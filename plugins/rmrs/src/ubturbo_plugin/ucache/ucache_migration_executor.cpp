@@ -121,7 +121,8 @@ void UcacheMigrationExecutor::MigrationWorkerTask()
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] Start Migration worker task.";
     while (shouldRun_) {
         if (!currentStrategy_.has_value()) {
-            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] No currentStrategy_, worker task stopped.";
+            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[ucache] No currentStrategy_, worker task stopped.";
             return;
         }
 
@@ -228,7 +229,8 @@ uint32_t UcacheMigrationExecutor::MigrateFromMultipleSrcNids(const uint16_t desN
 // 向单个远端numa节点迁移内存
 void UcacheMigrationExecutor::MigrateToRemoteNode(const uint16_t desNid, const MigrationStrategy &strategy)
 {
-    UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] Start to migrate to remote node=" << desNid << ".";
+    UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[ucache] Start to migrate to remote node=" << desNid << ".";
     // 如果远端内存已经满足使用水线
     if (IsNidWatermarkExceeded(desNid)) {
         UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
@@ -468,7 +470,8 @@ std::string UcacheMigrationExecutor::GetContainerdIdByPid(const pid_t pid)
     std::string command = " cat /proc/" + std::to_string(pid) + "/cgroup | grep kubepods.slice | cut -d'/' -f4";
     FILE *pipe = popen(command.c_str(), "r");
     if (!pipe) {
-        UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] Failed to find file of pid, pid=" << pid << ".";
+        UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[ucache] Failed to find file of pid, pid=" << pid << ".";
         return "";
     }
 

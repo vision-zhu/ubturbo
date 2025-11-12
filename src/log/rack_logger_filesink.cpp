@@ -117,6 +117,9 @@ std::string RackLoggerFilesink::GenerateCompressedFilename(const std::string &fi
 
     // 获取当前时间信息
     struct tm *ptimeinfo = localtime(&timeStamp);
+    if (ptimeinfo == nullptr) {
+        std::cerr << "Error: localtime failed for timestamp " << timeStamp << std::endl;
+    }
 
     // 生成文件名
     oss << basePath << "/" << fileName << "_" << std::setw(4) << std::setfill('0') << // 年份格式占4位

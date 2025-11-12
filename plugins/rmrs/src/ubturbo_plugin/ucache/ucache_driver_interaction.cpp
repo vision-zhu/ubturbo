@@ -64,7 +64,7 @@ bool DriverInteraction::EnsureDevice()
     struct stat fileStat;
 
     // 检查设备文件是否存在并获取信息
-    if (stat(DEVICE_PATH, &fileStat) == -1) {
+    if (stat(devicePath, &fileStat) == -1) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
             << "[ucache] Failed to stat ucache_device. Error=" << strerror(errno) << ".";
         CloseDevice();
@@ -79,7 +79,7 @@ bool DriverInteraction::EnsureDevice()
     // 关闭旧设备并尝试打开新设备
     CloseDevice();
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] Try to reopened ucache_device.";
-    fd = open(DEVICE_PATH, O_RDWR);
+    fd = open(devicePath, O_RDWR);
     if (fd >= 0) {
         stDev = fileStat.st_dev;
         stIno = fileStat.st_ino;

@@ -138,8 +138,8 @@ bool RmrsRollbackModule::CanMigrate(std::map<pid_t, VmDomainInfo> &vmInfoMap,
         return false;
     }
     std::map<uint16_t, NumaInfo> numaInfoMap;
-    for (NumaInfo numaInfo : numaInfos) {
-        numaInfoMap[numaInfo.numaMetaInfo.numaId] = numaInfo;
+    for (NumaInfo NumaInfo : numaInfos) {
+        numaInfoMap[NumaInfo.numaMetaInfo.numaId] = NumaInfo;
     }
     return CanMigrateBack(vmInfoMap, numaInfoMap, pidInfoList);
 }

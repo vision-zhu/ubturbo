@@ -76,13 +76,15 @@ RmrsResult ResourceExport::Init()
     // 初始化cpuId-numaId对照表
     ret = OsHelper::GetNumaCPUInfos(cpuSocketMap, cpuNumaMap, numaLocalMap, numaInfos);
     if (ret != RMRS_OK) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] Failed to get cpu-numa relation.";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsResourceExport] Failed to get cpu-numa relation.";
         return RMRS_ERROR;
     }
 #ifndef UB_ENVIRONMENT
     ret = OsHelper::GetRemoteAvailableFlag(numaInfos);
     if (ret != RMRS_OK) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] Get Remote Available Flag failed.";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsResourceExport] Get Remote Available Flag failed.";
         return RMRS_ERROR;
     }
 #endif
@@ -154,7 +156,8 @@ RmrsResult ResourceExport::UpdateVmDomainInfo()
 
 RmrsResult ResourceExport::GetVmInfoImmediately(std::vector<VmDomainInfo> &vmDomainInfos)
 {
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [Immediately] Collect VmInfo started.";
+    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[RmrsResourceExport] [Immediately] Collect VmInfo started.";
     RmrsResult ret = ReInit();
     if (ret != RMRS_OK) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [Immediately] ReInit failed.";
@@ -197,7 +200,8 @@ RmrsResult ResourceExport::GetNumaInfoImmediately(std::vector<NumaInfo> &numaInf
     vmResourceCollect.CollectNumaInfo();
     vmResourceCollect.UpdateVmDomainInfo();
     numaInfos = *vmResourceCollect.GetNumaInfos();
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [Immediately] Collect NumaInfo ended.";
+    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[RmrsResourceExport] [Immediately] Collect NumaInfo ended.";
     for (const NumaInfo info : numaInfos) {
         UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
             << "[RmrsResourceExport] [Immediately] Collect NumaInfo: " << info.toString() << ".";

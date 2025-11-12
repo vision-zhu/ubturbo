@@ -9,7 +9,7 @@ UBTurbo客户端库 (libubturbo_client.so)
 ```cpp
 #include "turbo_rmrs_interface.h"
 
-uint32_t UBTurboRMRSAgentMigrateStrategy(const MigrateStrategyParam &migrateStrategyParam, MigrateStrategyResult &migrateStrategyResult);
+uint32_t UBTurboRMRSAgentMigrateStrategy(const MigrateStrategyParamRMRS &migrateStrategyParam, MigrateStrategyResult &migrateStrategyResult);
 ```
 
 ## 描述 DESCRIPTION
@@ -20,8 +20,8 @@ uint32_t UBTurboRMRSAgentMigrateStrategy(const MigrateStrategyParam &migrateStra
 
 | name                  | IN/OUT | description                                                  |
 | --------------------- | ------ | ------------------------------------------------------------ |
-| MigrateStrategyParam  | IN     | struct MigrateStrategyParam {<br/>    std::vector<VMPresetParam> vmInfoList;                                     // 虚拟机列表及最大迁出比<br/>    std::uint64_t borrowSize;                                                  // 需要匀出本地内存大小<br/>    std::vector<RemoteNumaSocketInfo> remoteNumaInfo;                          // 远端numa借出信息<br/>    std::unordered_map<std::string, std::vector<MemNodeDataNew>> nodeTopology; // 获取全量拓扑信息<br/>    std::string nodeId;                                                        // 从节点Id<br/>};<br/>struct VMPresetParam {<br/>    pid_t pid;      // vm对应pid<br/>    uint16_t ratio; // 迁出最大比例<br/>};<br/>struct RemoteNumaSocketInfo {<br/>    int16_t borrowRemoteNuma{-1}; // 借入numa, remote 借用时有效，否则为-1<br/>    std::string lentNode{};       // 借出节点<br/>    uint16_t lentSocketId{0};     // 借出内存socketId<br/>};<br/>struct NumaData {<br/>    std::string numaId{};<br/>    bool operator==(const NumaData &numaData) const<br/>    {<br/>        return numaId == numaData.numaId;<br/>    }<br/>};<br/>struct CpuData {<br/>    std::string CpuId{};<br/>    bool operator==(const CpuData &cpuData) const<br/>    {<br/>        return CpuId == cpuData.CpuId;<br/>    }<br/>};<br/>struct SocketData {<br/>    std::string socketId{};<br/>    std::vector<NumaData> numas{};<br/>    std::vector<CpuData> cpus{};<br/>    bool operator==(const SocketData &socketData) const<br/>    {<br/>        return socketId == socketData.socketId && numas == socketData.numas && cpus == socketData.cpus;<br/>    }<br/>};<br/>struct MemNodeDataNew {<br/>    std::string nodeId{};      // 节点名<br/>    SocketData socket{};       // socket 数据<br/>    std::string hostname{};    // 主机名<br/>    bool isRegisterRm = false; // 该节点是否有可连接的 RM，非 OS 固定为 false<br/>}; |
-| MigrateStrategyResult | OUT    | struct VMMigrateOutParam {<br/>    pid_t pid;<br/>    uint64_t memSize;   // 迁出预设大小<br/>    uint16_t desNumaId; // 迁移远端numa<br/>};<br/>struct MigrateStrategyResult {<br/>    std::vector<VMMigrateOutParam> vmInfoList;<br/>    uint64_t waitingTime; // 单位ms<br/>}; |
+| migrateStrategyParam  | IN     | struct MigrateStrategyParamRMRS { <br/> std::vector&lt;VMPresetParam&gt; vmInfoList;                    // 虚拟机列表及最大迁出比例<br/> std::uint64_t borrowSize;                                 // 需要匀出本地内存大小 <br/> std::map<pid_t, std::vector<uint16_t>> pidRemoteNumaMap;  // pid对应的远端numa信息Map <br/> std::vector<uint16_t> timeOutNumas;                       // 归还超时的远端numa<br/>}; <br/> struct VMPresetParam {<br/>pid_t pid;      // vm对应pid<br/>uint16_t ratio; // 迁出最大比例<br/>};|
+| migrateStrategyResult | OUT    | struct VMMigrateOutParam {<br/>    pid_t pid;<br/>    uint64_t memSize;   // 迁出预设大小<br/>    uint16_t desNumaId; // 迁移远端numa<br/>};<br/>struct MigrateStrategyResult {<br/>    std::vector<VMMigrateOutParam> vmInfoList;<br/>    uint64_t waitingTime; // 单位ms<br/>}; |
 
 ## 返回值 RETURN VALUE
 
@@ -97,7 +97,7 @@ uint32_t UBTurboRMRSAgentMigrateExecute(const MigrateStrategyResult &migrateStra
 
 | name                  | IN/OUT | description                                                  |
 | --------------------- | ------ | ------------------------------------------------------------ |
-| MigrateStrategyResult | IN     | struct VMMigrateOutParam {<br/>    pid_t pid;<br/>    uint64_t memSize;   // 迁出预设比例<br/>    uint16_t desNumaId; // 迁移远端numa<br/>};<br/>struct MigrateStrategyResult {<br/>    std::vector<VMMigrateOutParam> vmInfoList;<br/>    uint64_t waitingTime; // 单位ms, 范围10s-3min<br/>}; |
+| migrateStrategyResult | IN     | struct VMMigrateOutParam {<br/>    pid_t pid;<br/>    uint64_t memSize;   // 迁出预设比例<br/>    uint16_t desNumaId; // 迁移远端numa<br/>};<br/>struct MigrateStrategyResult {<br/>    std::vector&lt;VMMigrateOutParam&gt; vmInfoList;<br/>    uint64_t waitingTime; // 单位ms, 范围10s-3min<br/>}; |
 
 ## 返回值 RETURN VALUE
 
@@ -168,7 +168,7 @@ uint32_t UBTurboRMRSAgentMigrateBack(MigrateBackResult &migrateBackResult);
 
 | name              | IN/OUT | description                                                  |
 | ----------------- | ------ | ------------------------------------------------------------ |
-| MigrateBackResult | IN     | class MigrateBackResult {<br/>public:<br/>    uint32_t result{};                   <br/>    std::vector<uint16_t> NumaIds{};     // 决策结果，表示哪些远端numaID可以归还<br/>}; |
+| MigrateBackResult | IN     | class MigrateBackResult {<br/>public:<br/>    uint32_t result{};                   <br/>    std::vector<uint16_t> numaIds{};     // 决策结果，表示哪些远端numaID可以归还<br/>}; |
 
 ## 返回值 RETURN VALUE
 

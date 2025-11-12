@@ -17,7 +17,7 @@ void RmrsConfig::RmrsLoadConfig()
     uint32_t ret = UBTurboGetBool("plugin_rmrs", "rmrs.ucache.enable", rmrsUCacheEnable);
     if (ret != RMRS_OK) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
-            << "get config value failed, key=rmrs.ucache.enable, ret=" << ret << ", using default value false.";
+            << "Get config value failed, key=rmrs.ucache.enable, ret=" << ret << ", using default value false.";
         rmrsUCacheEnable = false;
     }
 }

@@ -42,11 +42,14 @@ using namespace turbo::ipc::server;
 
 int main()
 {
-    // 注册exit信号,实现优雅退出
-    signal(SIGINT, turbo::SignalHandler);   // ctrl c
-    signal(SIGTERM, turbo::SignalHandler);
-    signal(SIGHUP, turbo::SignalHandler);   // systemctl stop
-    signal(SIGPIPE, turbo::SignalHandler);
+    const std::array signals = {SIGINT, SIGTERM, SIGHUP, SIGPIPE};
+
+    for (int sig : signals) {
+        if (signal(sig, turbo::SignalHandler) == SIG_ERR) {
+            std::cerr << "[Main] Failed to register handler for signal " << sig << "." << std::endl;
+        }
+    }
+
     RetCode ret = turbo::main::TurboMain::GetInstance().Run();
     if (ret != TURBO_OK) {
         std::cerr << "[Main] Turbo main init failed." << std::endl;

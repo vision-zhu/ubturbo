@@ -76,9 +76,29 @@ uint32_t LibvirtHelper::CloseConn()
             << "[RmrsResourceExport] [LibvirtHelper] Libvirt connect is empty.";
         return RMRS_ERROR;
     }
-    while (LibvirtModule::VirConnectClose()(virConnect) > 0) {
+
+    const int MAX_RETRY = 10;
+    for (int i = 0; i < MAX_RETRY; ++i) {
+        int ret = LibvirtModule::VirConnectClose()(virConnect);
+        if (ret = 0) {
+            UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[RmrsResourceExport] [LibvirtHelper] Libvirt connection closed successfully.";
+            return RMRS_OK;
+        } else if (ret < 0) {
+            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[RmrsResourceExport] [LibvirtHelper] Failed to close libvirt connection, ret=" << ret;
+            return RMRS_ERROR;
+        } else {
+            UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[RmrsResourceExport] [LibvirtHelper] Connection still has referencesk, retry " << (i + 1);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
-    return RMRS_OK;
+
+    UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[RmrsResourceExport] [LibvirtHelper] Failed to close libvirt connection after max retries.";
+
+    return RMRS_ERROR;
 }
 
 bool LibvirtHelper::IsConnectAlive()

@@ -48,27 +48,27 @@ constexpr int PERSENTAGE_NUM = 100;
 
 void BottleneckDetector::Init()
 {
-    std::lock_guard<std::mutex> lock(init_mutex_);
+    std::lock_guard<std::mutex> lock(initMutex_);
     if (initialized_) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[UCache] BottleneckDetector already initialized.";
         return;
     }
 
     initialized_ = true;
-    detection_thread_ = std::thread(&BottleneckDetector::BottleneckDetectionLoop, this);
+    detectionThread_ = std::thread(&BottleneckDetector::BottleneckDetectionLoop, this);
 }
 
 void BottleneckDetector::Deinit()
 {
-    std::lock_guard<std::mutex> lock(init_mutex_);
+    std::lock_guard<std::mutex> lock(initMutex_);
     if (!initialized_) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[UCache] BottleneckDetector not initialized.";
         return;
     }
  
-    stop_scanning_ = true;
-    if (detection_thread_.joinable()) {
-        detection_thread_.join();
+    stopScanning_ = true;
+    if (detectionThread_.joinable()) {
+        detectionThread_.join();
     }
  
     initialized_ = false;
@@ -77,7 +77,7 @@ void BottleneckDetector::Deinit()
 void BottleneckDetector::BottleneckDetectionLoop()
 {
     uint32_t ret = RMRS_OK;
-    while (!stop_scanning_) {
+    while (!stopScanning_) {
         ret = RunBottleneckDetection();
         if (ret != RMRS_OK) {
             UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
@@ -133,20 +133,20 @@ bool ReadContainerInactiveFile(const std::string &statPath, const std::string &i
     return true;
 }
 
-float GetMigrationRatio(ioBottleneckLevel level)
+float GetMigrationRatio(IoBottleneckLevel level)
 {
     float ratio = 0;
     switch (level) {
-        case ioBottleneckLevel::Level1:
+        case IoBottleneckLevel::LEVEL1:
             ratio = PAGEACACHE_MIGRATION_RATIO_LEVEL1;
             break;
-        case ioBottleneckLevel::Level2:
+        case IoBottleneckLevel::LEVEL2:
             ratio = PAGEACACHE_MIGRATION_RATIO_LEVEL2;
             break;
-        case ioBottleneckLevel::Level3:
+        case IoBottleneckLevel::LEVEL3:
             ratio = PAGEACACHE_MIGRATION_RATIO_LEVEL3;
             break;
-        case ioBottleneckLevel::Level4:
+        case IoBottleneckLevel::LEVEL4:
             ratio = PAGEACACHE_MIGRATION_RATIO_LEVEL4;
             break;
         default:
@@ -171,14 +171,14 @@ uint32_t BottleneckDetector::GetTotalInactiveFilePages(const std::set<std::strin
         }
         const ContainerInfo &container = *it;
 
-        if (!container.isActive || container.leneckLevel == ioBottleneckLevel::NoioBottleneck) {
+        if (!container.isActive || container.leneckLevel == IoBottleneckLevel::NOLOBOTTLENECK) {
             UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                 << "[UCache] Container is not IObottleneck, containerId=" << id << ".";
             continue;
         }
         float ratio = GetMigrationRatio(container.leneckLevel);
         UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
-            << "[UCache] Get ratio=" << ratio << "ioBottleneckLevel=" << static_cast<int>(container.leneckLevel) << ".";
+            << "[UCache] Get ratio=" << ratio << "IoBottleneckLevel=" << static_cast<int>(container.leneckLevel) << ".";
         std::string statPath = basePath + "cri-containerd-" + container.id + ".scope/memory.stat";
  
         if (!ReadContainerInactiveFile(statPath, id, totalInactiveFile, ratio)) {
@@ -354,30 +354,30 @@ void BottleneckDetector::IdentifyBottlenecks()
                 UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                     << "[UCache] Found IO bottleneck container, containerId=" << container.id
                     << ", iowaitRatio=" << container.iowaitRatio << ".";
-                container.leneckLevel = ioBottleneckLevel::Level4;
+                container.leneckLevel = IoBottleneckLevel::LEVEL4;
             } else if (container.pageCacheInMB > BOTTLENECK_THRESHOLD_LEVEL3 &&
                        container.ioReadBandwidthMB > BOTTLENECK_THRESHOLD_LEVEL3) {
                 UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                     << "[UCache] Found IO bottleneck container, containerId=" << container.id
                     << ", iowaitRatio=" << container.iowaitRatio << ".";
-                container.leneckLevel = ioBottleneckLevel::Level3;
+                container.leneckLevel = IoBottleneckLevel::LEVEL3;
             } else if (container.pageCacheInMB > BOTTLENECK_THRESHOLD_LEVEL2 &&
                        container.ioReadBandwidthMB > BOTTLENECK_THRESHOLD_LEVEL2) {
                 UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                     << "[UCache] Found IO bottleneck container, containerId=" << container.id
                     << ", iowaitRatio=" << container.iowaitRatio << ".";
-                container.leneckLevel = ioBottleneckLevel::Level2;
+                container.leneckLevel = IoBottleneckLevel::LEVEL2;
             } else {
                 UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                     << "[UCache] Found IO bottleneck container, containerId=" << container.id
                     << ", iowaitRatio=" << container.iowaitRatio << ".";
-                container.leneckLevel = ioBottleneckLevel::Level1;
+                container.leneckLevel = IoBottleneckLevel::LEVEL1;
             }
         } else {
             UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
                 << "[UCache] Found no IO bottleneck container, containerId=" << container.id
                 << ", iowaitRatio=" << container.iowaitRatio << ".";
-            container.leneckLevel = ioBottleneckLevel::NoioBottleneck;
+            container.leneckLevel = IoBottleneckLevel::NOLOBOTTLENECK;
         }
     }
 }
@@ -424,7 +424,7 @@ bool IsSameContainer(const ContainerInfo &a, const ContainerInfo &b)
     return aCpus == bCpus;
 }
 
-bool isPauseCommand(const std::string &cmd)
+bool IsPauseCommand(const std::string &cmd)
 {
     const std::string pauseCommand = "/pause";
     std::string s = cmd;
@@ -465,7 +465,7 @@ bool IsContainerActive(const std::string &containerId)
                 << "[UCache] Failed to read cmdline file, containerId=" << containerId << ".";
             return false;
         }
-        if (!cmdlineLines.empty() && isPauseCommand(cmdlineLines[0])) {
+        if (!cmdlineLines.empty() && IsPauseCommand(cmdlineLines[0])) {
             return false;
         }
     }

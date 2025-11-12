@@ -194,9 +194,11 @@ RmrsResult CallbackManager::InitSmap()
     if (!isSetSmapMode) {
         RmrsResult retMode = RmrsSmapHelper::SmapMode(CallbackManager::memFragmentationMode);
         if (retMode == RMRS_OK) {
-            UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsInit][Smap] Set memFragmentation mode success.";
+            UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[RmrsInit][Smap] Set memFragmentation mode success.";
         } else {
-            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsInit][Smap] Set memFragmentation mode failed.";
+            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+                << "[RmrsInit][Smap] Set memFragmentation mode failed.";
             return RMRS_ERROR;
         }
         isSetSmapMode = true;
@@ -583,7 +585,8 @@ RmrsResult CallbackManager::UpdateUCacheRatioRecvHandler(const TurboByteBuffer &
     MigrationInfoParam param{};
     RmrsInStream builderIn(req.data, req.len);
     builderIn >> param;
-    UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[ucache] Recv UpdateUCacheRatio=" << param.ToString() << ".";
+    UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[ucache] Recv UpdateUCacheRatio=" << param.ToString() << ".";
     if (!ValidatePidsParam(param.pids)) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
             << "[ucache] Invalid MigrationInfoParam=" << param.ToString() << ".";

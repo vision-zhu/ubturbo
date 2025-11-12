@@ -323,7 +323,6 @@ TEST_F(TestTurboIpcHandler, TestStartListenErrWhenstrcpyErr)
     // Act
     ipcHandler->UBTurboRegIpcService("function", TestFunc);
     ipcHandler->StartListen();
-
 }
 
 TEST_F(TestTurboIpcHandler, TestStartListenErrWhenlistenErr)

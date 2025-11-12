@@ -225,7 +225,8 @@ RetCode SmapAddProcessTrackingHandler(const TurboByteBuffer &inputBuffer, TurboB
     SmapAddProcessTrackingCodec codec;
     ret = codec.DecodeRequest(inputBuffer, pidArr, scanTime, duration, len, scanType);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapAddProcessTrackingHandler DecodeRequest error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapAddProcessTrackingHandler DecodeRequest error " << ret;
         return TURBO_ERROR;
     }
     int result = g_smapAddProcessTracking(pidArr, scanTime, duration, len, scanType);
@@ -291,13 +292,15 @@ RetCode SetSmapRemoteNumaInfoHandler(const TurboByteBuffer &inputBuffer, TurboBy
     SetSmapRemoteNumaInfoCodec codec;
     int ret = codec.DecodeRequest(inputBuffer, msg);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SetSmapRemoteNumaInfoHandler DecodeRequest error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SetSmapRemoteNumaInfoHandler DecodeRequest error " << ret;
         return TURBO_ERROR;
     }
     int result = g_setSmapRemoteNumaInfo(&msg);
     ret = codec.EncodeResponse(outputBuffer, result);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SetSmapRemoteNumaInfoHandler EncodeResponse error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SetSmapRemoteNumaInfoHandler EncodeResponse error " << ret;
         return TURBO_ERROR;
     }
     return TURBO_OK;
@@ -382,13 +385,15 @@ RetCode SmapMigrateRemoteNumaHandler(const TurboByteBuffer &inputBuffer, TurboBy
     SmapMigrateRemoteNumaCodec codec;
     int ret = codec.DecodeRequest(inputBuffer, msg);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapMigrateRemoteNumaHandler DecodeRequest error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapMigrateRemoteNumaHandler DecodeRequest error " << ret;
         return TURBO_ERROR;
     }
     int result = g_smapMigrateRemoteNuma(&msg);
     ret = codec.EncodeResponse(outputBuffer, result);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapMigrateRemoteNumaHandler EncodeResponse error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapMigrateRemoteNumaHandler EncodeResponse error " << ret;
         return TURBO_ERROR;
     }
     return TURBO_OK;
@@ -404,14 +409,16 @@ RetCode SmapMigratePidRemoteNumaHandler(const TurboByteBuffer &inputBuffer, Turb
     SmapMigratePidRemoteNumaCodec codec;
     ret = codec.DecodeRequest(inputBuffer, pidArr, len, srcNid, destNid);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapMigrateRemoteNumaHandler DecodeRequest error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapMigrateRemoteNumaHandler DecodeRequest error " << ret;
         return TURBO_ERROR;
     }
     int result = g_smapMigratePidRemoteNuma(pidArr, len, srcNid, destNid);
     delete[] pidArr;
     ret = codec.EncodeResponse(outputBuffer, result);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapMigrateRemoteNumaHandler EncodeResponse error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapMigrateRemoteNumaHandler EncodeResponse error " << ret;
         return TURBO_ERROR;
     }
     return TURBO_OK;
@@ -424,7 +431,8 @@ RetCode SmapQueryProcessConfigHandler(const TurboByteBuffer &inputBuffer, TurboB
     SmapQueryProcessConfigCodec codec;
     int ret = codec.DecodeRequest(inputBuffer, nid, inLen);
     if (ret) {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] SmapQueryProcessConfigHandler DecodeRequest error " << ret;
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] SmapQueryProcessConfigHandler DecodeRequest error " << ret;
         return TURBO_ERROR;
     }
     if (inLen <= 0) {
@@ -612,7 +620,7 @@ int OpenSmapHandler()
     g_smapAddProcessTracking = (SmapAddProcessTrackingFunc)dlsym(g_smapHandler, "ubturbo_smap_process_tracking_add");
     g_smapRemoveProcessTracking = (SmapRemoveProcessTrackingFunc)dlsym(g_smapHandler,
                                                                        "ubturbo_smap_process_tracking_remove");
-    g_smapEnableProcessMigrate = (SmapEnableProcessMigrateFunc)dlsym(g_smapHandler, 
+    g_smapEnableProcessMigrate = (SmapEnableProcessMigrateFunc)dlsym(g_smapHandler,
                                                                      "ubturbo_smap_process_migrate_enable");
     g_smapMigrateRemoteNuma = (SmapMigrateRemoteNumaFunc)dlsym(g_smapHandler, "ubturbo_smap_remote_numa_migrate");
     g_smapMigratePidRemoteNuma = (SmapMigratePidRemoteNumaFunc)dlsym(g_smapHandler,
@@ -779,7 +787,8 @@ RetCode TurboModuleSmap::LoadPageType(uint32_t &pageType)
         inFile.close();
         UBTURBO_LOG_INFO(MODULE_NAME, MODULE_CODE) << "[Smap] PageType loaded from file: " << pageType << "\n";
     } else {
-        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] Error opening file for reading or file does not exist.\n";
+        UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE)
+            << "[Smap] Error opening file for reading or file does not exist.\n";
         return TURBO_ERROR;
     }
 

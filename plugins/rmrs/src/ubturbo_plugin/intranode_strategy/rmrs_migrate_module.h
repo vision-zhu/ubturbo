@@ -114,26 +114,26 @@ struct SmapVmHotnessQueryParam {
     std::vector<pid_t> vmHotnessPriorityVec;                          // 冷热优先级排列的 VM PID 列表（冷的在前）
 };
 
-struct vmInfo {
+struct VmInfo {
     pid_t pid;
     uint64_t maxSize;
     uint16_t desNumaId;
     uint16_t localNumaId;
 };
 
-struct numaInfo {
+struct NumaInfoWithSize {
     uint16_t remoteNumaId;
     uint64_t freeSize;
 };
 
 struct DFSContext {
-    const std::vector<vmInfo> &vms;
+    const std::vector<VmInfo> &vms;
     std::unordered_map<uint16_t, uint64_t> numaFreeMap;
     uint64_t totalRequired;
     std::vector<rmrs::serialization::VMMigrateOutParam> currentResult;
     std::vector<rmrs::serialization::VMMigrateOutParam> finalResult;
 
-    DFSContext(const std::vector<vmInfo> &v, const std::vector<numaInfo> &n, uint64_t t) : vms(v), totalRequired(t)
+    DFSContext(const std::vector<VmInfo> &v, const std::vector<NumaInfoWithSize> &n, uint64_t t) : vms(v), totalRequired(t)
     {
         for (const auto &numa : n) {
             numaFreeMap[numa.remoteNumaId] = numa.freeSize;
@@ -167,12 +167,12 @@ public:
         return data_;
     }
  
-    void clear() noexcept
+    void Clear() noexcept
     {
         data_.clear();
     }
  
-    const std::string &str() const noexcept
+    const std::string &Str() const noexcept
     {
         return data_;
     }
@@ -219,23 +219,23 @@ public:
 
     static bool CanPrune(const DFSContext &ctx, size_t index, uint64_t currentTotal);
 
-    static bool MigrateToNuma(DFSContext &ctx, const vmInfo &vm, size_t index, uint64_t currentTotal);
+    static bool MigrateToNuma(DFSContext &ctx, const VmInfo &vm, size_t index, uint64_t currentTotal);
 
     static bool TryMigrate(DFSContext &ctx, size_t index, uint64_t currentTotal);
 
-    static bool AllocateMemory(uint64_t totalSize, const std::vector<vmInfo> &vms, const std::vector<numaInfo> &numas,
+    static bool AllocateMemory(uint64_t totalSize, const std::vector<VmInfo> &vms, const std::vector<NumaInfoWithSize> &numas,
                                std::vector<rmrs::serialization::VMMigrateOutParam> &result);
 
     static RmrsResult DFSGetMigrationActions(const uint64_t &memMigrateTotalSize, const NumaQueryInfo &numaQueryInfo,
                                              const VMQueryInfo &vmQueryInfo,
                                              std::vector<rmrs::serialization::VMMigrateOutParam> &vmMigrateOutParam);
 
-    static bool VmComparator(const vmInfo &a, const vmInfo &b);
+    static bool VmComparator(const VmInfo &a, const VmInfo &b);
 
-    static bool NumaComparator(const numaInfo &a, const numaInfo &b);
+    static bool NumaComparator(const NumaInfoWithSize &a, const NumaInfoWithSize &b);
 
     static RmrsResult FillVmNumaInfo(const NumaQueryInfo &numaQueryInfo, const VMQueryInfo &vmQueryInfo,
-                                     std::vector<vmInfo> &vms, std::vector<numaInfo> &numas);
+                                     std::vector<VmInfo> &vms, std::vector<NumaInfoWithSize> &numas);
 
     static RmrsResult ConvertMemToKB(const VMQueryInfo &vmQueryInfo,
                                      std::vector<rmrs::serialization::VMMigrateOutParam> &vmMigrateOutParam);

@@ -471,7 +471,8 @@ std::string OsHelper::ExecCommand(const std::string &cmd)
         result += buffer.data();
     }
     pclose(pipe);
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [OsHelper] Result = " << result <<".";
+    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+        << "[RmrsResourceExport] [OsHelper] Result = " << result <<".";
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [OsHelper] ExecCommand end.";
     return result;
 }

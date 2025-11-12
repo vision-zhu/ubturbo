@@ -72,13 +72,13 @@ void RmrsMigrateModule::DistributeNumaMemInfo(std::vector<rmrs::NumaInfo> &numaI
                                               std::map<uint16_t, NumaHugePageInfo> &numaInfoMap,
                                               std::vector<NumaHugePageInfo> &numaHugePageInfoSumList)
 {
-    for (rmrs::NumaInfo numaInfo : numaInfos) {
+    for (rmrs::NumaInfo NumaInfoWithSize : numaInfos) {
         NumaHugePageInfo info;
-        info.numaId = numaInfo.numaMetaInfo.numaId;
-        info.hugePageFree = numaInfo.numaMetaInfo.hugePageFree;
-        info.hugePageTotal = numaInfo.numaMetaInfo.hugePageTotal;
-        info.isRemote = numaInfo.numaMetaInfo.isRemoteAvailable; // 可以迁出内存的numa节点 才是远端numa节点
-        info.isLocal = numaInfo.numaMetaInfo.isLocal;
+        info.numaId = NumaInfoWithSize.numaMetaInfo.numaId;
+        info.hugePageFree = NumaInfoWithSize.numaMetaInfo.hugePageFree;
+        info.hugePageTotal = NumaInfoWithSize.numaMetaInfo.hugePageTotal;
+        info.isRemote = NumaInfoWithSize.numaMetaInfo.isRemoteAvailable; // 可以迁出内存的numa节点 才是远端numa节点
+        info.isLocal = NumaInfoWithSize.numaMetaInfo.isLocal;
 
         // 在超时numa里面找到该numa节点就返回
         auto it = std::find(s_timeOutNumas.begin(), s_timeOutNumas.end(), info.numaId);
@@ -93,7 +93,7 @@ void RmrsMigrateModule::DistributeNumaMemInfo(std::vector<rmrs::NumaInfo> &numaI
         LOG_DEBUG << "[MemMigrate][Strategy][DistributeNumaMemInfo] NUMA node info: numaId = " << info.numaId
                   << ", hugePageFree = " << info.hugePageFree << ", hugePageTotal = " << info.hugePageTotal
                   << ", isRemote = " << info.isRemote << ", isLocal = " << info.isLocal
-                  << ", socketId = " << numaInfo.numaMetaInfo.socketId << ".";
+                  << ", socketId = " << NumaInfoWithSize.numaMetaInfo.socketId << ".";
     }
 }
 
@@ -522,7 +522,7 @@ void RmrsMigrateModule::PrintMigrateToNuma(const DFSContext &ctx, size_t index)
     }
 }
 
-bool RmrsMigrateModule::MigrateToNuma(DFSContext &ctx, const vmInfo &vm, size_t index, uint64_t currentTotal)
+bool RmrsMigrateModule::MigrateToNuma(DFSContext &ctx, const VmInfo &vm, size_t index, uint64_t currentTotal)
 {
     LOG_DEBUG << "[MemMigrate][Strategy][MigrateToNuma] Entry, index=" << index << ", currentTotal=" << currentTotal
               << ", pid=" << vm.pid << ", maxSize=" << vm.maxSize << ".";
@@ -592,8 +592,8 @@ bool RmrsMigrateModule::TryMigrate(DFSContext &ctx, size_t index, uint64_t curre
     return TryMigrate(ctx, index + 1, currentTotal);
 }
 
-bool RmrsMigrateModule::AllocateMemory(uint64_t totalSize, const std::vector<vmInfo> &vms,
-                                       const std::vector<numaInfo> &numas,
+bool RmrsMigrateModule::AllocateMemory(uint64_t totalSize, const std::vector<VmInfo> &vms,
+                                       const std::vector<NumaInfoWithSize> &numas,
                                        std::vector<rmrs::serialization::VMMigrateOutParam> &result)
 {
     DFSContext ctx(vms, numas, totalSize);
@@ -605,7 +605,7 @@ bool RmrsMigrateModule::AllocateMemory(uint64_t totalSize, const std::vector<vmI
 }
 
 // 排序规则
-bool RmrsMigrateModule::VmComparator(const vmInfo &a, const vmInfo &b)
+bool RmrsMigrateModule::VmComparator(const VmInfo &a, const VmInfo &b)
 {
     // desNumaId == 0 的放到后面
     bool aIsZero = (a.desNumaId == 0);
@@ -624,13 +624,13 @@ bool RmrsMigrateModule::VmComparator(const vmInfo &a, const vmInfo &b)
 }
 
 // 排序规则
-bool RmrsMigrateModule::NumaComparator(const numaInfo &a, const numaInfo &b)
+bool RmrsMigrateModule::NumaComparator(const NumaInfoWithSize &a, const NumaInfoWithSize &b)
 {
     return a.remoteNumaId < b.remoteNumaId;
 }
 
 RmrsResult RmrsMigrateModule::FillVmNumaInfo(const NumaQueryInfo &numaQueryInfo, const VMQueryInfo &vmQueryInfo,
-                                             std::vector<vmInfo> &vms, std::vector<numaInfo> &numas)
+                                             std::vector<VmInfo> &vms, std::vector<NumaInfoWithSize> &numas)
 {
     for (const auto &it : vmQueryInfo.vmNumaInfoMap) {
         const auto &info = it.second;
@@ -723,8 +723,8 @@ RmrsResult RmrsMigrateModule::DFSGetMigrationActions(
     }
 
     uint64_t totalSize = (memMigrateTotalSize + memoryThreshold - 1) / memoryThreshold;
-    std::vector<vmInfo> vms;
-    std::vector<numaInfo> numas;
+    std::vector<VmInfo> vms;
+    std::vector<NumaInfoWithSize> numas;
 
     LOG_DEBUG << "[MemMigrate][Strategy] DFS input, totalSize = " << totalSize << ".";
 

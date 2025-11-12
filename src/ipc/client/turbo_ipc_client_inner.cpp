@@ -177,7 +177,7 @@ bool IpcClientInner::CheckInputIsValid(const std::string &function, const TurboB
 }
 
 uint32_t IpcClientInner::UBTurboFunctionCaller(const std::string &function, const TurboByteBuffer &params,
-                                        TurboByteBuffer &result)
+                                               TurboByteBuffer &result)
 {
     IPC_CLIENT_LOGGER_INFO("[Ipc][Client] Start functioncall, func is %s.", function.c_str());
     if (!CheckInputIsValid(function, params)) {

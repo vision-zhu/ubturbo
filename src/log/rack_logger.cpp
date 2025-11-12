@@ -50,7 +50,11 @@ static void FormatTimestamp(std::ostream &os, uint64_t timestamp)
     std::tm time;
     gmtime_r(&timet, &time);
     char buffer[32]; // 设置缓冲区大小为32
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %T.", &time);
+    size_t len = strftime(buffer, sizeof(buffer), "%Y-%m-%d %T.", &time);
+    if (len == 0) {
+        std::cerr << "Time string truncated." << std::endl;
+        buffer[0] = '\0';
+    }
     uint64_t milliseconds = (timestamp % 1000000) / 1000; // timestamp % 1000000提取时间戳微秒部分
     os << '[' << buffer << std::setw(3) << std::setfill('0') << milliseconds << " +0800]"; // 毫秒格式化3位
 }

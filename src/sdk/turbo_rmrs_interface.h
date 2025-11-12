@@ -36,30 +36,6 @@ struct NumaData {
         return numaId == numaData.numaId;
     }
 };
-struct CpuData {
-    std::string CpuId{};
-    bool operator==(const CpuData &cpuData) const
-    {
-        return CpuId == cpuData.CpuId;
-    }
-};
-struct SocketData {
-    std::string socketId{};
-    std::vector<NumaData> numas{};
-    std::vector<CpuData> cpus{};
-
-    bool operator==(const SocketData &socketData) const
-    {
-        return socketId == socketData.socketId && numas == socketData.numas && cpus == socketData.cpus;
-    }
-};
-
-struct MemNodeDataNew {
-    std::string nodeId{};      // 节点名
-    SocketData socket{};       // socket 数据
-    std::string hostname{};    // 主机名
-    bool isRegisterRm = false; // 该节点是否有可连接的 RM，非 OS 固定为 false
-};
 
 struct RemoteNumaSocketInfo {
     int16_t borrowRemoteNuma{-1}; // 借入numa, remote 借用时有效，否则为-1
@@ -88,7 +64,7 @@ struct MigrateStrategyResult {
 class MigrateBackResult {
 public:
     uint32_t result{};
-    std::vector<uint16_t> NumaIds{};
+    std::vector<uint16_t> numaIds{};
 };
 
 struct BorrowIdInfo {

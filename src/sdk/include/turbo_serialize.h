@@ -34,7 +34,8 @@ struct CountMember {
     constexpr static size_t value = sizeof...(Args) - 1;
 };
 template <typename T, typename ...Args>
-struct CountMember<T, std::void_t<decltype(T{{Args{}}...})>, Args...> {
+struct CountMember<T, std::void_t<decltype(T{{Args{}}...})>, Args...>
+{
     constexpr static size_t value = CountMember<T, void, Args..., AnyType>::value;
 };
 

@@ -52,7 +52,7 @@ private:
     int32_t fd;
     dev_t stDev;
     ino_t stIno;
-    static constexpr const char *DEVICE_PATH = "/dev/ucache";
+    static constexpr const char *devicePath = "/dev/ucache";
 
     void CloseDevice();
     bool EnsureDevice();

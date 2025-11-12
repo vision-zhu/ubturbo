@@ -264,7 +264,8 @@ RmrsResult RmrsSmapHelper::GetMigrateOutMsg(MigrateOutMsg &migrateOutMsg, std::v
                                             std::vector<uint16_t> &remoteNumaIdsIn, int &ratio)
 {
     if (pidsIn.size() > MAX_NR_MIGOUT_RMRS) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Migrate-out PID array size too large.";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsSmapHelper] Migrate-out PID array size too large.";
         return RMRS_ERROR;
     }
 
@@ -327,7 +328,8 @@ RmrsResult RmrsSmapHelper::SmapRemoveVMPidToRemoteNuma(std::vector<pid_t> &vmPid
 
     int ret = smapRemoveFunc(&msg, PID_TYPE_2MB);
     if (ret == SMAP_OK) {
-        UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] SmapRemoveVMPidToRemoteNuma success.";
+        UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsSmapHelper] SmapRemoveVMPidToRemoteNuma success.";
     } else if (ret == smapParamErrorCode) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
             << "[RmrsSmapHelper] SmapRemove param error, ret = " << ret << ".";
@@ -397,7 +399,8 @@ RmrsResult RmrsSmapHelper::SmapMigratePidRemoteNumaHelper(pid_t *pidArr, int len
             << "[RmrsSmapHelper] Operation not permitted. ret: " << ret << ".";
         return RMRS_ERROR;
     } else if (ret == smapParamErrorCode) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Invalid argument. ret: " << ret << ".";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsSmapHelper] Invalid argument. ret: " << ret << ".";
         return RMRS_ERROR;
     } else if (ret == smapTimeDoutErrorCode) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
@@ -434,7 +437,8 @@ RmrsResult RmrsSmapHelper::SmapEnableProcessMigrateHelper(pid_t *pidArr, int len
             << "[RmrsSmapHelper] Operation not permitted. ret: " << ret << ".";
         return RMRS_ERROR;
     } else if (ret == smapParamErrorCode) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Invalid argument. ret: " << ret << ".";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsSmapHelper] Invalid argument. ret: " << ret << ".";
         return RMRS_ERROR;
     } else if (ret == smapApplyMemErrorCode) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Out of memory. ret: " << ret << ".";
@@ -444,7 +448,8 @@ RmrsResult RmrsSmapHelper::SmapEnableProcessMigrateHelper(pid_t *pidArr, int len
             << "[RmrsSmapHelper] The smapRangeErrorCode. ret: " << ret << ".";
         return RMRS_ERROR;
     } else if (ret == smapBadFNErrorCode) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Bad file number. ret: " << ret << ".";
+        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
+            << "[RmrsSmapHelper] Bad file number. ret: " << ret << ".";
         return RMRS_ERROR;
     } else {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
