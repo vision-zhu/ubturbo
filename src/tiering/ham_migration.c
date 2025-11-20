@@ -37,7 +37,6 @@
 #define FINISH_LENGTH ((jiffies) + (msecs_to_jiffies(60000)))
 #define MAX_RETRY_TIMES 1000
 #define WAITE_TIME 100
-/* 虚机规格最大为256G, 1G有512个2M大页 */
 #define MAX_HUGEPAGE_NUM (256 * 512)
 #define MAX_DATA_SIZE 10
 #define MAX_PATH_SIZE 100
@@ -76,22 +75,16 @@ static int config_system_huge_page(unsigned long huge_page_number,
 	int retry_times = 0;
 	buf_size =
 		snprintf(path, MAX_PATH_SIZE, NODE_2MB_HUGEPAGES_PATH, node_id);
-	if (buf_size < 0 || buf_size >= MAX_PATH_SIZE) {
-		pr_err("Failed to sprintf node 2MB huge pages path, path: %s, size = %ld\n",
-		       path, buf_size);
+	if (buf_size < 0 || buf_size >= MAX_PATH_SIZE)
 		return -ENOEXEC;
-	}
 
 	buf_size = snprintf(data, MAX_DATA_SIZE, "%lu", huge_page_number);
-	if (buf_size < 0 || buf_size >= MAX_DATA_SIZE) {
-		pr_err("Failed to convert huge pages number to string, num: %ld, size = %ld\n",
-		       huge_page_number, buf_size);
+	if (buf_size < 0 || buf_size >= MAX_DATA_SIZE)
 		return -ENOEXEC;
-	}
 
 	file = filp_open(path, O_RDWR | O_TRUNC, 0);
 	if (IS_ERR(file)) {
-		pr_err("Failed to open file: %ld\n", PTR_ERR(file));
+		pr_err("failed to open file, ret: %ld\n", PTR_ERR(file));
 		return PTR_ERR(file);
 	}
 
@@ -99,13 +92,13 @@ static int config_system_huge_page(unsigned long huge_page_number,
 		buf_size = kernel_write(file, data,
 					strnlen(data, MAX_DATA_SIZE), &pos);
 		if (buf_size < 0) {
-			pr_err("Failed to write huge page number: data size :%ld\n",
+			pr_err("failed to write huge page number, data size: %ld\n",
 			       strnlen(data, MAX_DATA_SIZE));
 			break;
 		}
 		nr_page = h->nr_huge_pages_node[node_id];
 		if (nr_page == huge_page_number) {
-			pr_info("Hugepage configuration succeeded: numa_id = %u, nr_hugepages = %u, retry times = %d\n",
+			pr_info("hugepage configuration succeeded: NUMA id = %u, nr_hugepages = %u, retry times = %d\n",
 				node_id, nr_page, retry_times);
 			filp_close(file, NULL);
 			return 0;
@@ -115,7 +108,7 @@ static int config_system_huge_page(unsigned long huge_page_number,
 	}
 
 	filp_close(file, NULL);
-	pr_err("nr_hugepages on node%d: %u, retry times:%d\n", node_id, nr_page,
+	pr_err("nr_hugepages on node%d: %u, retry times: %d\n", node_id, nr_page,
 	       retry_times);
 	return -EFAULT;
 }
@@ -150,14 +143,14 @@ static int init_numa_page_map(struct ham_migrate_task *mig_task,
 	struct ram_block_info *rbi;
 	if (mig_task->numa_cnt == 0 || mig_task->numa_cnt > BATCH_NUM ||
 	    arg->cnt == 0 || arg->cnt > BATCH_NUM) {
-		pr_err("params check err, numa_cnt = %u,  arg_cnt = %u\n",
+		pr_err("invalid params passed to init numa page map, numa_cnt = %u,  arg_cnt = %u\n",
 		       mig_task->numa_cnt, arg->cnt);
 		return -ENOMEM;
 	}
 	mig_task->ram_maps = kzalloc(
 		mig_task->numa_cnt * sizeof(struct ram_block_map), GFP_KERNEL);
 	if (!mig_task->ram_maps) {
-		pr_err("ram_maps kzalloc failed\n");
+		pr_err("unable to allocate memory for ram maps\n");
 		return -ENOMEM;
 	}
 
@@ -171,8 +164,7 @@ static int init_numa_page_map(struct ham_migrate_task *mig_task,
 		mig_task->ram_maps[i].hpms = kzalloc(
 			page_num * sizeof(struct ham_page_map), GFP_KERNEL);
 		if (!mig_task->ram_maps[i].hpms) {
-			pr_err("mig_task->ram_maps[%d].hpms kzalloc failed\n",
-			       i);
+			pr_err("unable to allocate memory for HAM page map\n");
 			ret = -ENOMEM;
 			goto out_err;
 		}
@@ -216,7 +208,7 @@ static int init_global_task_list(void)
 	init_task_list();
 	ham_wq = create_workqueue("ham_wq");
 	if (!ham_wq) {
-		pr_err("Failed to create workqueue\n");
+		pr_err("failed to create workqueue\n");
 		return -ENOMEM;
 	}
 	INIT_DELAYED_WORK(&ham_work, reclaim_task_fn);
@@ -247,7 +239,7 @@ static struct folio *alloc_folio_with_retry(int nid,
 			return new_folio;
 		}
 
-		pr_warn("Failed to allocate folio, nid:%d nr_hugepages: %u, free_hugepages: %u\n",
+		pr_warn("unable to allocate folio, nid: %d nr_hugepages: %u, free_hugepages: %u\n",
 			nid, mig_task->hstate->nr_huge_pages_node[nid],
 			mig_task->hstate->free_huge_pages_node[nid]);
 		/*
@@ -258,7 +250,7 @@ static struct folio *alloc_folio_with_retry(int nid,
 		update_mems_allowed_with_remote_nodes(param);
 	}
 
-	pr_err("Failed to allocate folio after %d retries\n",
+	pr_err("unable to allocate folio after %d retries\n",
 	       GET_FOLIO_RETRY_TIMES);
 	return NULL;
 }
@@ -272,7 +264,7 @@ static int create_numa_map(struct ham_migrate_task *mig_task,
 	struct ram_block_map *map;
 	ret = init_numa_page_map(mig_task, param);
 	if (ret) {
-		pr_err("Ham migrate task init numa page map failed, pid = %d\n",
+		pr_err("HAM migrate task init numa page map failed, pid: %d\n",
 		       mig_task->pid);
 		return -ENOMEM;
 	}
@@ -318,7 +310,7 @@ static int fill_folios_hugetlb(pte_t *pte, unsigned long hmask,
 
 	index = (addr - ram_map->hva_start) >> PMD_SHIFT;
 	if (index >= ram_map->page_num) {
-		pr_err("Index out of bounds [%lu/%u]\n", index,
+		pr_err("index out of bounds [%lu/%u]\n", index,
 		       ram_map->page_num);
 		return -EINVAL;
 	}
@@ -386,7 +378,7 @@ static void sort_hpm_list(struct list_head *head, unsigned int nr_hpm)
 	}
 	array = kmalloc_array(nr_hpm, sizeof(struct list_head *), GFP_KERNEL);
 	if (!array) {
-		pr_warn("sort hpm list failed %s: kmalloc failed", __func__);
+		pr_warn("unable to allocate memory for HAM page map array\n");
 		return;
 	}
 	list_for_each_entry(hpm, head, list) {
@@ -400,7 +392,7 @@ static void sort_hpm_list(struct list_head *head, unsigned int nr_hpm)
 		list_add_tail(array[i], head);
 	}
 	kfree(array);
-	pr_info("sort page list by freqs success\n");
+	pr_info("sort page list by frequency successfully\n");
 }
 
 /*
@@ -423,10 +415,8 @@ static unsigned int queue_qualified_pages(struct ham_migrate_task *mig_task,
 	struct ham_page_map *hpm;
 	unsigned int i, j, nr_hpm = 0;
 
-	/* Traversing ramblocks */
 	for (i = 0; i < mig_task->numa_cnt; i++) {
 		ram_map = &mig_task->ram_maps[i];
-		/* Traversing folios */
 		for (j = 0; j < ram_map->page_num; j++) {
 			hpm = &ram_map->hpms[j];
 			if (!hpm->present || hpm->is_migrate != migrate_flag) {
@@ -492,13 +482,13 @@ static int handle_ham_migration(struct list_head *hpm_list,
 	int ret;
 
 	if (list_empty(hpm_list)) {
-		pr_info("No pages needed to be migrated\n");
+		pr_info("no pages need to be migrated\n");
 		return 0;
 	}
 
 	folios = kmalloc_array(nr_hpm_max, sizeof(struct folio *), GFP_KERNEL);
 	if (!folios) {
-		pr_err("%s: kmalloc failed", __func__);
+		pr_err("unable to allocate for folios array\n");
 		return -ENOMEM;
 	}
 
@@ -516,7 +506,7 @@ static int handle_ham_migration(struct list_head *hpm_list,
 					 MIGRATE_SYNC, &nr_succeeded);
 	nr_left = (nr_folios << (PMD_SHIFT - PAGE_SHIFT)) - nr_succeeded;
 	if (nr_left || ret) {
-		pr_info("Isolate and migrate folios failed, ret = %d, nr_folios = %u, nr_seccessed = %u, nr_left = %u\n",
+		pr_info("isolate and migrate folios failed, ret: %d, nr_folios: %u, nr_successed: %u, nr_left: %u\n",
 			ret, nr_folios, nr_succeeded, nr_left);
 		kfree(folios);
 		return -EPERM;
@@ -567,7 +557,7 @@ void put_new_folio(struct folio *folio, unsigned long private)
 			return;
 		}
 	}
-	pr_warn(" No matching folio to put\n");
+	pr_warn("no matched folio to put\n");
 }
 
 struct folio *get_new_folio_rollBack(struct folio *folio, unsigned long private)
@@ -595,7 +585,7 @@ static int ham_cache_clear(pid_t pid, struct ham_migrate_task *mig_task)
 					mig_task->ram_maps[i].size,
 					HISI_CACHE_MAINT_CLEANINVALID);
 		if (ret) {
-			pr_err("Flush cache failed, pid = %d\n", pid);
+			pr_err("failed to flush cache, pid: %d\n", pid);
 			return ret;
 		}
 	}
@@ -610,29 +600,20 @@ static int src_suspend_pgtable_maintain(struct ham_migrate_task *mig_task)
 
 	for (i = 0; i < mig_task->numa_cnt; i++) {
 		ram_map = &mig_task->ram_maps[i];
-		/*
-		 * Matintain kernel pgtable. It seems the rollback of
-		 * this step is not necessary. Because borrowed memory
-		 * will be returned when the migration fails.
-		 */
 		ret = kernel_pgtable_within_pa_set_cacheable(
 			ram_map->rmt_numa_start, ram_map->size, false);
 		if (ret) {
-			pr_err("kernel_pgtable_within_pa_set_cacheable failed, pid = %d, size = %zx, ret = %d",
+			pr_err("kernel_pgtable_within_pa_set_cacheable failed, pid: %d, size: %zx, ret: %d",
 			       mig_task->pid, ram_map->size, ret);
 			return ret;
 		}
 
-		/*
-		 * Maintain task pgtable. Once we have done it, we
-		 * need to undo it when rollback.
-		 */
 		ret = task_pgtable_within_pid_set_cacheable(mig_task->pid,
 							    ram_map->hva_start,
 							    ram_map->size,
 							    false);
 		if (ret) {
-			pr_err("task_pgtable_within_pid_set_cacheable failed, pid = %d, size = %zx, ret = %d\n",
+			pr_err("task_pgtable_within_pid_set_cacheable failed, pid: %d, size: %zx, ret: %d\n",
 			       mig_task->pid, ram_map->size, ret);
 			return ret;
 		}
@@ -652,18 +633,12 @@ static int src_pgtable_maintain_rollback(struct ham_migrate_task *mig_task)
 		if (ram_map->cacheable) {
 			continue;
 		}
-		/*
-		 * Modifying the kernel page table in the ub simulation
-		 * environment will cause a softlockup. So for the time
-		 * being, skip this non-essential step and only undo task
-		 * page table maintain.
-		 */
-		pr_info("pgtable maintain rollback, size = %zx\n",
+		pr_info("page table maintain rollback, size: %zx\n",
 			ram_map->size);
 		ret = task_pgtable_within_pid_set_cacheable(
 			mig_task->pid, ram_map->hva_start, ram_map->size, true);
 		if (ret) {
-			pr_warn(" failed to set the corresponding task page table attribute\n");
+			pr_warn("failed to set the page table attribute of relevant process\n");
 		}
 		ram_map->cacheable = true;
 	}
@@ -683,7 +658,7 @@ static int dst_resume_pgtable_maintain(struct ham_migrate_task *mig_task)
 		ret = task_pgtable_within_pid_set_cacheable(
 			mig_task->pid, ram_map->hva_start, ram_map->size, true);
 		if (ret) {
-			pr_err("task_pgtable_within_pid_set_cacheable failed, pid = %d, size = %zx, ret = %d\n",
+			pr_err("task_pgtable_within_pid_set_cacheable failed, pid: %d, size: %zx, ret: %d\n",
 			       mig_task->pid, ram_map->size, ret);
 			return ret;
 		}
@@ -692,7 +667,7 @@ static int dst_resume_pgtable_maintain(struct ham_migrate_task *mig_task)
 		ret = kernel_pgtable_within_pid_set_valid(
 			mig_task->pid, ram_map->hva_start, ram_map->size, true);
 		if (ret) {
-			pr_err("kernel_pgtable_within_pid_set_valid failed, pid = %d, size = %zx, ret = %d",
+			pr_err("kernel_pgtable_within_pid_set_valid failed, pid: %d, size: %zx, ret: %d",
 			       mig_task->pid, ram_map->size, ret);
 			return ret;
 		}
@@ -727,13 +702,14 @@ static int get_folios_freqs(struct ham_migrate_task *mig_task)
 	ret = get_ham_pages_freqs(mig_task->pid, &freq_info_array,
 				  &freq_info_num);
 	if (ret) {
-		pr_err("get ham pages freqs from smap failed, pid = %d\n",
+		pr_err("failed to get HAM page's frequency from SMAP, pid: %d\n",
 		       mig_task->pid);
 		return -EINVAL;
 	}
 
 	if (!freq_info_array) {
-		pr_err("get folios freqs failed, pid = %d\n", mig_task->pid);
+		pr_err("failed to get folio's frequency, pid: %d\n",
+		       mig_task->pid);
 		return -EINVAL;
 	}
 	map = mig_task->ram_maps;
@@ -760,24 +736,21 @@ static int check_rmt_numa_info(struct ram_block_info *rbi)
 {
 	struct pglist_data *pgdata;
 
-	/*
-	 * NUMA_NO_NODE is a valid input parameter, but migration is not
-	 * permitted at this time.
-	 */
 	if (rbi->rmt_numa_id == NUMA_NO_NODE) {
 		return 0;
 	}
 
 	if (rbi->rmt_numa_id >= MAX_NUMNODES ||
 	    !numa_is_remote_node(rbi->rmt_numa_id)) {
-		pr_err("numa:%u is not a remote numa\n", rbi->rmt_numa_id);
+		pr_err("node: %u is not a remote NUMA node\n",
+		       rbi->rmt_numa_id);
 		return -EINVAL;
 	}
 
 	pgdata = NODE_DATA(rbi->rmt_numa_id);
 	if (pgdata->node_present_pages != pgdata->node_spanned_pages ||
 	    pgdata->node_present_pages << PAGE_SHIFT != rbi->size) {
-		pr_err("Numa %d unqualified\n", rbi->rmt_numa_id);
+		pr_err("invalid NUMA node: %d\n", rbi->rmt_numa_id);
 		return -EINVAL;
 	}
 	return 0;
@@ -794,17 +767,17 @@ static int check_migration_param(struct migration_param param,
 	unsigned long sum = 0;
 
 	if (!pid_legally(param.pid)) {
-		pr_err("pid:%d is invalid\n", param.pid);
+		pr_err("invalid pid: %d\n", param.pid);
 		return ret;
 	}
 	if (param.cnt > BATCH_NUM || param.cnt == 0) {
-		pr_err("cnt:%u is invalid\n", param.cnt);
+		pr_err("invalid count: %d\n", param.cnt);
 		return ret;
 	}
 
 	mm = find_get_mm_by_vpid(param.pid);
 	if (!mm) {
-		pr_err("failed to get mm_struct of pid:%d\n", param.pid);
+		pr_err("failed to get mm_struct of pid: %d\n", param.pid);
 		return ret;
 	}
 	for (i = 0; i < param.cnt; i++) {
@@ -813,20 +786,19 @@ static int check_migration_param(struct migration_param param,
 		if (!vma || rbi->hva_start != vma->vm_start || rbi->size == 0 ||
 		    rbi->size % PMD_SIZE != 0 ||
 		    rbi->size != vma->vm_end - vma->vm_start) {
-			pr_err("RamBlock info invalid, i = %d, pid = %d\n", i,
-			       param.pid);
+			pr_err("invalid ramblock info of pid: %d\n", param.pid);
 			goto exit_with_mmput;
 		}
 
 		*h = hstate_vma(vma);
 		if (!(*h) || huge_page_size(*h) != PMD_SIZE) {
-			pr_err("pid:%d doesn't use hugepage for the corresponding vma.\n",
+			pr_err("unable to find hugepage of relevant VMA of pid: %d\n",
 			       param.pid);
 			goto exit_with_mmput;
 		}
 
 		if ((rbi->size >> PMD_SHIFT) > MAX_HUGEPAGE_NUM - sum) {
-			pr_err("The number of hugepages exceeds the maximum limit %u\n",
+			pr_err("the number of hugepages exceeds the maximum limit: %u\n",
 			       MAX_HUGEPAGE_NUM);
 			return -EINVAL;
 		}
@@ -854,18 +826,18 @@ static long ioctl_start_migration(unsigned long arg)
 	struct ram_block_info *rbi;
 
 	if (copy_from_user(&param, (void __user *)arg, sizeof(param))) {
-		pr_err("Start migration, copy_from_user err\n");
+		pr_err("failed to copy migrate params from user space\n");
 		return -EFAULT;
 	}
 
 	if (check_migration_param(param, &h)) {
-		pr_err("Validate input parameter errors\n");
+		pr_err("invalid params passed to start migration\n");
 		return -EINVAL;
 	}
 
 	mig_task = init_migrate_task(&param, h);
 	if (!mig_task) {
-		pr_err("Mig task init failed, pid = %d\n", param.pid);
+		pr_err("failed to init migrate task of pid: %d\n", param.pid);
 		return -ENOMEM;
 	}
 
@@ -882,7 +854,7 @@ static long ioctl_start_migration(unsigned long arg)
 		ret = config_system_huge_page(huge_page_num, rbi->rmt_numa_id,
 					      mig_task->hstate);
 		if (ret < 0) {
-			pr_err("Hugepage configuration failed, pid = %d, block_cnt = %d, numa_id = %d, nr_hugepages = %lu, "
+			pr_err("failed to configure hugepage number, pid = %d, block_cnt = %d, numa_id = %d, nr_hugepages = %lu, "
 			       "ret = %d\n",
 			       mig_task->pid, i, rbi->rmt_numa_id,
 			       huge_page_num, ret);
@@ -893,7 +865,7 @@ static long ioctl_start_migration(unsigned long arg)
 create_map:
 	ret = create_numa_map(mig_task, &param);
 	if (ret) {
-		pr_err("Numa map creation failed, pid = %d\n", mig_task->pid);
+		pr_err("failed to create NUMA map, pid: %d\n", mig_task->pid);
 		goto out_err;
 	}
 
@@ -901,7 +873,7 @@ create_map:
 	return 0;
 out_err:
 	release_migrate_task(mig_task);
-	pr_err("Ioctl start migration err %d\n", ret);
+	pr_err("ioctl start migration err: %d\n", ret);
 	return ret;
 }
 
@@ -914,26 +886,26 @@ static long ioctl_migration_pages(unsigned long arg)
 	pid_t pid;
 
 	if (copy_from_user(&pid, (void __user *)arg, sizeof(pid_t))) {
-		pr_err("Migration pages copy_from_user err\n");
+		pr_err("failed to copy pages to migrate from user space\n");
 		return -EFAULT;
 	}
 
 	mig_task = get_migrate_task(pid);
 	if (!mig_task) {
-		pr_err("Search migrate task err, pid = %d\n", pid);
+		pr_err("failed to search migration task, pid: %d\n", pid);
 		return -EINVAL;
 	}
 
 	ret = check_task_status(mig_task, HAM_TASK_INITED | HAM_TASK_MIGRATED |
 						  HAM_TASK_ALLOW_MIGR);
 	if (ret) {
-		pr_err("Pre task status is not satisfied, migrating not allowed\n");
+		pr_err("pre task status is not satisfied, migration is not allowed\n");
 		return ret;
 	}
 
 	ret = fill_task_pages(mig_task);
 	if (ret) {
-		pr_err("Fill migration pages failed, pid = %d\n", pid);
+		pr_err("failed to fill migration pages, pid: %d\n", pid);
 		goto out;
 	}
 
@@ -951,7 +923,7 @@ static long ioctl_migration_pages(unsigned long arg)
 	ret = handle_ham_migration(&hpm_list, nr_hpm, get_folio_migrate_out,
 				   get_new_folio, put_new_folio);
 	if (ret) {
-		pr_err("Migration failed, pid = %d\n", pid);
+		pr_err("migration failed, pid: %d\n", pid);
 		goto out;
 	}
 
@@ -970,27 +942,27 @@ static long ioctl_rollback_pages(unsigned long arg)
 	pid_t pid;
 
 	if (copy_from_user(&pid, (void __user *)arg, sizeof(pid_t))) {
-		pr_err("Migration pages copy_from_user err\n");
+		pr_err("failed to copy pages to migrate from user space\n");
 		return -EFAULT;
 	}
-	pr_info("Start rollback pages, pid = %d\n", pid);
+	pr_info("start to rollback pages, pid: %d\n", pid);
 
 	mig_task = get_migrate_task(pid);
 	if (!mig_task) {
-		pr_err("Search migrate task err, pid = %d\n", pid);
+		pr_err("failed to search migration task, pid: %d\n", pid);
 		return -EINVAL;
 	}
 
 	ret = check_task_status(mig_task, HAM_TASK_MIGRATED);
 	if (ret) {
-		pr_warn("Nothing need to be rollback\n");
+		pr_warn("nothing need to be rollback\n");
 		goto out;
 	}
 
 	mig_task->is_finish = false;
 
 	if (!find_vpid(pid)) {
-		pr_err("can't find pid %d", pid);
+		pr_err("unable to find pid: %d", pid);
 		ret = -EFAULT;
 		goto out;
 	}
@@ -1011,7 +983,7 @@ static long ioctl_rollback_pages(unsigned long arg)
 	ret = handle_ham_migration(&hpm_list, nr_hpm, get_folio_migrate_back,
 				   get_new_folio_rollBack, NULL);
 	if (ret) {
-		pr_err("Rollback pages fail, pid = %d\n", mig_task->pid);
+		pr_err("failed to rollback pages, pid: %d\n", mig_task->pid);
 	}
 
 out:
@@ -1026,26 +998,26 @@ static long ioctl_stop_migration(unsigned long arg)
 	int ret;
 
 	if (copy_from_user(&pid, (void __user *)arg, sizeof(pid_t))) {
-		pr_err("Ham stop migration copy from user err\n");
+		pr_err("failed to copy pid to stop migrate task from user space\n");
 		return -EFAULT;
 	}
 
 	mig_task = get_migrate_task(pid);
 	if (!mig_task) {
-		pr_err("Search migrate task err, pid = %d\n", pid);
+		pr_err("failed to search migration task, pid: %d\n", pid);
 		return -EINVAL;
 	}
 
 	ret = check_task_status(mig_task, HAM_TASK_INITED | HAM_TASK_MIGRATED);
 	if (ret) {
-		pr_err("Pre task status is not satisfied, stopping not allowed\n");
+		pr_err("pre task status is not satisfied, stop migration is not allowed\n");
 		return ret;
 	}
 
 	mig_task->finish_times = FINISH_LENGTH;
 	mig_task->is_finish = true;
 
-	pr_info("Stop migration success\n");
+	pr_info("stop migration successfully\n");
 	put_migrate_task(mig_task, HAM_TASK_STOPPED);
 	return 0;
 }
@@ -1058,29 +1030,31 @@ static long ioctl_modify_pagetable(unsigned long arg)
 
 	if (copy_from_user(&mt_info, (void __user *)arg,
 			   sizeof(maintain_info))) {
-		pr_err("%s: copy from user err\n", __func__);
+		pr_err("failed to copy maintain info from user space\n");
 		return -EFAULT;
 	}
 
 	mig_task = get_migrate_task(mt_info.pid);
 	if (!mig_task) {
-		pr_err("Search migrate task err, pid = %d\n", mt_info.pid);
+		pr_err("failed to search migration task, pid: %d\n",
+		       mt_info.pid);
 		return -EINVAL;
 	}
 
 	ret = check_task_status(mig_task, HAM_TASK_INITED);
 	if (ret) {
-		pr_err("Pre task status is not satisfied, modify not allowed\n");
+		pr_err("pre task status is not satisfied, page table modification is not allowed\n");
 		return ret;
 	}
 
-	pr_info("Start modify page, pid = %d, cacheable = %d\n", mt_info.pid,
+	pr_info("start to modify page, pid: %d, cacheable: %d\n", mt_info.pid,
 		mt_info.cacheable);
 	ret = ham_modify_pgtable(mig_task, mt_info.cacheable);
 	if (ret) {
-		pr_err("Modify pagetable err, pid = %d\n", mt_info.pid);
+		pr_err("failed to modify page table, pid: %d\n", mt_info.pid);
 	} else {
-		pr_info("Modify pagetable ok, pid = %d\n", mt_info.pid);
+		pr_info("modify page table successfully, pid: %d\n",
+			mt_info.pid);
 	}
 
 	put_migrate_task(mig_task, mig_task->status);
@@ -1092,30 +1066,30 @@ static long ioctl_cache_clear(unsigned long arg)
 	pid_t pid;
 	int ret;
 	struct ham_migrate_task *mig_task;
-	pr_info("start cache clear\n");
+	pr_info("start to clear cache\n");
 	if (copy_from_user(&pid, (void __user *)arg, sizeof(pid_t))) {
-		pr_err("Cache Clear copy from user err\n");
+		pr_err("failed to copy pid to clear cache from user space\n");
 		return -EFAULT;
 	}
 
 	mig_task = get_migrate_task(pid);
 	if (!mig_task) {
-		pr_err("Search migrate task err, pid = %d\n", pid);
+		pr_err("failed to search migration task, pid: %d\n", pid);
 		return -EINVAL;
 	}
 
 	ret = check_task_status(mig_task, HAM_TASK_MIGRATED);
 	if (ret) {
-		pr_err("Pre task status is not satisfied, clear cache not allowed\n");
+		pr_err("pre task status is not satisfied, cache clear is not allowed\n");
 		return ret;
 	}
 
 	ret = ham_cache_clear(pid, mig_task);
 	if (ret) {
-		pr_err("Cache Clear err, pid = %d\n", pid);
+		pr_err("failed to clear cache, pid: %d\n", pid);
 		return ret;
 	}
-	pr_info("end cache clear, pid = %d\n", pid);
+	pr_info("clear cache successfully, pid: %d\n", pid);
 	put_migrate_task(mig_task, mig_task->status);
 	return 0;
 }
@@ -1125,16 +1099,16 @@ static long ioctl_ub_mem_drain(unsigned long arg)
 	unsigned short scna;
 	int ret;
 	if (copy_from_user(&scna, (void __user *)arg, sizeof(unsigned short))) {
-		pr_err("%s: copy from user err\n", __func__);
+		pr_err("failed to copy SCNA from user space\n");
 		return -EFAULT;
 	}
-	pr_info("Start ub mem drain, scna = %u\n", scna);
+	pr_info("start UB mem drain, SCNA: %u\n", scna);
 	ret = ub_mem_drain_sync((u32)scna);
 	if (ret) {
-		pr_info("Ub mem drain timeout, scna = %u\n", scna);
+		pr_info("UB mem drain timeout, SCNA: %u\n", scna);
 		return ret;
 	}
-	pr_info("End ub mem drain, scna = %u\n", scna);
+	pr_info("UB mem drain successfully, SCNA: %u\n", scna);
 	return 0;
 }
 
@@ -1178,7 +1152,7 @@ static long ham_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case HAM_UB_DRAIN:
 		return ioctl_ub_mem_drain(arg);
 	default:
-		return -EINVAL; // unknown cmd return EINVAL
+		return -EINVAL;
 	}
 }
 
@@ -1199,21 +1173,21 @@ int ham_init(void)
 
 	ret = alloc_chrdev_region(&dev_id, 0, HAM_DEV_COUNT, "ham_migrate");
 	if (ret < 0) {
-		pr_err("Alloc chrdev region init err\n");
+		pr_err("unable to allocate character device region\n");
 		return ret;
 	}
 	g_ham_dev = MKDEV(MAJOR(dev_id), 0);
 	cdev_init(&g_ham_cdev, &g_ham_fops);
 	ret = cdev_add(&g_ham_cdev, g_ham_dev, HAM_DEV_COUNT);
 	if (ret < 0) {
-		pr_err("Ham cdev init err\n");
+		pr_err("failed to init HAM character device\n");
 		goto cdev_add_err;
 	}
 
 	g_ham_class = class_create("ham_migrate");
 	if (IS_ERR(g_ham_class)) {
 		ret = PTR_ERR(g_ham_class);
-		pr_err("Ham class init err\n");
+		pr_err("failed to init HAM class\n");
 		goto class_create_err;
 	}
 
@@ -1221,7 +1195,7 @@ int ham_init(void)
 				   "ham_migrate");
 	if (IS_ERR(ham_device)) {
 		ret = -EBUSY;
-		pr_err("Ham device init err\n");
+		pr_err("failed to init HAM device\n");
 		goto dev_create_err;
 	}
 

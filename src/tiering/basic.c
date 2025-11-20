@@ -61,25 +61,23 @@ pte_t kernel_huge_ptep_get(pte_t *ptep)
 }
 
 /*
- * Find a task by it's virtual pid and get the mm_struct, and the mmput()
- * needs to be called subsequently.
+ * Find a task by it's virtual pid and get the mm_struct,
+ * and the mmput() needs to be called subsequently.
  */
 struct mm_struct *find_get_mm_by_vpid(pid_t pid)
 {
 	struct task_struct *task;
 	struct mm_struct *mm = NULL;
 
-	/* Get process information */
 	task = find_get_task_by_vpid(pid);
 	if (!task) {
-		pr_err("Failed to get task_struct of PID:%d\n", pid);
+		pr_err("failed to get task_struct of pid: %d\n", pid);
 		return NULL;
 	}
 
-	/* Get mm_struct */
 	mm = get_task_mm(task);
 	if (!mm) {
-		pr_err("Failed to get mm_struct of PID:%d\n", pid);
+		pr_err("failed to get mm_struct of pid: %d\n", pid);
 	}
 	put_task_struct(task);
 	return mm;

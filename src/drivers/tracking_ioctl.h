@@ -10,29 +10,12 @@
 #include <linux/types.h>
 
 #include "drv_common.h"
-/*
- *  cmd 0->Tracking able config:
- *      arg 0->Tracking disable
- *      arg 1->Tracking enable
- */
 
 #define SMAP_IOCTL_TRACKING_CMD _IOW('N', 0, unsigned long)
-
-/*
- *  cmd 1->Tracking mode sel:
- *      arg 0->mat actc
- *      arg 1->mebs
- *      arg 2->cpi
- */
 
 #define SMAP_IOCTL_MODE_SET_CMD _IOW('N', 1, unsigned long)
 
 #define SMAP_IOCTL_MAP_MODE_CMD _IOW('N', 2, unsigned long)
-
-/*
- *  cmd 2->Tracking dev get size:
- *
- */
 
 #define SMAP_IOCTL_GET_SIZE_CMD _IOR('N', 3, unsigned long)
 

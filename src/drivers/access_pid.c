@@ -89,10 +89,7 @@ static void destroy_access_statistic_pid(struct statistics_tracking_info *elem)
 	if (!elem) {
 		return;
 	}
-	/*
-	* vaddr is allocated uniformly via malloc, since vaddr[L2] = vaddr[L1] + offset,
-	* only vaddr[L1] needs to be free here.
-	*/
+	/* vaddr[L1] stores the pointer of whole vaddr */
 	vfree(elem->vaddr[L1]);
 	for (i = 0; i < elem->window_num; ++i) {
 		vfree(elem->sliding_windows[i]);
@@ -124,13 +121,13 @@ static int scan_kvm_gfn(struct kvm *kvm, struct vm_mapping_info *info)
 	u64 gfn_thre = VM_MEMSLOT_PRIOR_THRE;
 
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("kvm or kvm pgtable is null\n");
+		pr_err("null kvm or kvm pagetable passed to kvm scan gfn\n");
 		return -EINVAL;
 	}
 
 	slots = kvm_memslots(kvm);
 	if (!slots) {
-		pr_err("get memslots failed\n");
+		pr_err("unable to get kvm memslots\n");
 		return -EINVAL;
 	}
 
@@ -173,7 +170,7 @@ static int init_vm_mapping(struct vm_mapping_info *info)
 	if (info->vm_size) {
 		info->mapping = vmalloc(info->vm_size * sizeof(u32));
 		if (!info->mapping) {
-			pr_err("malloc mem for vm mapping failed\n");
+			pr_err("unable to allocate memory for VM mapping\n");
 			return -ENOMEM;
 		}
 		clear_vm_mapping(info->mapping, info->vm_size);
@@ -194,14 +191,14 @@ static int init_vm_mapping_info(pid_t pid, struct vm_mapping_info *info)
 	task = get_pid_task(pid_s, PIDTYPE_PID);
 	if (!task) {
 		put_pid(pid_s);
-		pr_err("get pid task failed, pid: %d\n", pid);
+		pr_err("unable to get task struct of pid: %d\n", pid);
 		return -EINVAL;
 	}
 	filp = get_kvm_file_from_task(task);
 	if (!filp) {
 		put_task_struct(task);
 		put_pid(pid_s);
-		pr_err("get filp failed, pid: %d\n", pid);
+		pr_err("unable to get kvm file of pid: %d\n", pid);
 		return -EINVAL;
 	}
 	kvm = filp->private_data;
@@ -209,14 +206,14 @@ static int init_vm_mapping_info(pid_t pid, struct vm_mapping_info *info)
 		fput(filp);
 		put_task_struct(task);
 		put_pid(pid_s);
-		pr_err("get kvm failed, pid: %d\n", pid);
+		pr_err("unable to get kvm of pid: %d\n", pid);
 		return -EINVAL;
 	}
 	srcu_idx = pre_scan_kvm_gfn(kvm);
 
 	ret = scan_kvm_gfn(kvm, info);
 	if (ret) {
-		pr_err("scan kvm gfn failed of pid %d\n", pid);
+		pr_err("failed to scan kvm of pid %d\n", pid);
 	}
 	post_scan_kvm_gfn(kvm, srcu_idx);
 	fput(filp);
@@ -261,7 +258,7 @@ void print_access_pid_list(void)
 {
 	struct access_pid *ap;
 
-	pr_debug("---access pid list---\n");
+	pr_debug("access pid list:\n");
 	down_read(&ap_data.lock);
 	list_for_each_entry(ap, &ap_data.list, node) {
 		pr_debug("pid %d, numa_nodes %x, scan_time %d, type %d\n",
@@ -289,7 +286,7 @@ void print_access_statistic_pid_list(void)
 {
 	struct statistics_tracking_info *ap;
 
-	pr_debug("---access statistic pid list---\n");
+	pr_debug("statistic access pid list:\n");
 	spin_lock(&statistic_lock);
 	list_for_each_entry(ap, &statistic_pid_list, node) {
 		pr_debug("pid %d, l1_node %d, l2_node %d\n", ap->pid,
@@ -308,15 +305,13 @@ static int init_ham_pid_memory(struct ham_tracking_info *info,
 	}
 	info->paddr[level] = vzalloc(info->len[level] * sizeof(u64));
 	if (!info->paddr[level]) {
-		pr_err("ham tracking info paddr %d vzalloc failed, len %llu, l1_node %d, l2_node %d\n",
-		       level, info->len[level], info->l1_node, info->l2_node);
+		pr_err("unable to allocate memory for HAM access pid physical address array\n");
 		return -ENOMEM;
 	}
 	info->freq[level] = vzalloc(info->len[level] * sizeof(actc_t));
 	if (!info->freq[level]) {
 		vfree(info->paddr[level]);
-		pr_err("ham tracking info freq %d vzalloc failed, len %llu, l1_node %d, l2_node %d\n",
-		       level, info->len[level], info->l1_node, info->l2_node);
+		pr_err("unable to allocate memory for HAM access pid frequency array\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -403,8 +398,8 @@ static int init_access_ham_pid(struct access_add_pid_payload *payload)
 	l1_node = find_first_local_numa(&numa_nodes);
 	l2_node = find_first_remote_numa(&numa_nodes);
 	if (l1_node == NUMA_NO_NODE) {
-		pr_err("init access ham pid invalid nodes: %d %d\n", l1_node,
-		       l2_node);
+		pr_err("invalid local node: %d passed to init access HAM pid\n",
+		       l1_node);
 		return -EINVAL;
 	}
 
@@ -420,7 +415,7 @@ static int init_access_ham_pid(struct access_add_pid_payload *payload)
 	spin_unlock(&ham_lock);
 	tmp = kzalloc(sizeof(struct ham_tracking_info), GFP_KERNEL);
 	if (!tmp) {
-		pr_err("ham tracking info kzalloc failed\n");
+		pr_err("unable to allocate memory for HAM tracking info\n");
 		return -ENOMEM;
 	}
 	tmp->pid = payload->pid;
@@ -431,12 +426,12 @@ static int init_access_ham_pid(struct access_add_pid_payload *payload)
 	tmp->freq[L1] = tmp->freq[L2] = NULL;
 
 	if (init_ham_pid_len(tmp)) {
-		pr_err("init ham pid len failed\n");
+		pr_err("unable to init HAM pid length\n");
 		kfree(tmp);
 		return -ENOMEM;
 	}
 	if (smap_create_tracking_info_file(tmp)) {
-		pr_err("create /proc/%d_t/tracking_info file failed\n",
+		pr_err("unable to create tracking info file of pid: %d in process file system\n",
 		       tmp->pid);
 		kfree(tmp);
 		return -ENXIO;
@@ -457,7 +452,7 @@ int access_add_ham_pid(int len, struct access_add_pid_payload *payload)
 			ret = init_access_ham_pid(&payload[i]);
 		}
 		if (ret) {
-			pr_err("access add ham pid %d failed\n",
+			pr_err("unable to init HAM access pid: %d\n",
 			       payload[i].pid);
 			return ret;
 		}
@@ -476,13 +471,13 @@ static int init_statistic_window(u8 ***sliding_windows, u32 duration,
 	*windows_num = win_nr;
 	wins = vzalloc(win_nr * sizeof(u8 *));
 	if (!wins) {
-		pr_err("init statistic windows vzalloc failed\n");
+		pr_err("unable to allocate memory for windows list of statistic access\n");
 		return -ENOMEM;
 	}
 	for (i = 0; i < win_nr; ++i) {
 		wins[i] = vzalloc(total_page_num * sizeof(u8));
 		if (!wins[i]) {
-			pr_err("init statistic window value vzalloc failed\n");
+			pr_err("unable to allocate memory for window of statistic access\n");
 			for (j = 0; j < i; ++j) {
 				vfree(wins[j]);
 			}
@@ -507,15 +502,15 @@ static int init_access_statistic_pid(struct access_add_pid_payload *payload)
 	l1_node = find_first_local_numa(&numa_nodes);
 	l2_node = find_first_remote_numa(&numa_nodes);
 	if (l1_node == NUMA_NO_NODE) {
-		pr_err("init access statistic invalid numa nodes: %d\n",
-		       l1_node);
+		pr_err("invalid local node passed to init statistic access of pid: %d\n",
+		       payload->pid);
 		return -EINVAL;
 	}
 
 	spin_lock(&statistic_lock);
 	list_for_each_entry_safe(ap, tmp, &statistic_pid_list, node) {
 		if (ap->pid == payload->pid) {
-			pr_info("init access statistic pid %d already exists, update info\n",
+			pr_info("statistic access pid: %d already exists, update info\n",
 				payload->pid);
 			list_del(&ap->node);
 			destroy_access_statistic_pid(ap);
@@ -526,7 +521,7 @@ static int init_access_statistic_pid(struct access_add_pid_payload *payload)
 
 	tmp = kzalloc(sizeof(struct statistics_tracking_info), GFP_KERNEL);
 	if (!tmp) {
-		pr_err("statistic tracking info kzalloc failed\n");
+		pr_err("unable to allocate memory for statistic tracking info\n");
 		return -ENOMEM;
 	}
 	tmp->pid = payload->pid;
@@ -537,7 +532,7 @@ static int init_access_statistic_pid(struct access_add_pid_payload *payload)
 			    &tmp->page_num[L2], &tmp->vaddr[L1],
 			    &tmp->vaddr[L2]);
 	if (ret) {
-		pr_err("init access statistic get hva info failed\n");
+		pr_err("failed to scan hva info for statistic tracking\n");
 		kfree(tmp);
 		return ret;
 	}
@@ -547,7 +542,7 @@ static int init_access_statistic_pid(struct access_add_pid_payload *payload)
 				    tmp->page_num[L1] + tmp->page_num[L2],
 				    &tmp->window_num);
 	if (ret) {
-		pr_err("init access statistic init window failed\n");
+		pr_err("failed to init statistic tracking windows\n");
 		kfree(tmp);
 		return ret;
 	}
@@ -556,7 +551,7 @@ static int init_access_statistic_pid(struct access_add_pid_payload *payload)
 	list_add_tail(&tmp->node, &statistic_pid_list);
 	spin_unlock(&statistic_lock);
 
-	pr_info("init access statistic success, pid:%d, page_num[L1]:%llu , page_num[L2]:%llu ",
+	pr_info("init statistic access tracking, pid: %d, local page number: %llu, remote page number: %llu\n",
 		tmp->pid, tmp->page_num[L1], tmp->page_num[L2]);
 	return 0;
 }
@@ -568,9 +563,8 @@ int access_add_statistic_pid(int len, struct access_add_pid_payload *payload)
 	for (i = 0; i < len; i++) {
 		if (payload[i].type == STATISTIC_SCAN) {
 			if (payload[i].duration > MAX_SCAN_DURATION_SEC) {
-				pr_err("init access statistic pid %d failed, duration %d beyond max duration %d s\n",
-				       payload[i].pid, payload[i].duration,
-				       MAX_SCAN_DURATION_SEC);
+				pr_err("invalid scan duration: %u of pid: %d passed to add statistic access tracking\n",
+				       payload[i].duration, payload[i].pid);
 				return -EINVAL;
 			}
 			pr_debug("init access statistic pid %d\n",
@@ -578,7 +572,7 @@ int access_add_statistic_pid(int len, struct access_add_pid_payload *payload)
 			ret = init_access_statistic_pid(&payload[i]);
 		}
 		if (ret) {
-			pr_err("access add statistic pid %d failed\n",
+			pr_err("failed to add statistic access pid: %d\n",
 			       payload[i].pid);
 			return ret;
 		}
@@ -596,7 +590,7 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 	list_for_each_entry_safe(ap, tmp, tmp_head, node) {
 		list_for_each_entry(tmp2, &ap_data.list, node) {
 			if (ap->pid == tmp2->pid) {
-				pr_info("set pid %d numa_nodes from %#x to %#x\n",
+				pr_info("set pid: %d NUMA mask from %#x to %#x\n",
 					ap->pid, tmp2->numa_nodes,
 					ap->numa_nodes);
 				tmp2->numa_nodes = ap->numa_nodes;
@@ -611,10 +605,10 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 	/* move all new pids to ap_data.list */
 	list_for_each_entry_safe(ap, tmp, tmp_head, node) {
 		/*
-		 * When new ap arrive, may during scan cycle or migrate cycle.
-		 * If in migrate cycle, no need to submit_one_work.
-		 * If in scan cycle, set ap->cur_times refer to ap_head->cur_times and ap_head->ntimes.
-		 * If cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID < ap->ntimes, no need to submit_one_work.
+		 * A new pid may be attached during scan period or migrate period,
+		 * if in migrate period, no need to call submit_one_work;
+		 * if in scan period, set ap->cur_times refer to ap_head->cur_times and ap_head->ntimes,
+		 * if cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID < ap->ntimes, no need to call submit_one_work
 		 */
 		if (list_empty(&ap_data.list)) {
 			ap->cur_times = ap->ntimes;
@@ -625,8 +619,7 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 				ap->cur_times = ap_head->cur_times *
 						ap->ntimes / ap_head->ntimes;
 			} else {
-				pr_warn("pid %d ap_head->ntimes is zero\n",
-					ap_head->pid);
+				pr_warn("scan times of the first entry in access pid list had been setted to 0\n");
 				ap->cur_times = ap->ntimes;
 			}
 		}
@@ -765,11 +758,8 @@ void access_remove_all_pid(void)
 	spin_lock(&ham_lock);
 	list_for_each_entry_safe(ap_ham, tmp_ham, &ham_pid_list, node) {
 		ret = scnprintf(path, sizeof(path), "%d_t", ap_ham->pid);
-		if (!ret) {
-			pr_err("write pid to path of pid: %d failed\n",
-			       ap_ham->pid);
+		if (!ret)
 			continue;
-		}
 		remove_proc_entry("tracking_info", ap_ham->pde);
 		remove_proc_entry(path, NULL);
 		list_del(&ap_ham->node);
@@ -827,16 +817,16 @@ static int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
 		}
 		ap->paddr_bm[i] = vzalloc(ap->bm_len[i] * nr_bytes);
 		if (!ap->paddr_bm[i]) {
-			pr_err("alloc pid %d node%d bitmap failed, size %zu\n",
-			       ap->pid, i, ap->bm_len[i] * nr_bytes);
+			pr_err("unable to allocate memory for bitmap on node %d of pid: %d\n",
+			       i, ap->pid);
 			free_ap_bm(ap);
 			return -ENOMEM;
 		}
 
 		ap->white_list_bm[i] = vzalloc(ap->bm_len[i] * nr_bytes);
 		if (!ap->white_list_bm[i]) {
-			pr_err("alloc pid %d node%d white list bitmap failed, size %zu\n",
-			       ap->pid, i, ap->bm_len[i] * nr_bytes);
+			pr_err("unable to allocate memory for white list bitmap on node %d of pid: %d\n",
+			       i, ap->pid);
 			free_ap_white_list_bm(ap);
 			return -ENOMEM;
 		}
@@ -852,7 +842,8 @@ void change_ap_type(pid_t pid)
 	list_for_each_entry(tmp, &ap_data.list, node) {
 		if (tmp->pid == pid) {
 			tmp->type = NO_SCAN;
-			pr_info("change pid %d type success\n", pid);
+			pr_info("change scan type of pid: %d successfully\n",
+				pid);
 			break;
 		}
 	}
@@ -896,7 +887,7 @@ int access_walk_pagemap(struct access_pid *ap)
 	clean_last_ap_data(ap);
 	ret = init_ap_bm(SMAP_MAX_NUMNODES, nodes_page_count, ap);
 	if (ret) {
-		pr_err("init ap bitmap failed for %d\n", ap->pid);
+		pr_err("unable to init access bitmap for pid: %d\n", ap->pid);
 		return ret;
 	}
 	ret = init_vm_mapping(&ap->info);
@@ -944,8 +935,7 @@ void update_hist_tracking(void)
 		}
 		tempfile = filp_open(path, O_RDWR, 0);
 		if (tempfile == NULL || IS_ERR(tempfile)) {
-			pr_err("update_hist_tracking g_smap_actc_filep[%d] is NULL or IS_ERR\n",
-			       i);
+			pr_err("invalid file pointer of SMAP histogram tracking device passed to update histogram tracking\n");
 			continue;
 		}
 		pos = 0;
@@ -971,13 +961,13 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 	struct access_tracking_dev *adev;
 
 	if (!data_len || !data) {
-		pr_err("read_pid_freq data_len or data is NULL\n");
+		pr_err("null data pointer passed to pid frequency read\n");
 		return -EINVAL;
 	}
 
 	ap = find_access_pid(pid);
 	if (!ap) {
-		pr_err("read_pid_freq invalid access_pid %d\n", pid);
+		pr_err("unable to find pid: %d in access pid list\n", pid);
 		return -EINVAL;
 	}
 
@@ -1002,8 +992,8 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 				continue;
 			}
 			if (unlikely(acidx >= adev->page_count)) {
-				pr_warn("acidx %zu exceeds adev%d page count %llu\n",
-					acidx, i, adev->page_count);
+				pr_warn("exceeds total page amount: %llu when lookup access index: %zu on access device: %d\n",
+					adev->page_count, acidx, i);
 				break;
 			}
 			if (i >= nr_local_numa && g_hist_actc_data[i] &&
@@ -1069,7 +1059,7 @@ static int calc_absolute_pos(unsigned long *paddr_bm, size_t bm_len,
 static int check_parameters_and_state(u64 len, u64 *addr)
 {
 	if (len == 0 || !addr) {
-		pr_err("convert_pos_to_paddr_sorted invalid len or addr\n");
+		pr_err("invalid length or address passed to check\n");
 		return -EINVAL;
 	}
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_MIG)) {
@@ -1139,7 +1129,8 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 	}
 
 	if (!found) {
-		pr_err("convert_pos_to_paddr_sorted invalid pid %d\n", pid);
+		pr_err("invalid pid: %d passed to convert position to PA\n",
+		       pid);
 		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
 						     AP_STATE_FREQ |
 						     AP_STATE_MIG);
@@ -1147,7 +1138,8 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 		return -EINVAL;
 	}
 
-	pr_debug("convert pid %d node%d total %llu addrs\n", pid, nid, len);
+	pr_debug("%llu addresses of pid: %d on node%d has been converted\n",
+		 len, pid, nid);
 	for (i = 0; i < len; i++) {
 		convert_single_address(ap, nid, page_size, &addr[i], &abs_pos);
 	}
@@ -1165,7 +1157,6 @@ int hist_actc_data_reinit(void)
 	u64 page_count;
 	int page_size = is_access_hugepage() ? PAGE_SIZE_2M : PAGE_SIZE_4K;
 	for (i = nr_local_numa; i < SMAP_MAX_NUMNODES; i++) {
-		// 重置获取硬件扫描结果
 		g_hist_actc_data_ret[i] = 0;
 		page_count = get_node_page_cnt_iomem(i, page_size);
 		if (page_count == 0) {
@@ -1187,7 +1178,7 @@ int hist_actc_data_reinit(void)
 		}
 		g_hist_actc_data[i] = vzalloc(sizeof(actc_t) * page_count);
 		if (!g_hist_actc_data[i]) {
-			pr_err("g_hist_actc_data[%d] vzalloc failed\n", i);
+			pr_err("unable to allocate memory for histogram tracking ACTC buffer\n");
 			g_hist_actc_page_count[i] = 0;
 			return -ENOMEM;
 		}
@@ -1210,7 +1201,7 @@ int hist_actc_data_init(void)
 		}
 		g_hist_actc_data[i] = vzalloc(page_count * sizeof(actc_t));
 		if (!g_hist_actc_data[i]) {
-			pr_err("g_hist_actc_data[%d] vzalloc failed\n", i);
+			pr_err("unable to allocate memory for histogram tracking ACTC buffer\n");
 			goto out_g_node_actc;
 		}
 		g_hist_actc_page_count[i] = page_count;

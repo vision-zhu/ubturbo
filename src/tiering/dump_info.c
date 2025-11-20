@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
- * Description: SMAP3.0 dump info module
+ * Description: SMAP dump info module
  */
 
 #include <linux/fs.h>
@@ -13,7 +13,7 @@
 #include "dump_info.h"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smap_dump_info: " fmt
+#define pr_fmt(fmt) "SMAP_dump_info: " fmt
 
 int check_and_create_dir(char *dir)
 {

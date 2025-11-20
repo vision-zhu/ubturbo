@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap reverse map module
+ * Description: SMAP reverse map module
  */
 
 #include <linux/mm.h>

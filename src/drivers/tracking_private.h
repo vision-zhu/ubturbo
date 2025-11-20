@@ -15,11 +15,11 @@
 int tracking_bus_init(void);
 void tracking_bus_exit(void);
 
-struct tracking_node_dev { /* cdev */
+struct tracking_node_dev {
 	struct list_head list;
-	struct list_head dev_list; /* low level device */
+	struct list_head dev_list;
 	struct device *device;
-	struct device cdev_device; /* cdev_device */
+	struct device cdev_device;
 	struct cdev cdev;
 	struct file *file;
 	int target_node;

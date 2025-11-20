@@ -33,15 +33,15 @@ static struct device *access_device;
 static int check_msg_validity(struct access_add_pid_msg *msg)
 {
 	if (!msg) {
-		pr_err("msg is null\n");
+		pr_err("null pid message passed to access tracking\n");
 		return -EINVAL;
 	}
 	if (msg->count <= 0 || msg->count > MAX_NR_MIGOUT) {
-		pr_err("count %d is invalid\n", msg->count);
+		pr_err("invalid message count passed to access tracking\n");
 		return -EINVAL;
 	}
 	if (!msg->payload) {
-		pr_err("payload is null\n");
+		pr_err("null payload passed to access tracking\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -52,12 +52,13 @@ static int add_payload(int len, struct access_add_pid_payload *payload)
 	int ret;
 	ret = access_add_ham_pid(len, payload);
 	if (ret) {
-		pr_err("access add ham pid fail\n");
+		pr_err("failed to add HAM pid tracking task, ret: %d\n", ret);
 		return ret;
 	}
 	ret = access_add_statistic_pid(len, payload);
 	if (ret) {
-		pr_err("access add statistic pid fail\n");
+		pr_err("failed to add statistic pid tracking task, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	ret = access_add_pid(len, payload);
@@ -72,12 +73,12 @@ static long ioctl_add_pid(void __user *argp)
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
 	if (check_msg_validity(&msg)) {
-		pr_err("check msg validity failed\n");
+		pr_err("message of add pid is invalid\n");
 		return -EINVAL;
 	}
 	payload = vzalloc(sizeof(struct access_add_pid_payload) * msg.count);
 	if (!payload) {
-		pr_err("ioctl_add_pid payload malloc failed\n");
+		pr_err("unable to allocate memory for access pid payload\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(payload, msg.payload,
@@ -86,21 +87,21 @@ static long ioctl_add_pid(void __user *argp)
 		goto out_free_payload;
 	}
 
-	pr_info("ioctl add pid payload:\n");
+	pr_info("adding pid payload:\n");
 	for (i = 0; i < msg.count; i++) {
 		pr_info("[%d] pid %d, numa_nodes %#x, scan_time %u, ntimes %u, duration %u, type %d\n",
 			i, payload[i].pid, payload[i].numa_nodes,
 			payload[i].scan_time, payload[i].ntimes,
 			payload[i].duration, payload[i].type);
 		if (payload[i].type >= MAX_SCAN_TYPE || payload[i].type < 0) {
-			pr_err("message payload[%d] scan type %d is invalid\n",
-			       i, payload[i].type);
+			pr_err("invalid scan type %d of message payload[%d]\n",
+			       payload[i].type, i);
 			ret = -EINVAL;
 			goto out_free_payload;
 		}
 		if (payload[i].ntimes == 0) {
-			pr_err("message payload[%d] ntimes %d is invalid\n", i,
-			       payload[i].ntimes);
+			pr_err("invalid scan times %d of message payload[%d]\n",
+			       payload[i].ntimes, i);
 			ret = -EINVAL;
 			goto out_free_payload;
 		}
@@ -126,12 +127,12 @@ static long ioctl_remove_pid(void __user *argp)
 	if (msg.count <= 0 || msg.count > MAX_NR_REMOVE)
 		return -EINVAL;
 	if (!msg.payload) {
-		pr_err("ioctl_remove_pid payload is null\n");
+		pr_err("null payload passed to access remove pid\n");
 		return -EINVAL;
 	}
 	payload = vzalloc(sizeof(struct access_remove_pid_payload) * msg.count);
 	if (!payload) {
-		pr_err("ioctl_remove_pid payload malloc failed\n");
+		pr_err("unable to allocate memory for access pid payload\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(payload, msg.payload,
@@ -140,7 +141,7 @@ static long ioctl_remove_pid(void __user *argp)
 		vfree(payload);
 		return -EFAULT;
 	}
-	pr_info("ioctl remove pid payload:\n");
+	pr_info("remove pid payload\n");
 	for (i = 0; i < msg.count; i++)
 		pr_info("[%d] pid %d\n", i, payload[i].pid);
 
@@ -187,7 +188,8 @@ static int transfer_frequency_data(struct access_pid_freq_msg *msg,
 			continue;
 		if (copy_to_user(msg->freq[i], data[i],
 				 sizeof(actc_t) * msg->len[i])) {
-			pr_err("copy pid %d node%d freq failed\n", msg->pid, i);
+			pr_err("failed to copy frequency of pid: %d on node%d to user\n",
+			       msg->pid, i);
 			return -EFAULT;
 		}
 	}
@@ -201,9 +203,9 @@ static long ioctl_read_pid_freq(void __user *argp)
 	struct access_pid_freq_msg msg;
 	actc_t *freq[SMAP_MAX_NUMNODES] = { 0 };
 
-	pr_debug("ioctl read pid freq\n");
+	pr_debug("read pid frequency\n");
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
-		pr_err("ap_data is a state that not allowed to read freq\n");
+		pr_err("read frequency of access pid is not allowed\n");
 		return -EAGAIN;
 	}
 
@@ -213,7 +215,8 @@ static long ioctl_read_pid_freq(void __user *argp)
 	}
 
 	if (!is_pid_freq_msg_valid(&msg)) {
-		pr_err("ioctl_read_pid_freq invalid pid %d\n", msg.pid);
+		pr_err("invalid pid: %d passed to access read frequency\n",
+		       msg.pid);
 		ret = -EINVAL;
 		goto out_ret;
 	}
@@ -230,7 +233,7 @@ static long ioctl_read_pid_freq(void __user *argp)
 
 	ret = read_pid_freq(msg.pid, msg.len, freq);
 	if (ret) {
-		pr_err("read pid %d freq failed\n", msg.pid);
+		pr_err("failed to read frequency of pid: %d\n", msg.pid);
 		goto out;
 	}
 
@@ -296,7 +299,7 @@ static long ioctl_walk_pagemap(void __user *argp)
 	int ret;
 	size_t buf_len;
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_WALK)) {
-		pr_err("ap_data is a state that not allowed to walk pagemap\n");
+		pr_err("walk pagemap of access pid is not allowed\n");
 		return -EAGAIN;
 	}
 	buf_len = calc_bitmap_len();
@@ -317,7 +320,7 @@ static long ioctl_walk_pagemap(void __user *argp)
 static inline void write_bitmap_pid(char **buffer, struct access_pid *ap)
 {
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write bitmap\n");
 		return;
 	}
 	memcpy(*buffer, &ap->pid, sizeof(ap->pid));
@@ -328,7 +331,7 @@ static inline void write_bitmap_nrpage(char **buffer, struct access_pid *ap)
 {
 	int i;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write page number\n");
 		return;
 	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
@@ -341,7 +344,7 @@ static inline void write_bitmap_bmlen(char **buffer, struct access_pid *ap)
 {
 	int i;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write bitmap length\n");
 		return;
 	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
@@ -353,7 +356,7 @@ static inline void write_bitmap_bmlen(char **buffer, struct access_pid *ap)
 static inline void write_bitmap_vmsize(char **buffer, struct access_pid *ap)
 {
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write VM size\n");
 		return;
 	}
 	memcpy(*buffer, &ap->info.vm_size, sizeof(ap->info.vm_size));
@@ -364,7 +367,7 @@ static void write_bitmap_paddrbm(char **buffer, struct access_pid *ap)
 {
 	int i;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write physical address bitmap\n");
 		return;
 	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
@@ -383,7 +386,7 @@ static void write_bitmap_white_list(char **buffer, struct access_pid *ap)
 {
 	int i;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write white list\n");
 		return;
 	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
@@ -402,7 +405,7 @@ static void write_bitmap_mappig(char **buffer, struct access_pid *ap)
 {
 	size_t length = sizeof(u32) * ap->info.vm_size;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("bitmap mapping invalid buffer or ap\n");
+		pr_err("invalid buffer or access pid passed to write VM mapping info\n");
 		return;
 	}
 	if (!ap->info.mapping) {
@@ -418,7 +421,7 @@ static void write_bitmap_buffer(char **buffer)
 	struct access_pid *ap;
 
 	if (unlikely(!buffer || !(*buffer))) {
-		pr_err("bitmap buffer or *buffer is NULL\n");
+		pr_err("invalid buffer passed to write bitmap buffer\n");
 		return;
 	}
 	down_read(&ap_data.lock);
@@ -442,7 +445,7 @@ static size_t read_bitmap(char __user *buf, size_t cnt, loff_t *loff)
 	size_t buf_len;
 	char *bitmap_buf, *tmp_buf;
 
-	pr_debug("read_bitmap\n");
+	pr_debug("reading bitmap\n");
 	buf_len = calc_bitmap_len();
 	if (buf_len == 0 || buf_len != cnt)
 		return 0;
@@ -505,17 +508,16 @@ static long ioctl_get_tracking(void __user *argp)
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
 	if (msg.length <= 0 || msg.length >= MAX_PAGENUM_OF_QUERY_VM_FREQ) {
-		pr_err("ioctl_get_tracking msg.length:%d invalid\n",
-		       msg.length);
+		pr_err("invalid message length passed to get tracking data\n");
 		return -EINVAL;
 	}
 	if (!msg.data) {
-		pr_err("ioctl_get_tracking payload is null\n");
+		pr_err("null buffer passed to get tracking data\n");
 		return -EINVAL;
 	}
 	tracking_data = vzalloc(sizeof(actc_t) * msg.length);
 	if (!tracking_data) {
-		pr_err("ioctl_get_tracking payload malloc failed\n");
+		pr_err("unable to allocate memory for tracking data payload\n");
 		return -ENOMEM;
 	}
 
@@ -526,13 +528,13 @@ static long ioctl_get_tracking(void __user *argp)
 	}
 	spin_unlock(&statistic_lock);
 	if (copy_to_user(argp, &msg, sizeof(msg))) {
-		pr_err("Failed to copy message to user space\n");
+		pr_err("failed to copy message to user space\n");
 		ret = -EFAULT;
 		goto out_free_payload;
 	}
 	if (copy_to_user(msg.data, tracking_data,
 			 sizeof(actc_t) * msg.length)) {
-		pr_err("Failed to copy tracking data to user buffer\n");
+		pr_err("failed to copy tracking data to user space buffer\n");
 		ret = -EFAULT;
 	}
 	pr_info("Exit ioctl get tracking, ret: %d, outlen: %d\n", ret,
@@ -579,7 +581,7 @@ static ssize_t smap_access_read(struct file *file, char __user *buf, size_t cnt,
 	size_t ret;
 
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_READ)) {
-		pr_err("ap_data is a state that not allowed to read bitmap\n");
+		pr_err("read bitmap of access pid is not allowed\n");
 		return 0;
 	}
 
@@ -613,7 +615,7 @@ int access_dev_init(void)
 	int rc = alloc_chrdev_region(&ioctl_access_dev, BASE_MINOR, NR_MINOR,
 				     ACCESS_DEV);
 	if (rc < 0) {
-		pr_err("failed to allocate smap access char dev region\n");
+		pr_err("unable to allocate access character device region\n");
 		return rc;
 	}
 
@@ -621,12 +623,12 @@ int access_dev_init(void)
 
 	rc = cdev_add(&access_cdev, ioctl_access_dev, 1);
 	if (rc) {
-		pr_err("Cannot add the device to the system\n");
+		pr_err("unable to add access device to the system\n");
 		goto err_cdev;
 	}
 	access_class = class_create(ACCESS_CLASS);
 	if (IS_ERR(access_class)) {
-		pr_err("Cannot create the struct class\n");
+		pr_err("unable to create the access class\n");
 		rc = PTR_ERR(access_class);
 		goto err_class;
 	}
@@ -634,7 +636,7 @@ int access_dev_init(void)
 	access_device = device_create(access_class, NULL, ioctl_access_dev,
 				      NULL, ACCESS_DEVICE);
 	if (IS_ERR(access_device)) {
-		pr_err("Cannot create the Device 1\n");
+		pr_err("unable to create the access device\n");
 		rc = PTR_ERR(access_device);
 		goto err_device;
 	}

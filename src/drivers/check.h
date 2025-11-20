@@ -39,7 +39,6 @@
 
 enum node_level { L1, L2, NR_LEVEL };
 
-/* calculate 2M count by addr range */
 static inline u64 calc_2m_count(u64 range)
 {
 	return (range & ~TWO_MEGA_MASK) == 0 ?

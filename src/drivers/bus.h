@@ -32,12 +32,12 @@ struct tracking_operations {
 
 struct tracking_dev {
 	struct list_head list;
-	struct device *dev; /* low level device eg.pcie i2c usb */
-	struct device tdev; /* device added to tracking bus */
+	struct device *dev;
+	struct device tdev;
 	int target_node;
 	int id;
 	const struct tracking_operations *ops;
-	void *trk_node_device; /* pointer to node_dev struct */
+	void *trk_node_device;
 };
 
 enum MODE_TYPE {

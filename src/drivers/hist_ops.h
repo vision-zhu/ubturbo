@@ -13,7 +13,6 @@
 #include <linux/hrtimer.h>
 #include <linux/spinlock.h>
 
-/* smap.hist statistics module */
 #define HIST_ADDR_SHIFT_4K (12)
 #define HIST_ADDR_SHIFT_2M (21)
 #define HIST_ADDR_SHIFT_32M (25)
@@ -33,7 +32,7 @@
 struct addr_seg {
 	u64 start;
 	u64 size;
-	u16 max; /* for counting hot windows */
+	u16 max;
 };
 
 struct segs_info {

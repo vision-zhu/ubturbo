@@ -121,11 +121,11 @@ static int get_pid_from_tracking_file(const struct file *file)
 	len = strlen(path);
 	number_str = kmalloc(len, GFP_KERNEL);
 	if (number_str == NULL) {
-		pr_err("Malloc size(%zu) memory failed.\n", len);
+		pr_err("unable to allocate memory for tracking file path\n");
 		return -ENOMEM;
 	}
 	memset(number_str, '\0', len);
-	/* file文件名结束是_t，所以减去2 */
+	/* File name end with '_t', we don't need the last 2 characters */
 	strncpy(number_str, path, len - 2);
 	if (kstrtoint(number_str, DECIMAL, &pid) == 0) {
 		kfree(number_str);
@@ -154,7 +154,7 @@ static struct freq_info *get_freq_info(struct ham_tracking_info *info, u64 *n)
 	total_len = info->len[L1] + info->len[L2];
 	freq_info_array = vzalloc(sizeof(struct freq_info) * total_len);
 	if (!freq_info_array) {
-		pr_err("vzalloc freq info array failed\n");
+		pr_err("unable to allocate memory for frequency info array\n");
 		return NULL;
 	}
 	for (i = 0; i < info->len[L1]; i++) {
@@ -197,18 +197,19 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 	spin_unlock(&ham_lock);
 
 	if (info->pid != pid) {
-		pr_err("no /proc/%d_t/tracking_info file\n", pid);
+		pr_err("unable to find tracking file of pid: %d in process file system\n",
+		       pid);
 		return -ENXIO;
 	}
 
 	freq_info_array = get_freq_info(info, &num);
 	if (!freq_info_array) {
-		pr_err("freq_info_array is NULL\n");
+		pr_err("unable to get frequency info array\n");
 		return -ENOMEM;
 	}
 	if (*pos == 0) {
 		if (copy_to_user(buf, &num, sizeof(u64))) {
-			pr_err("copy num to user failed\n");
+			pr_err("unable to copy size of frequency info array to user space\n");
 			ret = -EFAULT;
 		}
 		freq_info_num = num;
@@ -219,7 +220,7 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 	num = min(num, freq_info_num);
 	if (copy_to_user(buf, freq_info_array,
 			 sizeof(struct freq_info) * num)) {
-		pr_err("copy array to user failed\n");
+		pr_err("unable to copy frequency info array to user space\n");
 		ret = -EFAULT;
 		goto out;
 	}
@@ -252,13 +253,15 @@ int smap_create_tracking_info_file(struct ham_tracking_info *info)
 	}
 	proc_dir = proc_mkdir(path, NULL);
 	if (!proc_dir) {
-		pr_err("mkdir /proc/%d file failed\n", info->pid);
+		pr_err("unable to create directory of pid: %d in process file system\n",
+		       info->pid);
 		return -ENOENT;
 	}
 	proc_file =
 		proc_create("tracking_info", S_IRUGO, proc_dir, &proc_file_ops);
 	if (!proc_file) {
-		pr_err("Failed to create /proc/%d/tracking_info\n", info->pid);
+		pr_err("unable to create tracking info file of pid: %d in process file system\n",
+		       info->pid);
 		remove_proc_entry(path, NULL);
 		return -ENOENT;
 	}
@@ -279,7 +282,7 @@ int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 	spin_unlock(&ham_lock);
 
 	if (info->pid != pid) {
-		pr_err("not find ham migration pid = %d in the list\n",
+		pr_err("unable to find pid: %d in HAM managed pid list\n",
 		       info->pid);
 		return -ENXIO;
 	}
@@ -287,7 +290,7 @@ int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 	change_ap_type(pid);
 	*freq_info_array = get_freq_info(info, freq_info_num);
 	if (!*freq_info_array) {
-		pr_err("get ham freq info failed , pid = %d\n", info->pid);
+		pr_err("unable to get frequency info of pid: %d\n", info->pid);
 		return -ENOMEM;
 	}
 	clear_tracking_info(info);
@@ -329,7 +332,6 @@ pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr,
 	ud = READ_ONCE(*pudp);
 	if (sz != PUD_SIZE && pud_none(ud))
 		return NULL;
-	/* hugepage or swap? */
 	if (pud_huge(ud) || !pud_present(ud))
 		return (pte_t *)pudp;
 
@@ -397,7 +399,7 @@ static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)
 
 	pte = smap_huge_ptep_get(ptep);
 	if (!pte_present(pte)) {
-		pr_err("huge ptep_get failed\n");
+		pr_err("unable to get PTE\n");
 		return -EINVAL;
 	}
 
@@ -465,7 +467,7 @@ static int hva_to_hpa_ham(struct kvm *kvm, u64 host_va, pid_t pid)
 
 	pte = smap_huge_ptep_get(ptep);
 	if (!pte_present(pte)) {
-		pr_err("huge ptep_get failed\n");
+		pr_err("unable to get PTE\n");
 		return -EINVAL;
 	}
 
@@ -518,7 +520,6 @@ static bool find_tracking_index(struct statistics_tracking_info *stat_info,
 {
 	u64 i;
 
-	/* 查找 L1 页面 */
 	for (i = 0; i < stat_info->page_num[L1]; i++) {
 		if (stat_info->vaddr[L1][i] == vaddr) {
 			*index = i;
@@ -526,7 +527,6 @@ static bool find_tracking_index(struct statistics_tracking_info *stat_info,
 		}
 	}
 
-	/* 查找 L2 页面 */
 	for (i = 0; i < stat_info->page_num[L2]; i++) {
 		if (stat_info->vaddr[L2][i] == vaddr) {
 			*index = i + stat_info->page_num[L1];
@@ -595,14 +595,12 @@ static int fill_statistics_tracking(unsigned long hva, pid_t pid)
 {
 	int ret;
 	unsigned int index;
-	/* Calculate index from hva */
 	ret = calc_tracking_index(hva, pid, &index);
 	if (ret) {
-		pr_err("calc_tracking_index failed. ret :%d", ret);
+		pr_err("out of range while finding index of HVA\n");
 		return ret;
 	}
 
-	/* Update sliding window */
 	update_tracking_info(pid, index);
 	return ret;
 }
@@ -627,7 +625,7 @@ static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
 	int bkt;
 
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("kvm or kvm pgtable is null\n");
+		pr_err("invalid kvm passed to scan kvm memslots\n");
 		return -EINVAL;
 	}
 
@@ -647,16 +645,11 @@ static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
 							   gpa))
 				continue;
 			hva = gfn_to_hva_memslot(memslot, gpa_to_gfn(gpa));
-			if (!get_vma_if_huge_page(kvm, hva)) {
-				pr_debug(
-					"get vma with check is hupege failed\n");
+			if (!get_vma_if_huge_page(kvm, hva))
 				continue;
-			}
 			ret = hva_to_hpa(kvm, hva, type, pid);
-			if (ret) {
-				pr_debug("hva_to_hpa failed\n");
+			if (ret)
 				continue;
-			}
 			if (type == STATISTIC_SCAN) {
 				ret = fill_statistics_tracking(hva, pid);
 			}
@@ -720,7 +713,6 @@ static int get_total_huge_page_nr(struct kvm *kvm, u64 *total_huge_page_nr)
 			if (get_vma_if_huge_page(kvm, hva))
 				++huge_page_nr;
 		}
-		pr_debug("memslot npages=%lu\n", memslot->npages);
 	}
 	*total_huge_page_nr = huge_page_nr;
 	return 0;
@@ -757,7 +749,7 @@ static int get_vma_numa_node(struct kvm *kvm, struct vm_area_struct *vma,
 
 	pte = smap_huge_ptep_get(ptep);
 	if (!pte_present(pte)) {
-		pr_err("huge ptep_get failed\n");
+		pr_err("PTE is not presented\n");
 		return NUMA_NO_NODE;
 	}
 
@@ -791,10 +783,9 @@ static int fill_vaddrs_info(struct kvm *kvm, struct hva_info *hva_vec, u64 len,
 		     gpa < (memslot->base_gfn + memslot->npages) << PAGE_SHIFT;
 		     gpa += PAGE_SIZE_2M) {
 			struct vm_area_struct *vma;
-			/* length of hva_vec is total huge page num */
 			if (idx >= len) {
-				pr_err("fill vaddrs info failed, invalid idx %llu, len = %llu\n",
-				       idx, len);
+				pr_err("exceeds upper bound: %llu when looking up GPA in memslots\n",
+				       len);
 				return -EFAULT;
 			}
 			hva = gfn_to_hva_memslot(memslot, gpa_to_gfn(gpa));
@@ -809,15 +800,14 @@ static int fill_vaddrs_info(struct kvm *kvm, struct hva_info *hva_vec, u64 len,
 			else if (cur_node < nr_local_numa && cur_node >= 0)
 				++l1_page_nr;
 			else {
-				pr_err("invalid numa id %d\n", cur_node);
+				pr_err("invalid NUMA index: %d\n", cur_node);
 				return -EFAULT;
 			}
 			++idx;
 		}
 	}
 	if (l1_page_nr + l2_page_nr != len) {
-		pr_err("fill L1/L2 huge page num failed, L1 page num = %llu, L2 page num = %llu, total page num = %llu\n",
-		       l1_page_nr, l2_page_nr, len);
+		pr_err("failed to fill page info due to number of pages to fill not equal to that of total pages\n");
 		return -EFAULT;
 	}
 	*l1_page_num = l1_page_nr;
@@ -833,22 +823,17 @@ static int get_hva_info_by_scan_kvm_memslots(struct kvm *kvm, u64 *l1_page_num,
 {
 	u64 l1_page_nr, l2_page_nr, i;
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("kvm or kvm pgtable is null\n");
+		pr_err("invalid kvm passed to scan kvm memslots\n");
 		return -EINVAL;
 	}
 
 	l1_page_nr = 0;
 	l2_page_nr = 0;
-	/* scan per huge page to get hva_info */
 	if (fill_vaddrs_info(kvm, hva_vec, total_huge_page_num, &l1_page_nr,
-			     &l2_page_nr)) {
-		pr_err("fill vaddrs info failed\n");
+			     &l2_page_nr))
 		return -EINVAL;
-	}
 	pr_debug("L1 huge page num=%llu, L2 huge page num=%llu\n", l1_page_nr,
 		 l2_page_nr);
-
-	/* sorted by vaddress and node id */
 	sort(hva_vec, total_huge_page_num, sizeof(struct hva_info), hva_cmp,
 	     NULL);
 	for (i = 0; i < total_huge_page_num; ++i) {
@@ -866,20 +851,18 @@ static int alloc_vaddr_info(struct kvm *kvm, struct hva_info **hva_vec,
 	u64 *vaddrs_tmp = NULL;
 
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("kvm or kvm pgtable is null\n");
+		pr_err("invalid kvm passed to allocate memory to store page info\n");
 		return -EINVAL;
 	}
 
 	hva_vec_tmp = vzalloc(total_huge_page_nr * sizeof(struct hva_info));
 	if (!hva_vec_tmp) {
-		pr_err("hva info vzalloc error, total_huge_page_num=%llu\n",
-		       total_huge_page_nr);
+		pr_err("unable to allocate memory for page info vector\n");
 		return -ENOMEM;
 	}
 	vaddrs_tmp = vzalloc(total_huge_page_nr * sizeof(u64));
 	if (!vaddrs_tmp) {
-		pr_err("vaddrs vzalloc error, total_huge_page_num=%llu\n",
-		       total_huge_page_nr);
+		pr_err("unable to allocate memory for virtual address vector\n");
 		vfree(hva_vec_tmp);
 		return -ENOMEM;
 	}
@@ -888,7 +871,7 @@ static int alloc_vaddr_info(struct kvm *kvm, struct hva_info **hva_vec,
 	return 0;
 }
 
-/* when success, caller should manually release the handles */
+/* Caller must free those pointers after successfully called this function */
 static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 			  struct task_struct **task, struct file **filp,
 			  struct kvm **kvm)
@@ -901,7 +884,7 @@ static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 	pid_tmp = find_get_pid(pid_nr);
 	task_tmp = get_pid_task(pid_tmp, PIDTYPE_PID);
 	if (!task_tmp) {
-		pr_err("get_kvm_by_pid: get task failed, pid: %d\n", pid_nr);
+		pr_err("unable to get task struct of pid: %d\n", pid_nr);
 		put_pid(pid_tmp);
 		return -ESRCH;
 	}
@@ -909,15 +892,14 @@ static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 	if (!filp_tmp) {
 		put_task_struct(task_tmp);
 		put_pid(pid_tmp);
-		pr_err("get_kvm_by_pid: get kvm file failed, pid: %d\n",
-		       pid_nr);
+		pr_err("unable to get kvm file of pid: %d\n", pid_nr);
 		return -EBADF;
 	}
 	kvm_tmp = filp_tmp->private_data;
 	if (!kvm_tmp) {
 		put_task_struct(task_tmp);
 		put_pid(pid_tmp);
-		pr_err("get_kvm_by_pid: get kvm failed, pid: %d\n", pid_nr);
+		pr_err("unable to get kvm of pid: %d\n", pid_nr);
 		return -EINVAL;
 	}
 	*pid = pid_tmp;
@@ -940,24 +922,23 @@ int scan_hva_info(pid_t pid_nr, u64 *l1_page_num, u64 *l2_page_num,
 	struct hva_info *hva_vec;
 	ret = get_kvm_by_pid(pid_nr, &pid, &task, &filp, &kvm);
 	if (ret) {
-		pr_err("scan_hva_info: get kvm failed, pid: %d\n", pid_nr);
+		pr_err("unable to get kvm of pid: %d\n", pid_nr);
 		return ret;
 	}
 
-	/* scan to get total_huge_page_nr */
 	srcu_idx = pre_scan_kvm_memslots(kvm);
 	ret = get_total_huge_page_nr(kvm, &total_huge_page_nr);
 	post_scan_kvm_memslots(kvm, srcu_idx);
 	if (ret) {
-		pr_err("get huge page num failed, pid: %d\n", pid_nr);
+		pr_err("unable to get total hugepage number of pid: %d\n",
+		       pid_nr);
 		goto out_free_task_file;
 	}
 
-	pr_debug("total_huge_page_num=%llu\n", total_huge_page_nr);
-
 	ret = alloc_vaddr_info(kvm, &hva_vec, &vaddrs, total_huge_page_nr);
 	if (ret) {
-		pr_err("alloc vaddr info failed, pid: %d\n", pid_nr);
+		pr_err("unable to allocate memory to store virtual address info of pid: %d\n",
+		       pid_nr);
 		goto out_free_task_file;
 	}
 
@@ -969,7 +950,8 @@ int scan_hva_info(pid_t pid_nr, u64 *l1_page_num, u64 *l2_page_num,
 	post_scan_kvm_memslots(kvm, srcu_idx);
 
 	if (ret) {
-		pr_err("scan_hva_info: get hva info failed, pid: %d\n", pid_nr);
+		pr_err("unable to get frequency info of all pages of pid: %d by scan kvm\n",
+		       pid_nr);
 		vfree(hva_vec);
 		vfree(vaddrs);
 		goto out_free_task_file;
@@ -989,15 +971,12 @@ out_free_task_file:
 static void release_resources(struct file *filp, struct task_struct *task,
 			      struct pid *pid)
 {
-	if (filp) {
+	if (filp)
 		fput(filp);
-	}
-	if (task) {
+	if (task)
 		put_task_struct(task);
-	}
-	if (pid) {
+	if (pid)
 		put_pid(pid);
-	}
 }
 
 static void update_statistic_scan_num(pid_t pid)
@@ -1043,7 +1022,7 @@ static int scan_forward_2M(pid_t pid, int page_size, scan_type type)
 	}
 	srcu_idx = pre_scan_kvm_memslots(kvm);
 	if (scan_kvm_memslots(kvm, pid, page_size, type))
-		pr_err("scan kvm %d failed\n", pid);
+		pr_err("failed to scan kvm mem slots for pid: %d\n", pid);
 
 	post_scan_kvm_memslots(kvm, srcu_idx);
 	release_resources(filp, task, pid_s);
@@ -1091,15 +1070,14 @@ static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 
 	ret = mmap_read_lock_killable(mm);
 	if (ret) {
-		pr_err("small_vma_walk: mmap_read_lock failed, ret: %d\n", ret);
+		pr_err("unable to get mmap read lock, ret: %d\n", ret);
 		return ret;
 	}
 
 	ret = walk_page_range(mm, start_vaddr, end_vaddr, &pte_range_ops,
 			      pte_walk);
 	if (ret) {
-		pr_err("small_vma_walk: walk page range failed, ret: %d\n",
-		       ret);
+		pr_err("failed to walk page range, ret: %d\n", ret);
 		mmap_read_unlock(mm);
 		return ret;
 	}
@@ -1140,21 +1118,20 @@ static int take_vma_snapshot(struct mm_struct *mm,
 
 	ret = mmap_read_lock_killable(mm);
 	if (ret) {
-		pr_err("take_vma_snapshot: mmap_read_lock failed, ret: %d\n",
-		       ret);
+		pr_err("unable to get mmap read lock, ret: %d\n", ret);
 		return ret;
 	}
 	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		count++;
 	}
 	if (!count) {
-		pr_err("take_vma_snapshot: find vma failed.\n");
+		pr_err("unable to get VMA\n");
 		mmap_read_unlock(mm);
 		return -EINVAL;
 	}
 	arr = kzalloc(sizeof(struct smap_vma_struct) * count, GFP_KERNEL);
 	if (!arr) {
-		pr_err("take_vma_snapshot: kzalloc array failed.\n");
+		pr_err("unable to allocate memory for SMAP VMA descriptor\n");
 		mmap_read_unlock(mm);
 		return -ENOMEM;
 	}
@@ -1180,13 +1157,12 @@ static int scan_forward_4k_mm(int pid, int page_size)
 
 	mm = get_mm_by_pid(pid);
 	if (IS_ERR(mm) || !mm || !mmget_not_zero(mm)) {
-		pr_err("scan_forward_4k_mm: bad mm of pid: %d\n", pid);
+		pr_err("bad mm of pid: %d\n", pid);
 		return -EINVAL;
 	}
 	ret = take_vma_snapshot(mm, &vma_array, &vma_count);
 	if (ret) {
-		pr_err("scan_forward_4k_mm: take_vma_snapshot failed, ret: %d\n",
-		       ret);
+		pr_err("failed to take VMA snapshot, ret: %d\n", ret);
 		mmput(mm);
 		return -EINVAL;
 	}
@@ -1196,14 +1172,14 @@ static int scan_forward_4k_mm(int pid, int page_size)
 			ret = small_vma_walk(mm, vma_array[i].start_vaddr,
 					     vma_array[i].end_vaddr, &pte_walk);
 			if (ret) {
-				pr_err("scan_forward_4k_mm: small_vma_walk failed, pid: %d ret: %d\n",
+				pr_err("failed to walk VMA, pid: %d, ret: %d\n",
 				       pid, ret);
 				break;
 			}
 		} else {
 			ret = huge_vma_walk(mm, &vma_array[i], &pte_walk);
 			if (ret) {
-				pr_err("scan_forward_4k_mm: huge_vma_walk fail, pid: %d ret: %d\n",
+				pr_err("failed to walk VMA, pid: %d, ret: %d\n",
 				       pid, ret);
 				break;
 			}

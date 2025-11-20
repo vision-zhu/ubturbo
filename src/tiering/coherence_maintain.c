@@ -37,7 +37,7 @@ struct modify_info {
 
 #define UB_DRAIN_TIMEOUT_US (jiffies_to_usecs(HZ) * UB_DRAIN_TIMEOUT_SECS)
 
-/* flush the entire process address space */
+/* Flush the entire process address space */
 void ham_flush_tlb(struct mm_struct *mm)
 {
 	unsigned long asid;
@@ -95,7 +95,7 @@ int task_pgtable_within_mm_set_cacheable(struct mm_struct *mm,
 	mmap_write_lock(mm);
 	ret = walk_page_range(mm, start, end, &walk_ops, &info);
 	if (ret) {
-		pr_err("Failed to walk a memory map's page tables\n");
+		pr_err("failed to walk a memory map's page table\n");
 	}
 	mmap_write_unlock(mm);
 	ham_flush_tlb(mm);
@@ -125,22 +125,22 @@ int task_pgtable_within_pid_set_cacheable(pid_t pid, unsigned long start,
 	struct mm_struct *mm;
 	int ret = -EINVAL;
 
-	pr_info("Start modify task pgtable, pid = %d, size:0x%lx\n", pid, size);
+	pr_info("start modify task pgtable, pid: %d, size: %#lx\n", pid, size);
 	/* Get process information */
 	task = find_get_task_by_vpid(pid);
 	if (!task) {
-		pr_err("Failed to get task_struct of PID:%d\n", pid);
+		pr_err("failed to get task_struct of pid: %d\n", pid);
 		return ret;
 	}
 	mm = get_task_mm(task);
 	if (!mm) {
-		pr_err("Failed to get mm_struct of PID:%d\n", pid);
+		pr_err("failed to get mm_struct of pid: %d\n", pid);
 		goto exit_with_taskput;
 	}
-	/* maintain task pgtable */
+	/* Maintain task pgtable */
 	ret = task_pgtable_within_mm_set_cacheable(mm, start, size, cacheable);
 	if (ret) {
-		pr_err("Failed to modify task pgtable, pid = %d, size:0x%lx\n",
+		pr_err("failed to modify task pgtable, pid: %d, size: %#lx\n",
 		       pid, size);
 	}
 	mmput(mm);
@@ -204,7 +204,7 @@ int kernel_pgtable_within_mm_set_valid(struct mm_struct *mm,
 	info.hugetlb_ranges = kmalloc_array(
 		max_hugetlb_cnt, sizeof(struct pfn_range), GFP_KERNEL);
 	if (!info.hugetlb_ranges) {
-		pr_err("kmalloc_array failed, len:%lu\n", max_hugetlb_cnt);
+		pr_err("unable to allocate memory for hugetlb array\n");
 		return -ENOMEM;
 	}
 
@@ -227,7 +227,7 @@ int kernel_pgtable_within_mm_set_valid(struct mm_struct *mm,
 		 */
 		ret = set_linear_mapping_invalid(start_pfn, end_pfn, !valid);
 		if (ret) {
-			pr_warn("set_linear_mapping_invalid failed[%zu/%d], ret = %d\n",
+			pr_warn("set_linear_mapping_invalid failed[%zu/%d], ret: %d\n",
 				i, info.hugetlb_cnt, ret);
 		}
 		cond_resched();
@@ -255,22 +255,22 @@ int kernel_pgtable_within_pid_set_valid(pid_t pid, unsigned long start,
 	struct mm_struct *mm;
 	int ret = -EINVAL;
 
-	pr_info("Start modify kernel pgtable, pid = %d\n", pid);
+	pr_info("start modify kernel pgtable, pid: %d\n", pid);
 	/* Get process information */
 	task = find_get_task_by_vpid(pid);
 	if (!task) {
-		pr_err("Failed to get task_struct of PID:%d\n", pid);
+		pr_err("failed to get task_struct of pid: %d\n", pid);
 		return ret;
 	}
 	mm = get_task_mm(task);
 	if (!mm) {
-		pr_err("Failed to get mm_struct of PID:%d\n", pid);
+		pr_err("Failed to get mm_struct of pid: %d\n", pid);
 		goto exit_with_taskput;
 	}
-	/* maintain kernel pgtable */
+	/* Maintain kernel pgtable */
 	ret = kernel_pgtable_within_mm_set_valid(mm, start, size, valid);
 	if (ret) {
-		pr_err("Failed to modify kernel pgtable, pid = %d\n", pid);
+		pr_err("Failed to modify kernel pgtable, pid: %d\n", pid);
 	}
 	mmput(mm);
 
@@ -293,7 +293,7 @@ int flush_cache_by_pa(phys_addr_t addr, size_t size,
 		size_t flush_size;
 		flush_size = remain_size <= MAX_FLUSH_SIZE ? remain_size :
 							     MAX_FLUSH_SIZE;
-		/* retry if there is contention over hardware */
+		/* Retry if there is contention over hardware */
 		while (retry_times) {
 			pr_debug(
 				"call external: hisi_soc_cache_maintain(%#zx, %u)\n",
@@ -308,8 +308,8 @@ int flush_cache_by_pa(phys_addr_t addr, size_t size,
 				break;
 			}
 			pr_info_once(
-				"Racing access of cache flushing hardware "
-				"identified. The performance of UB memory may "
+				"racing access of cache flushing hardware "
+				"identified, the performance of UB memory may "
 				"signficantly degrade.\n");
 			retry_times--;
 			schedule();

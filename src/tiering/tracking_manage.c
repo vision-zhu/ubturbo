@@ -32,7 +32,7 @@
 #define SMAP_WATCH_NAME "smap_migrate_result"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smap_track_manage: " fmt
+#define pr_fmt(fmt) "SMAP_track_manage: " fmt
 
 int node_modes[SMAP_MAX_NUMNODES] = {
 	[0 ... SMAP_MAX_NUMNODES - 1] = INVALID_DATA_MODE,
@@ -40,26 +40,26 @@ int node_modes[SMAP_MAX_NUMNODES] = {
 module_param_array(node_modes, int, NULL, S_IRUGO);
 MODULE_PARM_DESC(
 	node_modes,
-	"smap data mode selection: SKIP = -1, HIST_MODE = 0, CPI_MODE_AND = 1, "
+	"SMAP data mode selection: SKIP = -1, HIST_MODE = 0, CPI_MODE_AND = 1, "
 	"CPI_MODE_SUM = 2, CPI_MODE_OR = 3, ACCESS_MODE_AND = 4, ACCESS_MODE_SUM = 5, ACCESS_MODE_OR = 6,"
 	"MEBS_MODE = 7, MEBS_MODE_4B = 8, MEBS_MODE_6B = 9, PLDA_HDT_MODE = 10, PLDA_HDT_DECAY_MODE = 11, default skip");
 EXPORT_SYMBOL_GPL(node_modes);
 
 unsigned int smap_pgsize = HUGE_PAGE;
 module_param(smap_pgsize, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_pgsize, "smap migration page size: 0 for 4K, 1 for 2M, "
+MODULE_PARM_DESC(smap_pgsize, "SMAP migration page size: 0 for 4K, 1 for 2M, "
 			      "default 2M");
 EXPORT_SYMBOL_GPL(smap_pgsize);
 
 unsigned int smap_mode = VM_MODE;
 module_param(smap_mode, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_mode, "smap migrate mode: 0 for baremetal, 1 for vm, "
-			    "2 for process, default vm");
+MODULE_PARM_DESC(smap_mode, "SMAP migrate mode: 0 for baremetal, 1 for VM, "
+			    "2 for process, default VM");
 EXPORT_SYMBOL_GPL(smap_mode);
 
 unsigned int smap_scene = NORMAL_SCENE;
 module_param(smap_scene, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_scene, "smap use scene: 0 for HCCS, 1 for UB_QEMU");
+MODULE_PARM_DESC(smap_scene, "SMAP usage scenarios: 0 for HCCS, 1 for UB_QEMU");
 
 char *qemu_name = "qemu-kvm";
 module_param(qemu_name, charp, S_IRUGO);
@@ -94,7 +94,7 @@ static int is_qemu_name_valid(void)
 {
 	if (!qemu_name || strlen(qemu_name) == 0 ||
 	    strlen(qemu_name) > QEMU_NAME_LEN) {
-		pr_err("Invalid qemu_name parameter\n");
+		pr_err("invalid qemu name\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -107,7 +107,6 @@ int is_smap_args_valid(void)
 	if (smap_pgsize >= NR_PGSIZE_ARGS) {
 		return -EINVAL;
 	}
-	pr_info("init smap_pgsize %u\n", smap_pgsize);
 	if (smap_mode >= NR_MODE_ARGS) {
 		return -EINVAL;
 	}
@@ -130,7 +129,8 @@ static void migrate_back_work_func(struct work_struct *work)
 
 	ret = iterate_obmm_dev();
 	if (ret) {
-		pr_err("iterate obmm dev in migrate back failed: %d\n", ret);
+		pr_err("failed to iterate obmm_dev in migrate back schedule, ret: %d\n",
+		       ret);
 	}
 
 next:
@@ -182,53 +182,53 @@ static int __init tracking_init(void)
 
 	ret = is_smap_args_valid();
 	if (ret < 0) {
-		pr_err("module args error: %d\n", ret);
+		pr_err("invalid module arguments\n");
 		return ret;
 	}
 	ret = init_acpi_mem();
 	if (ret < 0) {
-		pr_err("init acpi mem error: %d\n", ret);
+		pr_err("failed to init ACPI memory, ret: %d\n", ret);
 		return ret;
 	}
 	(void)refresh_remote_ram();
 	if (smap_scene != UB_QEMU_SCENE_ADVANCED) {
 		if (list_empty(&remote_ram_list)) {
 			ret = -EINVAL;
-			pr_err("remote numa not detected\n");
+			pr_err("remote NUMA is not detected\n");
 			goto out_smap_node_sysfs;
 		}
-		pr_info("remote numa detected\n");
+		pr_info("remote NUMA has been detected\n");
 	}
 	migrate_back_wq = create_workqueue("smap_migrate_back_wq");
 	if (!migrate_back_wq) {
-		pr_err("create migrate back workqueue error\n");
+		pr_err("failed to create migrate back workqueue\n");
 		ret = -EAGAIN;
 		goto out_smap_node_sysfs;
 	}
 	INIT_DELAYED_WORK(&migrate_back_work, migrate_back_work_func);
 	ret = smap_debugfs_migrate_init();
 	if (ret < 0) {
-		pr_err("init debugfs error: %d\n", ret);
+		pr_err("failed to init debugfs, ret: %d\n", ret);
 		goto out_workqueue;
 	}
 	ret = smap_dev_init();
 	if (ret < 0) {
-		pr_err("init smap dev error: %d\n", ret);
+		pr_err("failed to init SMAP device, ret: %d\n", ret);
 		goto out_debugfs;
 	}
 	ret = init_migrate();
 	if (ret < 0) {
-		pr_err("init_migrate error: %d\n", ret);
+		pr_err("failed to init migrate, ret: %d\n", ret);
 		goto out_dev_int;
 	}
 	ret = ham_init();
 	if (ret < 0) {
-		pr_err("init ham error: %d\n", ret);
+		pr_err("failed to init HAM, ret: %d\n", ret);
 		goto out_migrate_int;
 	}
 	queue_delayed_work(migrate_back_wq, &migrate_back_work,
 			   msecs_to_jiffies(MB_INTV));
-	pr_info("smap_work_init success\n");
+	pr_info("SMAP init successfully\n");
 	return 0;
 out_migrate_int:
 	exit_migrate();
@@ -248,7 +248,7 @@ out_smap_node_sysfs:
 static void __exit tracking_exit(void)
 {
 	resource();
-	pr_info("smap_work_exit success!\n");
+	pr_info("SMAP exit successfully\n");
 }
 
 MODULE_AUTHOR("Huawei Tech. Co., Ltd.");

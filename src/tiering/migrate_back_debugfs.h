@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap migrate back debugfs module
+ * Description: SMAP migrate back debugfs module
  */
 
 #ifndef _SRC_TIERING_MIGRATE_BACK_DEBUGFS_H
