@@ -17,7 +17,7 @@
 #include "memory_notifier.h"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smap memory notifier: " fmt
+#define pr_fmt(fmt) "SMAP_memory_notifier: " fmt
 
 #define SMAP_MN_CALLBACK_PRI 100
 
@@ -28,21 +28,21 @@ static int memory_notifier_cb(struct memory_notify *mnb, unsigned long action)
 	struct page *page;
 	unsigned long start_pfn = mnb->start_pfn;
 
-	pr_info("detected pfn range %s\n",
+	pr_info("remote memory %s detected\n",
 		(action == MEM_ONLINE ? "online" : "offline"));
 
 	if (smap_scene == UB_QEMU_SCENE)
 		return 0;
 
-	/* find the node to which the memory block belongs */
+	/* Find the node which the memory block belongs to */
 	if (action == MEM_ONLINE) {
 		if (!pfn_valid(start_pfn)) {
-			pr_err("start_pfn %#lx is invalid\n", start_pfn);
+			pr_err("invalid start pfn has passed to SMAP memory notifier\n");
 			return -EINVAL;
 		}
 		page = pfn_to_online_page(start_pfn);
 		if (!page) {
-			pr_err("find pfn %#lx page failed\n", start_pfn);
+			pr_err("unable to find page according to pfn\n");
 			return -EINVAL;
 		}
 		nid = page_to_nid(page);
@@ -50,20 +50,21 @@ static int memory_notifier_cb(struct memory_notify *mnb, unsigned long action)
 		nid = get_numa_by_pfn(start_pfn);
 	}
 	if (nid == NUMA_NO_NODE) {
-		pr_warn("search node of the pfn %#lx failed\n", start_pfn);
+		pr_warn("unable to find NUMA node according to pfn\n");
 	}
-	pr_info("pfn %#lx belongs to node%d\n", start_pfn, nid);
 
 	ret = refresh_remote_ram();
 	if (ret) {
-		pr_err("update remote ram err: %d\n", ret);
+		pr_err("unable to update remote memory info, ret: %d\n", ret);
 		return ret;
 	}
-	pr_info("update remote ram node%d done\n", nid);
+	pr_info("update remote memory info on remote NUMA node: %d successfully\n",
+		nid);
 
 	ret = tracking_core_reinit_actc_buffer(nid);
 	if (ret)
-		pr_err("reinit node%d buffer ret: %d\n", nid, ret);
+		pr_err("unable to reinit ACTC buffer of NUMA node: %d, ret: %d\n",
+		       nid, ret);
 
 	return ret;
 }
@@ -71,11 +72,7 @@ static int memory_notifier_cb(struct memory_notify *mnb, unsigned long action)
 static int pre_offline_notifier_cb(struct memory_notify *mnb,
 				   unsigned long action)
 {
-	unsigned long start_pfn = mnb->start_pfn;
-	unsigned long end_pfn = mnb->start_pfn + mnb->nr_pages - 1;
-
-	pr_info("detected pfn range %#lx-%#lx going offline\n", start_pfn,
-		end_pfn);
+	pr_info("memory is going offline\n");
 
 	if (smap_scene == UB_QEMU_SCENE)
 		return 0;
@@ -101,7 +98,7 @@ static int smap_memory_notifier(struct notifier_block *self,
 		break;
 	}
 
-	pr_info("handle memory notify ret: %d\n", ret);
+	pr_info("handle memory notify, ret: %d\n", ret);
 	return NOTIFY_OK;
 }
 
@@ -113,13 +110,10 @@ static struct notifier_block smap_nb = {
 int memory_notifier_init(void)
 {
 	int ret = register_memory_notifier(&smap_nb);
-	pr_info("register memory notifier: %d\n", ret);
-
 	return ret;
 }
 
 void memory_notifier_exit(void)
 {
 	unregister_memory_notifier(&smap_nb);
-	pr_info("unregister memory notifier\n");
 }

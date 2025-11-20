@@ -17,7 +17,6 @@ extern int nr_local_numa;
 extern int isolate_lru_page(struct page *page);
 extern ktime_t calc_time_us(ktime_t start_time);
 
-/* 分配2M页面 */
 struct folio *smap_alloc_new_node_page(struct folio *folio, unsigned long node);
 struct folio *smap_alloc_new_node_page_mig_back(struct folio *folio,
 						unsigned long node);

@@ -112,7 +112,7 @@ static int create_scan_workqueue(void)
 	adev->scanq = alloc_workqueue("accessbit_workq", WQ_CPU_INTENSIVE,
 				      WQ_MAX_THREADS);
 	if (!adev->scanq) {
-		pr_err("unable to init scan-workqueue\n");
+		pr_err("unable to init access bit workqueue\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -170,7 +170,8 @@ static u64 calc_access_len_v2(struct access_tracking_dev *adev)
 	} else {
 		page_count = get_node_actc_len(adev->node, page_size);
 	}
-	pr_debug("adev->node %d, page_count %llu\n", adev->node, page_count);
+	pr_debug("access device of node: %d, page amount: %llu\n", adev->node,
+		 page_count);
 
 	return page_count;
 }
@@ -221,7 +222,7 @@ int init_iomem_msg(struct iomem_msg *iomem_msg)
 	iomem_msg->cnt = get_remote_ram_len();
 	if (iomem_msg->cnt != tmp_cnt) {
 		write_unlock(&rem_ram_list_lock);
-		pr_err("iomem_msg->cnt %d != %d\n", iomem_msg->cnt, tmp_cnt);
+		pr_err("remote ram number has been refreshed unexpectedly\n");
 		vfree(tmp_iomem);
 		iomem_msg->cnt = 0;
 		return -EINVAL;
@@ -237,11 +238,11 @@ int init_iomem_msg(struct iomem_msg *iomem_msg)
 	}
 
 	/*
-	 * user space has detected iomem changes and fetched newest iomem,
-	 * therefor we set remote_ram_changed to false here
+	 * User space has detected iomem changes and fetched newest iomem,
+	 * therefore we set remote_ram_changed to false here
 	 */
 	remote_ram_changed = false;
-	pr_info("set ram changed to %d\n", remote_ram_changed);
+	pr_info("remote ram wasn't changed\n");
 	write_unlock(&rem_ram_list_lock);
 	return 0;
 }
@@ -252,7 +253,8 @@ static int access_tracking_mode_set(struct device *ldev, u8 mode)
 
 	if (!(mode == ACCESS_MODE_AND || mode == ACCESS_MODE_SUM ||
 	      mode == ACCESS_MODE_OR)) {
-		pr_err("not support access mode %u\n", mode);
+		pr_err("invalid access mode %u passed to access tracking set tracking mode\n",
+		       mode);
 		return -EPERM;
 	}
 
@@ -290,8 +292,9 @@ static int actc_buffer_reinit(struct access_tracking_dev *adev)
 		init_actc_data(adev);
 		return 0;
 	}
-	pr_debug("node%d page_count changed from %llu to %llu\n", adev->node,
-		 adev->page_count, page_count);
+	pr_debug(
+		 "page amount of tracking device on node %d has been changed from %llu to %llu\n",
+		 adev->node, adev->page_count, page_count);
 	actc_buffer_deinit(adev);
 	if (page_count == 0) {
 		return 0;
@@ -337,11 +340,10 @@ static int access_tracking_set_page_size(struct device *ldev,
 		return ret;
 	}
 	up_write(&adev->buffer_lock);
-	pr_info("set page size: %u\n", page_size_index);
+	pr_info("set tracking page size to %u\n", page_size_index);
 	return 0;
 }
 
-/* this function has no caller for now */
 static int access_tracking_reinit_node(struct device *ldev)
 {
 	int ret;
@@ -364,7 +366,7 @@ static int access_tracking_ram_change(struct device *ldev, void __user *argp)
 	int is_change = (ram_changed()) ? 1 : 0;
 
 	if (copy_to_user(argp, &is_change, sizeof(int))) {
-		pr_err("the device not support is_change copy_to_user\n");
+		pr_err("unable to copy ram changed info to user space\n");
 		return -EFAULT;
 	}
 	return 0;
@@ -374,7 +376,7 @@ static int access_tracking_acpi_len_get(struct device *ldev, void __user *argp)
 {
 	size_t acpi_len = acpi_mem.len;
 	if (copy_to_user(argp, &acpi_len, sizeof(size_t))) {
-		pr_err("the device not support acpi_len copy_to_user\n");
+		pr_err("unable to copy local memory length to user space\n");
 		return -EFAULT;
 	}
 	return 0;
@@ -387,7 +389,7 @@ static int access_tracking_iomem_len_get(struct device *ldev, void __user *argp)
 	iomem_len = get_remote_ram_len();
 	read_unlock(&rem_ram_list_lock);
 	if (copy_to_user(argp, &iomem_len, sizeof(int))) {
-		pr_err("the device not support iomem_len copy_to_user\n");
+		pr_err("unable to copy remote memory length to user space\n");
 		return -EFAULT;
 	}
 	return 0;
@@ -400,12 +402,12 @@ static int access_tracking_acpi_mem_get(struct device *ldev, void __user *argp)
 
 	ret = init_acpi_msg(&msg);
 	if (ret) {
-		pr_err("failed to init acpi msg: %d\n", ret);
+		pr_err("unable to init ACPI segment info, ret: %d\n", ret);
 		return ret;
 	}
 	if (copy_to_user(argp, msg.acpi_seg,
 			 sizeof(struct acpi_seg) * msg.cnt)) {
-		pr_err("the device not support acpi_mem copy_to_user\n");
+		pr_err("unable to copy ACPI segment info to user space\n");
 		return -EFAULT;
 	}
 	vfree(msg.acpi_seg);
@@ -419,7 +421,8 @@ static int access_tracking_iomem_get(struct device *ldev, void __user *argp)
 
 	ret = init_iomem_msg(&msg);
 	if (ret) {
-		pr_err("failed to init iomem msg: %d\n", ret);
+		pr_err("unable to init iomem resources segment info, ret: %d\n",
+		       ret);
 		return ret;
 	}
 
@@ -428,7 +431,7 @@ static int access_tracking_iomem_get(struct device *ldev, void __user *argp)
 
 	if (copy_to_user(argp, msg.iomem_seg,
 			 sizeof(struct iomem_seg) * msg.cnt)) {
-		pr_err("the device not support iomem copy_to_user\n");
+		pr_err("unable to copy iomem resources segment info to user space\n");
 		vfree(msg.iomem_seg);
 		return -EFAULT;
 	}
@@ -464,7 +467,7 @@ int calc_access_len(struct access_tracking_dev *adev)
 static int actc_buffer_init(struct access_tracking_dev *adev)
 {
 	adev->page_count = calc_access_len_v2(adev);
-	pr_info("tracking dev %d page_count %llu\n", adev->node,
+	pr_info("tracking device of node: %d, page amount: %llu\n", adev->node,
 		adev->page_count);
 	if (adev->page_count == 0) {
 		adev->access_bit_actc_data = NULL;
@@ -473,7 +476,7 @@ static int actc_buffer_init(struct access_tracking_dev *adev)
 
 	adev->access_bit_actc_data = vzalloc(adev->page_count * sizeof(actc_t));
 	if (!adev->access_bit_actc_data) {
-		pr_err("adev->access_bit_actc_data vzalloc failed\n");
+		pr_err("unable to allocate memory for access bit ACTC buffer\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -488,7 +491,7 @@ static int access_tracking_add(void)
 	for (devno = 0; devno < SMAP_MAX_NUMNODES; devno++) {
 		adev = kzalloc(sizeof(struct access_tracking_dev), GFP_KERNEL);
 		if (!adev) {
-			pr_err("unable to alloc access_bit%d!\n", devno);
+			pr_err("unable to allocate memory for access tracking device\n");
 			goto put_dev;
 		}
 
@@ -497,7 +500,7 @@ static int access_tracking_add(void)
 
 		ret = actc_buffer_init(adev);
 		if (ret) {
-			pr_err("unable to init actc_buffer%d!\n", devno);
+			pr_err("unable to init ACTC buffer\n");
 			goto adev_free;
 		}
 
@@ -505,20 +508,21 @@ static int access_tracking_add(void)
 		device_initialize(&adev->ldev);
 		ret = dev_set_name(&adev->ldev, "access_bit%d", devno);
 		if (ret) {
-			pr_err("set adev name failed, ret is %d\n", ret);
+			pr_err("unable to set name for access bit device, ret: %d\n",
+			       ret);
 			return ret;
 		}
 
 		ret = device_add(&adev->ldev);
 		if (ret) {
-			pr_err("unable to add access_bit%d!\n", devno);
+			pr_err("unable to add access bit device\n");
 			goto buff_deinit;
 		}
 
 		adev->tracking_dev = tracking_dev_add(
 			&adev->ldev, &access_tracking_ops, adev->node);
 		if (!adev->tracking_dev) {
-			pr_err("unable to add tracking %d!\n", devno);
+			pr_err("unable to add tracking device\n");
 			goto attr_del;
 		}
 		list_add_tail(&adev->list, &access_dev);
@@ -583,7 +587,7 @@ static void work_func(struct work_struct *work)
 	end_time = ktime_get();
 	scan_time = ktime_to_us(ktime_sub(end_time, start_time));
 	if (ret < 0) {
-		pr_err("scan access-flag err, page_count %llu, page_size %d, node %d\n",
+		pr_err("unable to scan access-flag, page amount: %llu, page size: %d, node: %d\n",
 		       adev->page_count, page_size, adev->node);
 	}
 	ap->cur_times++;
@@ -593,7 +597,7 @@ static void work_func(struct work_struct *work)
 		queue_delayed_work(adev->scanq, &ap->scan_work,
 				   msecs_to_jiffies(ap->scan_time));
 	} else {
-		pr_debug("pid[%d] walk pagemap\n", ap->pid);
+		pr_debug("pid[%d] start to walk pagemap\n", ap->pid);
 		if (ap->type != STATISTIC_SCAN) {
 			access_walk_pagemap(ap);
 		}
@@ -606,15 +610,15 @@ static int remote_ram_init(void)
 	int ret;
 	ret = refresh_remote_ram();
 	if (ret) {
-		pr_err("refresh remote iomem failed: %d\n", ret);
+		pr_err("unable to refresh remote ram info, ret: %d\n", ret);
 		return ret;
 	}
 	if (smap_scene != UB_QEMU_SCENE_ADVANCED) {
 		if (list_empty(&remote_ram_list)) {
-			pr_err("remote numa not detected\n");
+			pr_err("remote NUMA node not detected\n");
 			return -EINVAL;
 		}
-		pr_info("remote numa detected\n");
+		pr_info("remote NUMA node detected\n");
 	}
 	return 0;
 }
@@ -625,10 +629,12 @@ static int __init access_tracking_init(void)
 
 	ret = init_acpi_mem();
 	if (ret) {
-		pr_err("init acpi mem failed: %d\n", ret);
+		pr_err("unable to init local memory info by ACPI table, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	spin_lock_init(&ham_lock);
+	spin_lock_init(&statistic_lock);
 	ret = remote_ram_init();
 	if (ret) {
 		goto err_remote_ram;
@@ -637,19 +643,19 @@ static int __init access_tracking_init(void)
 
 	ret = access_ioctl_init();
 	if (ret) {
-		pr_err("access_ioctl_init failed\n");
+		pr_err("unable to init access tracking ioctl operations\n");
 		goto err_ioctl;
 	}
 
 	ret = hist_actc_data_init();
 	if (ret) {
-		pr_err("hist_actc_data_init failed\n");
+		pr_err("unable to init SMAP histogram ACTC data buffer\n");
 		goto err_tracking_add;
 	}
 
 	ret = access_tracking_add();
 	if (ret) {
-		pr_err("access_tracking_add failed\n");
+		pr_err("unable to add access tracking device to tracking bus\n");
 		goto err_tracking_add;
 	}
 
@@ -659,7 +665,7 @@ static int __init access_tracking_init(void)
 
 	access_print_acpi_mem();
 
-	pr_info("access_tracking_init success\n");
+	pr_info("access tracking init successfully\n");
 	return ret;
 
 err_tracking_add:
@@ -688,7 +694,7 @@ static void __exit access_tracking_exit(void)
 	reset_acpi_mem();
 	memory_notifier_exit();
 	hist_actc_data_deinit();
-	pr_info("access_tracking_exit success\n");
+	pr_info("access tracking exit successfully\n");
 }
 
 MODULE_DESCRIPTION("Access driver");

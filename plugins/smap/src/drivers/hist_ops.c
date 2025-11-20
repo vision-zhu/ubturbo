@@ -54,11 +54,11 @@ static bool addr_seg_is_valid(struct segs_info *info)
 	u32 i;
 	u64 start, size;
 	if (!info) {
-		pr_err("input info is null\n");
+		pr_err("null segment info passed to histogram tracking\n");
 		return false;
 	}
 	if (!info->segs) {
-		pr_err("input info->segs is null\n");
+		pr_err("null address segment passed to histogram tracking\n");
 		return false;
 	}
 	for (i = 0; i < info->cnt; i++) {
@@ -66,15 +66,14 @@ static bool addr_seg_is_valid(struct segs_info *info)
 		size = info->segs[i].size;
 		if (!addr_is_aligned(start, HIST_ADDR_SHIFT_32M) ||
 		    !addr_is_aligned(start + size, HIST_ADDR_SHIFT_32M)) {
-			pr_err("input addr seg[%d] start%llu and size %llu is not 32M-aligned\n",
-			       i, start, size);
+			pr_err("segment [%d] start address or size %llu is not in 32M-aligned\n",
+			       i, size);
 			return false;
 		}
 	}
 	return true;
 }
 
-/* 按照start字段升序排序 */
 static int addr_seg_cmp_start(const void *seg1, const void *seg2)
 {
 	struct addr_seg *s1 = (struct addr_seg *)seg1;
@@ -88,7 +87,6 @@ static int addr_seg_cmp_start(const void *seg1, const void *seg2)
 	}
 }
 
-/* 按照max字段降序排序 */
 static int addr_seg_cmp_max(const void *win1, const void *win2)
 {
 	struct addr_seg *w1, *w2;
@@ -161,7 +159,6 @@ static inline bool is_intersect(struct addr_seg *seg1, struct addr_seg *seg2,
 	if (seg_end(seg1) < seg2->start || seg_end(seg2) < seg1->start) {
 		return false;
 	}
-	/* 计算交集的起始地址和结束地址 */
 	*inter_start = (seg1->start > seg2->start) ? seg1->start : seg2->start;
 	*inter_end = (seg_end(seg1) < seg_end(seg2)) ? seg_end(seg1) :
 						       seg_end(seg2);
@@ -177,7 +174,6 @@ static void calc_32m_hot_wins(struct segs_info *info, u16 *buf,
 	for (i = 0; i < info->cnt; i++) {
 		u64 start = info->segs[i].start;
 		while (start < seg_end(&info->segs[i])) {
-			/* 在当前对齐的32MB范围内计算最大值 */
 			u16 max_val = 0, nr = SIZE_32M / SIZE_2M;
 			u32 offset = (start - info->segs[i].start) >>
 				     HIST_ADDR_SHIFT_2M;
@@ -185,10 +181,9 @@ static void calc_32m_hot_wins(struct segs_info *info, u16 *buf,
 			while (nr--) {
 				max_val = max_t(u16, max_val, *buf_ptr++);
 			}
-			/* 越界保护 */
 			if (win_cnt >= win_info->cnt) {
-				pr_err("out-of-bounds when calc wins.[nr_wins:%u]\n",
-				       win_info->cnt);
+				pr_err("exceeded upper bound: %u when looking up window: %u\n",
+				       win_info->cnt, win_cnt);
 				start += SIZE_32M;
 				continue;
 			}
@@ -235,7 +230,7 @@ static int generate_aligned_16gb_wins_info(struct segs_info *win_info,
 		u64 size = merged_segs[i].size;
 		while (size > 0) {
 			if (nr_wins >= total_wins) {
-				pr_err("out-of-bounds when creating segs.[i:%d, total:%d]\n",
+				pr_err("exceeded upper bound: %d when creating segment: %d\n",
 				       nr_wins, total_wins);
 				vfree(merged_segs);
 				vfree(aligned_segs);
@@ -272,10 +267,15 @@ static int generate_aligned_32m_wins_info(struct segs_info *win_info,
 	}
 	win_info->cnt = nr_wins_4k;
 	win_info->segs = wins_4k;
+	/*
+	 * Firstly, we look up each 32MB long tracking window and calculate
+	 * the max access count within its range
+	 */
 	calc_32m_hot_wins(info, buf, win_info);
+	/* Secondly, sort windows */
 	sort(win_info->segs, win_info->cnt, sizeof(struct addr_seg),
 	     addr_seg_cmp_max, NULL);
-	/* 默认取前10%最热窗口 */
+	/* Finally, select the hottest part of the windows, by default 10% */
 	win_info->cnt = max_t(u32, 1, win_info->cnt / HOT_WINDOW_RATIO);
 	return 0;
 }
@@ -292,14 +292,13 @@ static void copy_actc_to_buf(struct segs_info *info, struct addr_seg *seg,
 	for (i = 0; i < info->cnt; i++) {
 		if (is_intersect(&info->segs[i], seg, &inter_start,
 				 &inter_end)) {
-			/* 拷贝actc数据到目标buffer */
 			hist_offset = (inter_start - seg->start) >> shift;
 			seg_offset = (inter_start - info->segs[i].start) >>
 				     shift;
 			inter_pages = (inter_end - inter_start + 1) >> shift;
 			if (seg_pages + seg_offset + inter_pages > buf_len) {
-				pr_err("out-of-bounds when coping to dst_buf.[segp:%llu, offset:%llu, inter:%llu]\n",
-				       seg_pages, seg_offset, inter_pages);
+				pr_err("exceeded upper bound: %u when coping to ACTC buffer\n",
+				       buf_len);
 				continue;
 			}
 			u16 *dst = dst_buf + seg_pages + seg_offset;
@@ -328,27 +327,32 @@ static int smap_hist_middle_read(u64 start, u64 size,
 		 start + size - 1);
 	int ret = smap_hist_middle_reset_roi();
 	if (ret) {
-		pr_err("smap_hist_middle_reset_roi error (%d)\n", ret);
+		pr_err("unable to reset roi by SMAP histogram middleware, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	ret = smap_hist_middle_add_roi(start, size);
 	if (ret) {
-		pr_err("smap hist middle add roi error (%d)\n", ret);
+		pr_err("unable to add roi by SMAP histogram middleware, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	ret = smap_hist_middle_scan_enable();
 	if (ret) {
-		pr_err("smap hist middle scan enable error (%d)\n", ret);
+		pr_err("unable to enable scan by SMAP histogram middleware, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	ret = smap_hist_middle_get_hot_pages(actc_pair, pair_cnt);
 	if (ret) {
-		pr_err("smap_hist_middle_get_hot_pages error (%d)\n", ret);
+		pr_err("unable to get hot pages by SMAP histogram middleware, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	ret = smap_hist_middle_scan_disable();
 	if (ret) {
-		pr_err("smap hist middle scan disable error (%d)\n", ret);
+		pr_err("unable to disable scan by SMAP histogram middleware, ret: %d\n",
+		       ret);
 	}
 	if (g_smap_hist_dev.abort_flag) {
 		pr_debug("hist scan paused\n");
@@ -358,7 +362,6 @@ static int smap_hist_middle_read(u64 start, u64 size,
 	return ret;
 }
 
-/* 滑窗扫描 */
 static int do_hist_scan_sliding(struct segs_info *info, u32 scan_time, u16 *buf,
 				u32 buf_len, u8 sts_size)
 {
@@ -369,22 +372,25 @@ static int do_hist_scan_sliding(struct segs_info *info, u32 scan_time, u16 *buf,
 	actc_pair = kmalloc(sizeof(struct addr_count_pair) * HIST_STS_VALUE_NUM,
 			    GFP_KERNEL);
 	if (!actc_pair) {
-		pr_err("malloc mem failed for addr_count_pair\n");
+		pr_err("unable to allocate memory for ACTC count pair\n");
 		return -ENOMEM;
 	}
 	struct segs_info win_info;
-	/* 1. 生成地址段对齐的段信息 */
+	/*
+	 * First of all, we calculate the least number of windows to
+	 * cover all address segments
+	 */
 	if (sts_size == STS_SIZE_2M) {
 		ret = generate_aligned_16gb_wins_info(&win_info, info);
 	} else {
 		ret = generate_aligned_32m_wins_info(&win_info, info, buf);
 	}
 	if (ret) {
-		pr_err("generate merged segs info failed. ret: %d\n", ret);
+		pr_err("failed to generate scan windows info, ret: %d\n", ret);
 		kfree(actc_pair);
 		return ret;
 	}
-	/* 2. 计算单次硬件扫描的时间scan_time */
+	/* Secondly, calculate scan period of a single window */
 	scan_time = max_t(u32, 1, scan_time / win_info.cnt);
 	struct hist_scan_cfg hist_cfg = {
 		.sort_enable = false,
@@ -396,7 +402,7 @@ static int do_hist_scan_sliding(struct segs_info *info, u32 scan_time, u16 *buf,
 	if (ret) {
 		goto done;
 	}
-	/* 3. 按照段信息执行扫描 */
+	/* Finally, launch scan job for every windows */
 	clear_actc_buf();
 	for (i = 0; i < win_info.cnt; i++) {
 		start = win_info.segs[i].start;
@@ -414,44 +420,50 @@ done:
 	return ret;
 }
 
-/* 核心扫描函数 */
 static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 			     u16 *buf, u32 buf_len, u32 pgsize)
 {
 	int ret;
-	/* 4K模式执行多粒度滑窗，2M模式执行单粒度滑窗 */
+	/*
+	 * For 2M pages, size of a window which consist of 16K pages is as large
+	 * as 32GB, we can finish all windows scan in time and ensure that each
+	 * window has been scanned for a sufficient period of time. But for 4K
+	 * pages, windows to scan is 512 times more than that of 2M pages.
+	 * To deal this problem, we use a strategy named "Multi-Hierarchy scan",
+	 * we do scan of a 32GB sliding window firstly to figure out the hottest
+	 * windows, scan work of a 64MB sliding window will be launched in those
+	 * windows later to get a fine-grained access count of each 4K pages.
+	 */
 	bool do_multi_gran = pgsize == SIZE_4K;
 	if (do_multi_gran) {
 		scan_time_total >>= 1;
 	}
-	/* 检查地址段是否合法，至少是32M对齐的地址段 */
 	if (!addr_seg_is_valid(info)) {
-		pr_err("addr seg is invalid\n");
+		pr_err("invalid address segment passed to sliding scan\n");
 		return -EINVAL;
 	}
 	if (!scan_time_total) {
-		pr_err("zero scan time is invalid\n");
+		pr_err("invalid scan period passed to sliding scan\n");
 		return -EINVAL;
 	}
 	if (!buf) {
-		pr_err("input buf is null\n");
+		pr_err("null buffer passed to sliding scan\n");
 		return -EINVAL;
 	}
-	/* 执行 2M 粒度扫描操作 */
 	ret = do_hist_scan_sliding(info, scan_time_total, buf, buf_len,
 				   STS_SIZE_2M);
 	if (ret) {
-		pr_debug("do hist scan sliding 2m failed. ret: %d\n", ret);
+		pr_debug("sliding scan on 2M pages failed, ret: %d\n", ret);
 		return ret;
 	}
 	if (!do_multi_gran) {
 		return 0;
 	}
-	/* 执行 4K 粒度扫描操作 */
+	/* Rescan for the secondary hierarchy */
 	ret = do_hist_scan_sliding(info, scan_time_total, buf, buf_len,
 				   STS_SIZE_4K);
 	if (ret) {
-		pr_debug("do hist scan sliding 4k failed. ret: %d\n", ret);
+		pr_debug("sliding scan on 4K pages failed, ret: %d\n", ret);
 		return ret;
 	}
 	return 0;
@@ -482,16 +494,14 @@ void fetch_hist_actc_buf(u16 *dst_buf, struct addr_seg *seg)
 	for (i = 0; i < info->cnt; i++) {
 		if (is_intersect(&info->segs[i], seg, &inter_start,
 				 &inter_end)) {
-			/* 拷贝actc数据到目标buffer */
 			offset = (inter_start - info->segs[i].start) >> shift;
 			inter_pages = (inter_end - inter_start + 1) >> shift;
 			if (seg_pages + offset + inter_pages > dev->pgcount) {
-				pr_warn("out-of-bounds %llu > %u\n",
+				pr_warn("exceeds upper bound: %llu, when trying to copy ACTC data of amount: %u to buffer\n",
 					seg_pages + offset + inter_pages,
 					dev->pgcount);
 				return;
 			}
-			/* 没有异常状态时，以读清方式copy访存数据 */
 			if (!dev->status.status_all) {
 				add_to_actc_data(dst_buf,
 						 dev->buf + seg_pages + offset,
@@ -555,7 +565,7 @@ static unsigned int get_cpu_socket_count(void)
 
 	socket_ids = kzalloc(max_cpus * sizeof(int), GFP_KERNEL);
 	if (!socket_ids) {
-		pr_err("failed to allocate memory for socket IDs\n");
+		pr_err("unable to allocate memory for socket IDs\n");
 		return -ENOMEM;
 	}
 	for_each_online_cpu(cpu) {
@@ -609,12 +619,12 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 		dev->info.segs = NULL;
 		dev->pgcount = 0;
 		dev->pgsize = pgsize;
-		pr_info("page count is 0\n");
+		pr_info("no page passed to address segment init\n");
 		return 0;
 	}
 	tmp_addr_segs = vzalloc(nr_segs * sizeof(struct addr_seg));
 	if (!tmp_addr_segs) {
-		pr_err("malloc mem failed for info segs\n");
+		pr_err("unable to allocate memory for address segment info\n");
 		return -ENOMEM;
 	}
 
@@ -622,7 +632,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 	dev->info.cnt = get_remote_ram_segs_locked();
 	if (dev->info.cnt != nr_segs) {
 		read_unlock(&rem_ram_list_lock);
-		pr_err("dev->info.cnt %d != %d\n", dev->info.cnt, nr_segs);
+		pr_err("remote segment info has been refreshed unexpectedly\n");
 		vfree(tmp_addr_segs);
 		return -EINVAL;
 	}
@@ -639,7 +649,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 	sort(dev->info.segs, dev->info.cnt, sizeof(struct addr_seg),
 	     addr_seg_cmp_start, NULL);
 	dev->pgcount = pgcount;
-	pr_info("page count is updated to %u\n", pgcount);
+	pr_info("page count has been updated to %u\n", pgcount);
 	dev->pgsize = pgsize;
 	return 0;
 }
@@ -647,7 +657,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 static void addr_segs_deinit(struct smap_hist_dev *dev)
 {
 	if (dev->info.segs) {
-		pr_info("deleted addr segs.\n");
+		pr_info("address segments have been deleted\n");
 		vfree(dev->info.segs);
 		dev->info.segs = NULL;
 	}
@@ -655,14 +665,13 @@ static void addr_segs_deinit(struct smap_hist_dev *dev)
 
 static int hist_buffer_init(struct smap_hist_dev *dev)
 {
-	int ret;
 	if (!dev->pgcount) {
 		dev->buf = NULL;
 		return 0;
 	}
 	dev->buf = vzalloc(dev->pgcount * sizeof(u16));
 	if (!dev->buf) {
-		pr_err("malloc tmp buf for hist dev failed. ret:%d\n", ret);
+		pr_err("unable to allocate memory for ACTC buffer\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -682,14 +691,15 @@ static int hist_pginfo_reinit(struct smap_hist_dev *dev, u32 pgsize_new)
 	addr_segs_deinit(dev);
 	ret = addr_segs_init(dev, pgsize_new);
 	if (ret) {
-		pr_err("reinit addr segs failed. ret: %d\n", ret);
+		pr_err("unable to reinit address segments, ret: %d\n", ret);
 		return -ENOMEM;
 	}
 	hist_buffer_deinit(dev);
 	ret = hist_buffer_init(dev);
 	if (ret) {
 		addr_segs_deinit(dev);
-		pr_err("reinit hist buffer failed. ret: %d\n", ret);
+		pr_err("unable to reinit histogram ACTC buffer, ret: %d\n",
+		       ret);
 		return -ENOMEM;
 	}
 	return 0;
@@ -703,11 +713,11 @@ static int scan_thread_run(void *data)
 	while (!kthread_should_stop()) {
 		if (dev->status.status_all) {
 			u32 pgsize = dev->status.flag.new_pgsize ?: dev->pgsize;
-			pr_info("hist pginfo reinit. status: %#x\n",
+			pr_info("histogram tracking page info has been reinited, status: %#x\n",
 				dev->status.status_all);
 			ret = hist_pginfo_reinit(dev, pgsize);
 			if (ret) {
-				pr_err("hist pginfo reinit failed. ret: %d\n",
+				pr_err("failed to reinit histogram tracking page info, ret: %d\n",
 				       ret);
 				msleep(THREAD_SLEEP);
 				continue;
@@ -723,15 +733,15 @@ static int scan_thread_run(void *data)
 		ret = hist_scan_sliding(&dev->info, dev->period, dev->buf,
 					dev->pgcount, dev->pgsize);
 		if (ret) {
-			pr_debug("hist scan sliding failed. ret: %d\n", ret);
+			pr_debug("failed to do scan sliding, ret: %d\n", ret);
 			msleep(THREAD_SLEEP);
 			continue;
 		}
 		if (!dev->status.status_all) {
-			pr_debug("hist: flush actc data\n");
+			pr_debug("flush ACTC data\n");
 			flush_actc_data(dev);
 		} else {
-			pr_info("skip hist scan sliding, status: %#x\n",
+			pr_info("skip histogram, status: %#x\n",
 				dev->status.status_all);
 		}
 	}
@@ -742,7 +752,7 @@ static int scan_thread_init(struct smap_hist_dev *dev)
 {
 	dev->kthread = kthread_run(scan_thread_run, NULL, "hist-scan-thread");
 	if (!dev->kthread) {
-		pr_err("create hist scan thread failed.\n");
+		pr_err("failed to create scan threads\n");
 		return -ECHILD;
 	}
 
@@ -752,7 +762,7 @@ static int scan_thread_init(struct smap_hist_dev *dev)
 static void scan_thread_deinit(struct smap_hist_dev *dev)
 {
 	if (dev->kthread) {
-		pr_info("deleted hist scan thread.\n");
+		pr_info("scan thread has been deleted\n");
 		kthread_stop(dev->kthread);
 		dev->kthread = NULL;
 	}
@@ -824,7 +834,7 @@ int hist_init(u32 pgsize, bool is_ub_qemu)
 		goto free_thread;
 	}
 
-	pr_info("Smap hist dev init success\n");
+	pr_info("histogram tracking device init successfully\n");
 	return 0;
 
 free_thread:

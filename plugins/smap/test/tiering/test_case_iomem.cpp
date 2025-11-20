@@ -69,17 +69,6 @@ TEST_F(IomemTest, copy_remote_ram_dt)
     list_add(&ramdata2.node, &test_list);
     copy_remote_ram(&ramdata1.node, &ramdata2.node);
 }
-extern "C" void __print_remote_ram(struct list_head *head);
-TEST_F(IomemTest, __print_remote_ram_dt)
-{
-    ram_segment ramdata1 = {0};
-    ram_segment ramdata2 = {0};
-    list_head test_list;
-    INIT_LIST_HEAD(&test_list);
-    list_add(&ramdata1.node, &test_list);
-    list_add(&ramdata2.node, &test_list);
-    __print_remote_ram(&test_list);
-}
 
 extern "C" bool pfn_valid(unsigned long pfn);
 extern "C" int page_to_nid(const struct page *page);

@@ -70,13 +70,6 @@ TEST_F(AccessIomemTest, move_remote_ram)
     EXPECT_EQ(&seg.node, dst.next);
 }
 
-extern "C" void drivers__print_remote_ram(struct list_head *head);
-TEST_F(AccessIomemTest, __print_remote_ram)
-{
-    LIST_HEAD(src);
-    drivers__print_remote_ram(&src);
-}
-
 extern "C" bool pfn_valid(unsigned long pfn);
 extern "C" struct page *pfn_to_online_page(unsigned long pfn);
 extern "C" int page_to_nid(const struct page *page);
@@ -232,7 +225,6 @@ TEST_F(AccessIomemTest, refresh_remote_ram_normal_scene)
     MOCKER(drivers_walk_system_ram_remote_range).stubs().will(returnValue(0));
     MOCKER(drivers_free_remote_ram).stubs().will(ignoreReturnValue());
     MOCKER(move_remote_ram).stubs().will(ignoreReturnValue());
-    MOCKER(drivers__print_remote_ram).stubs().will(ignoreReturnValue());
     ret = drivers_refresh_remote_ram();
     EXPECT_EQ(0, ret);
     EXPECT_TRUE(drivers_remote_ram_changed);
@@ -252,7 +244,6 @@ TEST_F(AccessIomemTest, refresh_remote_ram_ub_qemu_scene)
     MOCKER(drivers_fixed_remote_ram).stubs().will(returnValue(0));
     MOCKER(drivers_free_remote_ram).stubs().will(ignoreReturnValue());
     MOCKER(move_remote_ram).stubs().will(ignoreReturnValue());
-    MOCKER(drivers__print_remote_ram).stubs().will(ignoreReturnValue());
     ret = drivers_refresh_remote_ram();
     EXPECT_EQ(0, ret);
     EXPECT_TRUE(drivers_remote_ram_changed);

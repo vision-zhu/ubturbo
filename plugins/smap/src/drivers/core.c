@@ -130,11 +130,11 @@ static long handle_mode_set_cmd(struct tracking_node_dev *node_dev,
 				unsigned long arg)
 {
 	if (arg >= MODE_MAX) {
-		pr_err("not support trk mode %lu!\n", arg);
+		pr_err("invalid tracking mode: %lu passed to set\n", arg);
 		return -EINVAL;
 	}
 	if (node_tracking_set_trk_mode(node_dev, (u8)arg)) {
-		pr_err("the device does not support the mode %lu!\n", arg);
+		pr_err("unable to set tracking mode which is not supported\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -144,7 +144,7 @@ static long handle_page_size_set_cmd(struct tracking_node_dev *node_dev,
 				     unsigned long arg)
 {
 	if (node_tracking_set_page_size(node_dev, (u8)arg)) {
-		pr_err("the device not support the page size %lu!\n", arg);
+		pr_err("invalid page size passed to set\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -154,7 +154,7 @@ static long handle_reinit_node_cmd(struct tracking_node_dev *node_dev)
 {
 	int ret = node_tracking_reinit_node(node_dev);
 	if (ret) {
-		pr_err("reinit node failed: %d\n", ret);
+		pr_err("failed to reinit node, ret: %d\n", ret);
 		return ret;
 	}
 	return 0;
@@ -179,7 +179,8 @@ static long handle_ram_change_cmd(struct tracking_node_dev *node_dev,
 {
 	int ret = node_ram_change_cmd(node_dev, argp);
 	if (ret) {
-		pr_err("node ram_change get failed: %d\n", ret);
+		pr_err("failed to synchron remote ram changed info, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	return 0;
@@ -204,7 +205,8 @@ static long handle_acpi_len_cmd(struct tracking_node_dev *node_dev,
 {
 	int ret = node_acpi_len_cmd(node_dev, argp);
 	if (ret) {
-		pr_err("node_acpi_len get failed: %d\n", ret);
+		pr_err("failed to synchron local memory length, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	return 0;
@@ -229,7 +231,8 @@ static long handle_iomem_len_cmd(struct tracking_node_dev *node_dev,
 {
 	int ret = node_iomem_len_cmd(node_dev, argp);
 	if (ret) {
-		pr_err("node_iomem_len get failed: %d\n", ret);
+		pr_err("failed to synchron remote memory length, ret: %d\n",
+		       ret);
 		return ret;
 	}
 	return 0;
@@ -254,7 +257,7 @@ static long handle_acpi_mem_cmd(struct tracking_node_dev *node_dev,
 {
 	int ret = node_acpi_mem_cmd(node_dev, argp);
 	if (ret) {
-		pr_err("node acpi_mem get failed: %d\n", ret);
+		pr_err("failed to synchron local memory info, ret: %d\n", ret);
 		return ret;
 	}
 	return 0;
@@ -279,7 +282,7 @@ static long handle_iomem_cmd(struct tracking_node_dev *node_dev,
 {
 	int ret = node_iomem_cmd(node_dev, argp);
 	if (ret) {
-		pr_err("node iomem get failed: %d\n", ret);
+		pr_err("failed to synchron remote memory info, ret: %d\n", ret);
 		return ret;
 	}
 	return 0;
@@ -311,7 +314,7 @@ static long node_cdev_user_ioctl(struct file *file, unsigned int cmd,
 	case SMAP_IOCTL_IOMEM_ADDR:
 		return handle_iomem_cmd(node_dev, argp);
 	default:
-		pr_err("not support ioctl cmd! %d\n", cmd);
+		pr_err("invalid command type: %d passed to ioctl\n", cmd);
 		return -EINVAL;
 	}
 }
@@ -380,7 +383,8 @@ static int init_tracking_device(struct tracking_node_dev *node_dev, int node_id)
 	node_dev->cdev.owner = THIS_MODULE;
 	result = cdev_device_add(&node_dev->cdev, node_dev->device);
 	if (result) {
-		pr_err("add smap node%d failed\n", node_dev->target_node);
+		pr_err("unable to add SMAP tracking device on NUMA node: %d\n",
+		       node_dev->target_node);
 		return result;
 	}
 
@@ -401,8 +405,7 @@ static int tracking_device_probe(struct tracking_dev *dev)
 	struct tracking_node_dev *node_device;
 	int node_id = dev->target_node;
 
-	if (!test_bit(node_id,
-		      &trk_core_ctrl->node_bitmap)) { /* register cdev */
+	if (!test_bit(node_id, &trk_core_ctrl->node_bitmap)) {
 		struct tracking_node_dev *node_dev =
 			kzalloc(sizeof(*node_dev), GFP_KERNEL);
 		if (!node_dev)

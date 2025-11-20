@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap access mmu module
+ * Description: SMAP access mmu module
  */
 
 #include <linux/hugetlb.h>
@@ -259,7 +259,6 @@ static int add_to_bm(unsigned long vaddr, pagemap_entry_t *pme,
 	u64 pfn;
 	struct page *page;
 	pfn = pme->pme & PM_PFRAME_MASK;
-	/* skip if pfn is 0 or not PM_PRESENT */
 	if (!pfn || !(pme->pme & PM_PRESENT))
 		goto inc_pm_pos;
 	paddr = PFN_PHYS(pfn);
@@ -492,7 +491,7 @@ void walk_pid_pagemap(struct pagemapread *pm)
 		svpfn = evpfn;
 	}
 	pagemap_time = calc_time_us(start_time);
-	pr_debug("pagemap time of pid %d: %lldus\n", pm->mig_info.pid,
+	pr_debug("walk pagemap of pid: %d took %lldus\n", pm->mig_info.pid,
 		 pagemap_time);
 	mmput(mm);
 }

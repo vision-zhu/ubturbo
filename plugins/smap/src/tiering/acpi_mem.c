@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
- * Description: SMAP3.0 acpi memory module
+ * Description: SMAP ACPI memory module
  */
 
 #include <linux/types.h>
@@ -12,7 +12,7 @@
 #include "acpi_mem.h"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smap_acpi: " fmt
+#define pr_fmt(fmt) "SMAP_ACPI: " fmt
 
 int nr_local_numa = 0;
 struct mem_info acpi_mem = { .mem = LIST_HEAD_INIT(acpi_mem.mem) };
@@ -54,11 +54,11 @@ static int acpi_table_build_mem(struct acpi_subtable_header *header)
 	mem->pxm = p->proximity_domain;
 	node = pxm_to_node(mem->pxm);
 	if (node == NUMA_NO_NODE) {
-		pr_err("pxm to node failed, ret is %d\n", node);
+		pr_err("unable to trans PXM id to NUMA node, ret: %d\n", node);
 		return -EINVAL;
 	}
 	mem->node = node;
-	/* add to list and ensure increment order of acpi_mem.mem */
+	/* Add to list and ensure the ascending order of acpi_mem.mem */
 	if (list_empty(&acpi_mem.mem)) {
 		list_add_tail(&mem->segment, &acpi_mem.mem);
 	} else {
@@ -158,7 +158,7 @@ int init_acpi_mem(void)
 	};
 
 	if (acpi_disabled) {
-		pr_warn("acpi disabled\n");
+		pr_warn("ACPI disabled\n");
 		return -ENODEV;
 	}
 
@@ -171,7 +171,7 @@ int init_acpi_mem(void)
 	count = acpi_parse_entries_array(ACPI_SIG_SRAT, table_size,
 					 table_header, &proc, 1, 0);
 	if (count < 0) {
-		pr_err("acpi parse entries array failed, ret is %d\n", count);
+		pr_err("failed to parse ACPI entries, ret: %d\n", count);
 		acpi_put_table(table_header);
 		return -EINVAL;
 	}
@@ -182,8 +182,8 @@ int init_acpi_mem(void)
 		if (mem->node >= ARRAY_SIZE(acpi_mem_cached))
 			return -ERANGE;
 		/*
-		 * if memory belongs to same node was split into multiple
-		 * segment, clear the start and end
+		 * mem->node equals last_node indicates the NUMA's address is
+		 * splitted, in this case, don't use cache
 		 */
 		if (mem->node == last_node) {
 			acpi_mem_cached[mem->node].start = 0;
@@ -194,11 +194,12 @@ int init_acpi_mem(void)
 			acpi_mem_cached[mem->node].end = mem->end;
 			last_node = mem->node;
 		}
-		pr_info("node %d pxm %d [mem %#llx-%#llx]\n", mem->node,
-			mem->pxm, mem->start, mem->end);
+		pr_info("node: %d PXM: %d [%#llx-%#llx]\n", mem->node, mem->pxm,
+			mem->start, mem->end);
 		if (mem->node >= nr_local_numa) {
 			nr_local_numa = mem->node + 1;
-			pr_info("nr_local_numa is %u\n", nr_local_numa);
+			pr_info("number of local NUMA node: %u\n",
+				nr_local_numa);
 		}
 	}
 	calc_node_distance();

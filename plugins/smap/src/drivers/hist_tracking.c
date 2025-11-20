@@ -43,7 +43,7 @@
 
 unsigned int smap_scene = NORMAL_SCENE;
 module_param(smap_scene, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_scene, "smap use scene: 0 for HCCS, 1 for UB_QEMU");
+MODULE_PARM_DESC(smap_scene, "SMAP usage scenarios: 0 for HCCS, 1 for UB_QEMU");
 
 static struct list_head g_hist_tracking_dev;
 
@@ -98,7 +98,8 @@ static u64 calc_access_len(struct hist_tracking_dev *hdev)
 	} else {
 		page_count = get_node_actc_len(hdev->node, page_size);
 	}
-	pr_debug("hdev->node %d, page_count %llu\n", hdev->node, page_count);
+	pr_debug("histogram tracking node: %d, got page count: %llu\n",
+		 hdev->node, page_count);
 
 	return page_count;
 }
@@ -114,7 +115,7 @@ static int actc_buffer_reinit(struct hist_tracking_dev *hdev)
 	u64 page_count;
 	page_count = calc_access_len(hdev);
 	if (!page_count) {
-		pr_info("page count is zero for node %d\n", hdev->node);
+		pr_info("no page found on node: %d\n", hdev->node);
 	}
 	if (hdev->page_count == page_count) {
 		reset_actc_data(hdev);
@@ -152,7 +153,7 @@ static int hist_tracking_set_page_size(struct device *ldev, u8 pgsize)
 	hdev = to_hist_tracking_dev(ldev);
 
 	if (pgsize != PAGE_MODE_4K && pgsize != PAGE_MODE_2M) {
-		pr_err("Invalid page size: %d\n", pgsize);
+		pr_err("invalid page size\n");
 		return -EINVAL;
 	}
 	mutex_lock(&hdev->mutex);
@@ -166,7 +167,6 @@ static int hist_tracking_set_page_size(struct device *ldev, u8 pgsize)
 		return ret;
 	}
 	mutex_unlock(&hdev->mutex);
-	pr_info("set page size: %u\n", pgsize);
 	return ret;
 }
 
@@ -174,11 +174,11 @@ static int hist_tracking_read(struct device *ldev, void *buffer, u32 length)
 {
 	struct hist_tracking_dev *hdev;
 	if (unlikely(!buffer)) {
-		pr_err("buffer pointer is NULL.\n");
+		pr_err("null buffer passed to histogram tracking read\n");
 		return -EINVAL;
 	}
 	if (unlikely(length == 0)) {
-		pr_err("buffer length is zero.\n");
+		pr_err("buffer of length zero passed to histogram tracking read\n");
 		return -EINVAL;
 	}
 
@@ -209,13 +209,13 @@ static struct tracking_operations g_hist_tracking_ops = {
 static int actc_buffer_init(struct hist_tracking_dev *hdev)
 {
 	hdev->page_count = calc_access_len(hdev);
-	pr_info("page_count %llu for node%d\n", hdev->page_count, hdev->node);
-	if (!hdev->page_count) {
+	pr_info("page count: %llu for node: %d\n", hdev->page_count,
+		hdev->node);
+	if (!hdev->page_count)
 		return 0;
-	}
 	hdev->hist_actc_data = vzalloc(hdev->page_count * sizeof(u16));
 	if (!hdev->hist_actc_data) {
-		pr_err("hist dev hist_actc_data vzalloc failed\n");
+		pr_err("unable to alloc mem for histogram tracking ACTC buffer\n");
 		hdev->page_count = 0;
 		return -ENOMEM;
 	}
@@ -239,8 +239,8 @@ static void scan_hist(struct hist_tracking_dev *hdev)
 				   HIST_ADDR_SHIFT_2M :
 				   HIST_ADDR_SHIFT_4K);
 		if (pgcount + addr_pg > hdev->page_count) {
-			pr_warn("out-of-bounds %u > %llu\n", pgcount + addr_pg,
-				hdev->page_count);
+			pr_warn("page index: %u exceeds upper bound of page count: %llu\n",
+				pgcount + addr_pg, hdev->page_count);
 			break;
 		}
 		fetch_hist_actc_buf(hdev->hist_actc_data + pgcount, &addr_seg);
@@ -284,7 +284,7 @@ static int hist_tracking_init(void)
 	     ++node) {
 		hdev = kzalloc(sizeof(struct hist_tracking_dev), GFP_KERNEL);
 		if (!hdev) {
-			pr_err("unable to alloc mem for hist tracking dev!\n");
+			pr_err("unable to alloc mem for histogram tracking device\n");
 			goto put_dev;
 		}
 
@@ -293,7 +293,7 @@ static int hist_tracking_init(void)
 
 		ret = actc_buffer_init(hdev);
 		if (ret) {
-			pr_err("unable to init actc_buffer. ret:%d!\n", ret);
+			pr_err("unable to init ACTC buffer, ret: %d\n", ret);
 			goto free_hdev;
 		}
 
@@ -301,20 +301,21 @@ static int hist_tracking_init(void)
 		device_initialize(&hdev->ldev);
 		ret = dev_set_name(&hdev->ldev, "hist_tracking_dev%d", node);
 		if (ret) {
-			pr_err("set hdev name failed, ret is %d\n", ret);
+			pr_err("unable to set histogram tracking device name, ret: %d\n",
+			       ret);
 			return ret;
 		}
 
 		ret = device_add(&hdev->ldev);
 		if (ret) {
-			pr_err("unable to add hist_tracking_dev!\n");
+			pr_err("unable to add histogram tracking device\n");
 			goto deinit_buf;
 		}
 
 		hdev->tracking_dev = tracking_dev_add(
 			&hdev->ldev, &g_hist_tracking_ops, hdev->node);
 		if (!hdev->tracking_dev) {
-			pr_err("unable to add tracking for node %d!\n",
+			pr_err("unable to add tracking for node: %d\n",
 			       hdev->node);
 			goto del_dev;
 		}
@@ -341,18 +342,18 @@ static int __init hist_module_init(void)
 	int ret;
 	ret = init_acpi_mem();
 	if (ret) {
-		pr_err("init acpi mem failed: %d\n", ret);
+		pr_err("parse ACPI table failed: %d\n", ret);
 		return ret;
 	}
 	ret = hist_init(SIZE_2M, smap_scene != NORMAL_SCENE);
 	if (ret) {
-		pr_err("init smap hist dev failed! ret(%d)\n", ret);
+		pr_err("init SMAP histogram device failed, ret: %d\n", ret);
 		goto err_hist_init;
 	}
 
 	ret = hist_tracking_init();
 	if (ret) {
-		pr_err("init hist tracking dev failed! ret(%d)\n", ret);
+		pr_err("init histogram tracking device failed, ret: %d\n", ret);
 		goto err_tracking_add;
 	}
 	hist_set_flush_actc_cb(update_hist_actc_batch);

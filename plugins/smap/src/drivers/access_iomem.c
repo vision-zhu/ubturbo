@@ -27,7 +27,7 @@ EXPORT_SYMBOL(remote_ram_list);
 
 DEFINE_RWLOCK(rem_ram_list_lock);
 EXPORT_SYMBOL(rem_ram_list_lock);
-bool remote_ram_changed; /* protected by rem_ram_list_lock */
+bool remote_ram_changed; /* Protected by rem_ram_list_lock */
 
 int get_remote_ram_len(void)
 {
@@ -53,19 +53,6 @@ static void move_remote_ram(struct list_head *dst, struct list_head *src)
 	struct ram_segment *seg, *tmp;
 	list_for_each_entry_safe(seg, tmp, src, node) {
 		list_move_tail(&seg->node, dst);
-	}
-}
-
-static void __print_remote_ram(struct list_head *head)
-{
-	struct ram_segment *seg, *tmp;
-	if (list_empty(head)) {
-		pr_info("remote ram is empty\n");
-		return;
-	}
-	list_for_each_entry_safe(seg, tmp, head, node) {
-		pr_info("[%d] %#llx-%#llx\n", seg->numa_node, seg->start,
-			seg->end);
 	}
 }
 
@@ -191,9 +178,8 @@ int refresh_remote_ram(void)
 	free_remote_ram(&remote_ram_list);
 	move_remote_ram(&remote_ram_list, &tmp_head);
 	free_remote_ram(&tmp_head);
-	__print_remote_ram(&remote_ram_list);
 	remote_ram_changed = true;
-	pr_info("set ram changed to %d\n", remote_ram_changed);
+	pr_info("remote ram was changed\n");
 	write_unlock(&rem_ram_list_lock);
 	return 0;
 }
@@ -294,13 +280,12 @@ int calc_acidx_paddr_iomem(int nid, u64 acidx, u64 *paddr, int page_size)
 	return -ERANGE;
 }
 
-/* check if [pa_start, pa_end] belongs to numa */
 int smap_is_remote_addr_valid(int nid, u64 pa_start, u64 pa_end)
 {
 	struct ram_segment *seg = NULL;
 
 	if (pa_start >= pa_end) {
-		pr_err("pa_start(%#llx) >= pa_end(%#llx)\n", pa_start, pa_end);
+		pr_err("start physical address is greater than end physical address\n");
 		return -EINVAL;
 	}
 

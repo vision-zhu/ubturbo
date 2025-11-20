@@ -80,7 +80,7 @@ int inner_tracking_driver_register(struct tracking_driver *tracking_drv,
 	drv->mod_name = mod_name;
 	drv->bus = &tracking_bus_type;
 
-	/* there can only be one default driver */
+	/* Only one default driver is allowed to exist */
 	mutex_lock(&tracking_bus_lock);
 	match_always_count += tracking_drv->match_always;
 	if (match_always_count > 1) {
@@ -145,7 +145,7 @@ struct tracking_dev *tracking_dev_add(struct device *ldev,
 
 	ret = device_add(dev);
 	if (ret) {
-		pr_err("tracking device add failed!\n");
+		pr_err("unable to add tracking device\n");
 		goto ida_remove;
 	}
 
@@ -153,16 +153,17 @@ struct tracking_dev *tracking_dev_add(struct device *ldev,
 		ret = sysfs_create_link(&dev->kobj, &ldev->kobj,
 					"low_level_dev");
 	} else {
-		pr_err("ldev is null\n");
+		pr_err("null device passed to add tracking device\n");
 		goto trk_dev_del;
 	}
 
 	if (ret) {
-		pr_err("sysfs_create_link failed!\n");
+		pr_err("unable to create symbol link for tracking device\n");
 		goto trk_dev_del;
 	}
 
-	pr_info("tracking dev add success, node = %d\n", target_node);
+	pr_info("tracking device of node: %d has been added successfully\n",
+		target_node);
 	return trk_dev;
 
 trk_dev_del:
@@ -192,7 +193,7 @@ int tracking_bus_init(void)
 
 	ret = bus_register(&tracking_bus_type);
 	if (ret) {
-		pr_err("tracking bus registration failed: %d\n", ret);
+		pr_err("unable to register tracking bus, ret: %d\n", ret);
 	}
 	return ret;
 }

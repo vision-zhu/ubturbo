@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2024. All rights reserved.
- * Description: SMAP Tiering Memory Solution: 内核符号封装
+ * Description: SMAP Tiering Memory Solution: wrapper header
  */
 
 #ifndef _SMAP_MIGRATE_WRAPPER_H_
