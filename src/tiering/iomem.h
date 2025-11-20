@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2024. All rights reserved.
- * Description: smap5.0 remote iomem module
+ * Description: SMAP remote iomem module
  */
 
 #ifndef _SRC_TIERING_IOMEM_H

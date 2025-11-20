@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2024. All rights reserved.
- * Description: SMAP Debugfs接口文件
+ * Description: SMAP debugfs header
  */
 
 #ifndef SMAP_DEBUGFS_H

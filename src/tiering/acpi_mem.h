@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
- * Description: SMAP3.0 acpi mem header
+ * Description: SMAP ACPI mem header
  */
 
 #ifndef _ACPI_MEM_H

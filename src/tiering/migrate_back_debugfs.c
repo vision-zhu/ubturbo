@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap migrate back debugfs module
+ * Description: SMAP migrate back debugfs module
  */
 
 #define DEBUGFS_RO_MODE 0444
@@ -48,11 +48,8 @@ void create_migrate_back_debugfs(struct migrate_back_task *task)
 
 	int rc = scnprintf(file_name, NAME_MAX_LEN, "%s_%llu", PREFIX,
 			   task->task_id);
-	if (!rc) {
-		pr_err("create debugfs write file name: %s_%llu failed\n",
-		       PREFIX, task->task_id);
+	if (!rc)
 		return;
-	}
 	dentry = debugfs_lookup(file_name, dbg_root);
 	if (dentry) {
 		debugfs_remove(dentry);
@@ -68,11 +65,8 @@ void remove_migrate_back_debugfs(struct migrate_back_task *task)
 
 	int rc = scnprintf(file_name, NAME_MAX_LEN, "%s_%llu", PREFIX,
 			   task->task_id);
-	if (!rc) {
-		pr_err("remove debugfs write file name: %s_%llu failed\n",
-		       PREFIX, task->task_id);
+	if (!rc)
 		return;
-	}
 	dentry = debugfs_lookup(file_name, dbg_root);
 	if (dentry) {
 		debugfs_remove(dentry);
