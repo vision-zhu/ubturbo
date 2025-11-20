@@ -22,7 +22,7 @@
 #include "mig_init.h"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smu_mig: " fmt
+#define pr_fmt(fmt) "SMAP_mig: " fmt
 
 #define CMP_LT (-1)
 #define CMP_EQ 0
@@ -65,7 +65,6 @@ static int create_migrate_list(struct migrate_msg *msg, struct mig_list **mlist)
 		return -EINVAL;
 	}
 
-	/* Make sure field addr of struct mig_list is NULL */
 	*mlist = vzalloc(mlist_sz);
 	if (*mlist == NULL) {
 		return -ENOMEM;
@@ -104,7 +103,7 @@ static int init_migrate_list_addr(int len, struct mig_list *mlist)
 			goto out;
 		}
 
-		/* Until now, mlist[i].addr contains user space pointer */
+		/* Currently, mlist[i].addr contains user space pointer */
 		if (copy_from_user(addr, ml->addr, ml->nr * sizeof(u64))) {
 			ret = -EFAULT;
 			vfree(addr);
@@ -137,9 +136,6 @@ static int cmp_mlist_addr_ascend(const void *a, const void *b)
 	return tmp_a < tmp_b ? CMP_LT : CMP_GT;
 }
 
-/*
- * convert_migrate_list - convert page position to physical address
- */
 static int convert_migrate_list(int len, struct mig_list *mlist)
 {
 	int i, ret;
@@ -158,7 +154,7 @@ static int convert_migrate_list(int len, struct mig_list *mlist)
 		ret = convert_pos_to_paddr_sorted(ml->pid, ml->from, ml->nr,
 						  ml->addr);
 		if (ret) {
-			pr_err("convert pid %d migrate list from %d to %d failed: %d\n",
+			pr_err("failed to convert pid %d migrate list from %d to %d, ret: %d\n",
 			       ml->pid, ml->from, ml->to, ret);
 			return ret;
 		}
@@ -171,24 +167,24 @@ static int build_migrate_list(struct migrate_msg *msg, struct mig_list **mlist)
 	int ret;
 
 	if (!msg) {
-		pr_err("build_migrate_list msg is NULL\n");
+		pr_err("null message passed to build migrate list\n");
 		return -EINVAL;
 	}
 
 	ret = create_migrate_list(msg, mlist);
 	if (ret) {
-		pr_err("build_migrate_list create failed: %d\n", ret);
+		pr_err("failed to create migrate list, ret: %d\n", ret);
 		return ret;
 	}
 	ret = init_migrate_list_addr(msg->cnt, *mlist);
 	if (ret) {
-		pr_err("build_migrate_list init failed: %d\n", ret);
+		pr_err("failed to init migrate list address, ret: %d\n", ret);
 		free_migrate_list(mlist);
 		return ret;
 	}
 	ret = convert_migrate_list(msg->cnt, *mlist);
 	if (ret) {
-		pr_err("build_migrate_list convert failed: %d\n", ret);
+		pr_err("failed to convert migrate list, ret: %d\n", ret);
 		free_migrate_list_addr(msg->cnt, *mlist);
 		free_migrate_list(mlist);
 	}
@@ -202,18 +198,19 @@ static bool is_migrate_msg_valid(struct migrate_msg *msg)
 	int page_size = smap_pgsize == HUGE_PAGE ? TWO_MEGA_SIZE : PAGE_SIZE;
 
 	if (msg->cnt <= 0 || msg->cnt > max_cnt) {
-		pr_err("migrate msg invalid cnt: %d\n", msg->cnt);
+		pr_err("invalid migrate message cnt: %d passed to check\n",
+		       msg->cnt);
 		return false;
 	}
 	if (msg->mul_mig.page_size != page_size) {
-		pr_err("migrate msg page size invalid page_size: %d\n",
+		pr_err("invalid page size: %d passed to check\n",
 		       msg->mul_mig.page_size);
 		return false;
 	}
 	if (msg->mul_mig.is_mul_thread &&
 	    (msg->mul_mig.nr_thread <= 1 ||
 	     msg->mul_mig.nr_thread > MAX_NR_MIGRATE_THREADS)) {
-		pr_err("migrate msg invalid nr_thread: %d\n",
+		pr_err("invalid threads number: %d passed to check\n",
 		       msg->mul_mig.nr_thread);
 		return false;
 	}
@@ -238,10 +235,10 @@ static int __ioctl_migrate(void __user *argp)
 	ret = do_migrate(&msg, mig_list);
 	filter_4k_migrate_info();
 	if (copy_to_user(argp, &msg, sizeof(msg)))
-		pr_err("mig msg copy to user error\n");
+		pr_err("unable to copy migrate message to user space\n");
 	if (copy_to_user(msg.mig_list, mig_list,
 			 msg.cnt * sizeof(struct mig_list)))
-		pr_err("mig list copy to user error\n");
+		pr_err("unable to copy migrate list to user space\n");
 
 	free_migrate_list_addr(msg.cnt, mig_list);
 	free_migrate_list(&mig_list);
@@ -256,17 +253,18 @@ static int __ioctl_migrate_numa(void __user *argp)
 
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
-	pr_info("__ioctl_migrate_numa: src %d dest %d count %d\n", msg.src_nid,
-		msg.dest_nid, msg.count);
+	pr_info("received migrate NUMA message: source node id: %d, "
+		"destination node id: %d, page count: %d\n",
+		msg.src_nid, msg.dest_nid, msg.count);
 	if (msg.count <= 0 || msg.count > MAX_NR_MIGNUMA)
 		return -EINVAL;
 	if (!is_numa_remote(msg.src_nid)) {
-		pr_err("__ioctl_migrate_numa: src_nid %d invalid\n",
+		pr_err("invalid source node id: %d passed to migrate NUMA\n",
 		       msg.src_nid);
 		return -EINVAL;
 	}
 	if (!is_numa_remote(msg.dest_nid)) {
-		pr_err("__ioctl_migrate_numa: dest_nid %d invalid\n",
+		pr_err("invalid destination node id: %d passed to migrate NUMA\n",
 		       msg.dest_nid);
 		return -EINVAL;
 	}
@@ -278,18 +276,17 @@ static int __ioctl_migrate_numa(void __user *argp)
 	for (i = 0; i < msg.count; i++) {
 		struct pa_range *r = &(i_msg.range[i]);
 
-		/* Assign values to i_p->pa_start and i_p->pa_end */
 		ret = find_range_by_memid(msg.memids[i], &r->pa_start,
 					  &r->pa_end);
 		if (ret) {
-			pr_err("__ioctl_migrate_numa cannot find memid %llu range: %d\n",
+			pr_err("unable to find memory range of memid %llu, ret: %d\n",
 			       msg.memids[i], ret);
 			return ret;
 		}
 
 		if (smap_is_remote_addr_valid(msg.src_nid, r->pa_start,
 					      r->pa_end)) {
-			pr_err("__ioctl_migrate_numa range mismatch with node%d\n",
+			pr_err("memory range mismatch with node: %d\n",
 			       msg.src_nid);
 			return -EINVAL;
 		}
@@ -303,26 +300,25 @@ static int __ioctl_migrate_numa(void __user *argp)
 static int check_mig_msg(struct migrate_pid_remote_numa_msg *msg)
 {
 	if (!is_numa_remote(msg->src_nid)) {
-		pr_err("__ioctl_migrate_pid_remote_numa: src_nid %d invalid\n",
+		pr_err("invalid source node id: %d passed to check params\n",
 		       msg->src_nid);
 		return -EINVAL;
 	}
 	if (!is_numa_remote(msg->dest_nid)) {
-		pr_err("__ioctl_migrate_pid_remote_numa: dest_nid %d invalid\n",
+		pr_err("invalid destination node id: %d passed to check params\n",
 		       msg->dest_nid);
 		return -EINVAL;
 	}
 	if (msg->dest_nid == msg->src_nid) {
-		pr_err("__ioctl_migrate_pid_remote_numa: dest_nid == src_nid\n");
+		pr_err("source and destination node id should not be the same\n");
 		return -EINVAL;
 	}
 	if (msg->pid_cnt <= 0 || msg->pid_cnt > get_max_pid_cnt()) {
-		pr_err("__ioctl_migrate_pid_remote_numa: pid_cnt:%d is invalid\n",
-		       msg->pid_cnt);
+		pr_err("invalid pid count passed to check params\n");
 		return -EINVAL;
 	}
 	if (!msg->pid_list || !msg->mig_res_array) {
-		pr_err("__ioctl_migrate_pid_remote_numa: pid_list or mig_res_array is NULL\n");
+		pr_err("null pid list or null migrate result array passed to check params\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -352,13 +348,12 @@ static void walkpage_and_migrate(struct migrate_pid_remote_numa_msg *msg,
 			pm.mig_info.folios = vzalloc(sizeof(struct folio *) *
 						     pm.mig_info.folios_len);
 			if (!pm.mig_info.folios) {
-				pr_err("walkpage_and_migrate pid:%d folios malloc failed\n",
-				       pid_array[i]);
+				pr_err("unable to allocate memory for folio list to walk page range\n");
 				continue;
 			}
 
 			walk_pid_pagemap(&pm);
-			pr_info("pid:%d migrate page count %d, from %d to %d\n",
+			pr_info("pid:%d migrate page count: %d, from: %d to: %d\n",
 				pid_array[i], pm.mig_info.mig_cnt, msg->src_nid,
 				msg->dest_nid);
 			failed_cnt = smap_migrate(pm.mig_info.folios,
@@ -374,10 +369,7 @@ static void walkpage_and_migrate(struct migrate_pid_remote_numa_msg *msg,
 		if (successful_cnt == msg->pid_cnt) {
 			return;
 		}
-		pr_info("migrate pids remote numa again, %d times left\n",
-			retry);
 	} while (retry--);
-
 	pr_err("migrate pids remote numa failed after %d try\n",
 	       MAX_MIGRATE_PID_NUMA_RETRY_TIME);
 }
@@ -387,19 +379,19 @@ static int copy_to_user_mig_res(struct migrate_pid_remote_numa_msg *msg,
 				int *mig_res)
 {
 	if (copy_to_user(argp, msg, sizeof(*msg))) {
-		pr_err("mig msg copy to user error\n");
+		pr_err("failed to copy migrate message to user space\n");
 		return -EFAULT;
 	}
 
 	if (copy_to_user(msg->pid_list, pid_array,
 			 sizeof(pid_t) * msg->pid_cnt)) {
-		pr_err("pid_list copy to user error\n");
+		pr_err("failed to copy pid list to user space\n");
 		return -EFAULT;
 	}
 
 	if (copy_to_user(msg->mig_res_array, mig_res,
 			 sizeof(int) * msg->pid_cnt)) {
-		pr_err("mig_res_array copy to user error\n");
+		pr_err("failed to copy migrate result array to user space\n");
 		return -EFAULT;
 	}
 
@@ -412,31 +404,30 @@ static int __ioctl_migrate_pid_remote_numa(void __user *argp)
 	int *mig_res = NULL;
 	struct migrate_pid_remote_numa_msg msg;
 	pid_t *pid_array = NULL;
-	pr_info("recieve __ioctl_migrate_pid_remote_numa\n");
 	if (copy_from_user(&msg, argp, sizeof(msg))) {
-		pr_err("__ioctl_migrate_pid_remote_numa: copy msg from user failed\n");
+		pr_err("failed to copy migrate pid remote NUMA message from user space\n");
 		return -EFAULT;
 	}
 	if (check_mig_msg(&msg)) {
-		pr_err("__ioctl_migrate_pid_remote_numa: check msg validity failed\n");
+		pr_err("invalid params passed to migrate pid remote NUMA\n");
 		return -EINVAL;
 	}
 
 	pid_array = kzalloc(sizeof(pid_t) * msg.pid_cnt, GFP_KERNEL);
 	if (!pid_array) {
-		pr_err("__ioctl_migrate_pid_remote_numa: pid_array malloc failed\n");
+		pr_err("unable to allocate memory for pid array\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(pid_array, msg.pid_list,
 			   sizeof(pid_t) * msg.pid_cnt)) {
-		pr_err("__ioctl_migrate_pid_remote_numa: copy pid_list from user failed\n");
+		pr_err("failed to copy pid array from user space\n");
 		kfree(pid_array);
 		return -EFAULT;
 	}
 
 	mig_res = kzalloc(msg.pid_cnt * sizeof(int), GFP_KERNEL);
 	if (!mig_res) {
-		pr_err("__ioctl_migrate_pid_remote_numa: cannot allocate memory for mig_res\n");
+		pr_err("unable to allocate memory for migrate result\n");
 		kfree(pid_array);
 		return -ENOMEM;
 	}
@@ -444,10 +435,8 @@ static int __ioctl_migrate_pid_remote_numa(void __user *argp)
 	walkpage_and_migrate(&msg, pid_array, mig_res);
 
 	ret = copy_to_user_mig_res(&msg, argp, pid_array, mig_res);
-	if (ret) {
-		pr_err("__ioctl_migrate_pid_remote_numa: copy to user failed, ret %d\n",
-		       ret);
-	}
+	if (ret)
+		pr_err("failed to copy migrate result to user space\n");
 
 	kfree(mig_res);
 	kfree(pid_array);
@@ -522,25 +511,25 @@ int init_mig_dev(void)
 	int rc = alloc_chrdev_region(&mig_dev, BASE_MINOR, NR_MINOR,
 				     SMAP_MIG_DEV);
 	if (rc < 0) {
-		pr_err("Cannot allocate mig major number\n");
+		pr_err("unable to allocate migrate device major number\n");
 		return rc;
 	}
 	cdev_init(&smu_mig_cdev, &smu_mig_fops);
 	rc = cdev_add(&smu_mig_cdev, mig_dev, 1);
 	if (rc) {
-		pr_err("Cannot add the mig device to the system\n");
+		pr_err("unable to add migrate device\n");
 		goto err_cdev;
 	}
 	mig_dev_class = class_create(SMAP_MIG_CLASS);
 	if (IS_ERR(mig_dev_class)) {
-		pr_err("Cannot create the struct mig class\n");
+		pr_err("unable to create SMAP migrate class\n");
 		rc = PTR_ERR(mig_dev_class);
 		goto err_class;
 	}
 	smu_mig_device = device_create(mig_dev_class, NULL, mig_dev, NULL,
 				       SMAP_MIG_DEVICE);
 	if (IS_ERR(smu_mig_device)) {
-		pr_err("Cannot create the mig Device\n");
+		pr_err("unable to create migrate device\n");
 		rc = PTR_ERR(smu_mig_device);
 		goto err_device;
 	}
@@ -568,15 +557,15 @@ int init_migrate(void)
 	int ret;
 	ret = init_mig_dev();
 	if (ret) {
-		pr_err("init_mig_dev failed!, ret = %d\n", ret);
+		pr_err("failed to init migrate device, ret: %d\n", ret);
 		return ret;
 	}
-	pr_info("init migrate success!\n");
+	pr_info("init SMAP migrate successfully\n");
 	return ret;
 }
 
 void exit_migrate(void)
 {
 	exit_mig_dev();
-	pr_info("exit migrate!\n");
+	pr_info("exit SMAP migrate\n");
 }

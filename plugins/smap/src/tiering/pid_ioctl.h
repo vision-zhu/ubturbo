@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap ioctl module
+ * Description: SMAP ioctl module
  */
 
 #ifndef _SRC_TIERING_PID_IOCTL_H

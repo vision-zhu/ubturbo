@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2024. All rights reserved.
- * Description: smap5.0 remote iomem module
+ * Description: SMAP remote iomem module
  */
 
 #include <linux/kernel.h>
@@ -25,7 +25,7 @@
 #include "iomem.h"
 
 #undef pr_fmt
-#define pr_fmt(fmt) "smap_iomem: " fmt
+#define pr_fmt(fmt) "SMAP_iomem: " fmt
 
 #define REMOTE_RAM_NAME "System RAM (Remote)"
 #define MEMID_IORES_PREFIX "MEMID_"
@@ -63,15 +63,6 @@ static void copy_remote_ram(struct list_head *dst, struct list_head *src)
 	struct ram_segment *seg, *tmp;
 	list_for_each_entry_safe(seg, tmp, src, node) {
 		list_move_tail(&seg->node, dst);
-	}
-}
-
-static void __print_remote_ram(struct list_head *head)
-{
-	struct ram_segment *seg;
-	list_for_each_entry(seg, head, node) {
-		pr_info("[%d] %#llx-%#llx\n", seg->numa_node, seg->start,
-			seg->end);
 	}
 }
 
@@ -210,7 +201,7 @@ static void update_obmm_dev(u64 memid, u64 pa, u64 size)
 
 	list_for_each_entry(mr, &obmm_dev.list, node) {
 		if (mr->memid == memid) {
-			pr_debug("update memid %llu, pa %#llx, size %#llx\n",
+			pr_debug("update memid: %llu, pa: %#llx, size: %#llx\n",
 				 memid, pa, size);
 			found = true;
 			mr->memid = memid;
@@ -223,11 +214,11 @@ static void update_obmm_dev(u64 memid, u64 pa, u64 size)
 	if (found) {
 		return;
 	}
-	pr_debug("add memid %llu, pa %#llx, size %#llx\n", memid, pa, size);
+	pr_debug("add memid: %llu, pa: %#llx, size: %#llx\n", memid, pa, size);
 
 	tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
 	if (!tmp) {
-		pr_err("allocate mem for obmm_shmdev%llu failed\n", memid);
+		pr_err("unable to allocate mem for obmm_shmdev%llu\n", memid);
 		return;
 	}
 
@@ -243,7 +234,6 @@ static void clean_obmm_dev(void)
 	struct memid_range *mr, *tmp;
 	u64 std_seq;
 
-	pr_debug("enter clean_obmm_dev\n");
 	if (list_empty(&obmm_dev.list)) {
 		return;
 	}
@@ -252,12 +242,11 @@ static void clean_obmm_dev(void)
 	std_seq = mr->seq;
 	list_for_each_entry_safe(mr, tmp, &obmm_dev.list, node) {
 		if (mr->seq != std_seq) {
-			pr_info("delete memid %llu\n", mr->memid);
+			pr_info("delete memid: %llu\n", mr->memid);
 			list_del(&mr->node);
 			kfree(mr);
 		}
 	}
-	pr_debug("exit clean_obmm_dev\n");
 }
 
 static bool is_import_shmdev(const char *name)
@@ -267,16 +256,14 @@ static bool is_import_shmdev(const char *name)
 	int ret;
 
 	if (strncmp(name, OBMM_SHM_DIR, strlen(OBMM_SHM_DIR)) != 0) {
-		pr_debug("%s is not obmm share mem directory\n", name);
+		pr_debug("%s is not an obmm share mem directory\n", name);
 		return false;
 	}
 
 	ret = scnprintf(filepath, sizeof(filepath), "%s/%s/import_info",
 			OBMM_SYS_DIR, name);
-	if (ret <= 0) {
-		pr_err("build obmm shmdev path for %s failed\n", name);
+	if (ret <= 0)
 		return false;
-	}
 
 	ret = kern_path(filepath, LOOKUP_DIRECTORY, &path);
 	if (ret == 0) {
@@ -311,10 +298,8 @@ static int extract_hex_content(const char *file_path, u64 *content)
 	buf[ret] = '\0';
 	pr_debug("content of %s: %s\n", file_path, buf);
 	ret = kstrtoull(buf, HEX, &value);
-	if (ret) {
-		pr_err("failed to convert %s to u64: %d\n", buf, ret);
+	if (ret)
 		goto error;
-	}
 	*content = value;
 
 error:
@@ -337,7 +322,7 @@ static bool fill_obmmdev(struct dir_context *ctx, const char *name, int namelen,
 	struct read_obmm_callback *callback =
 		container_of(ctx, struct read_obmm_callback, ctx);
 
-	pr_debug("found %s, type %u\n", name, d_type);
+	pr_debug("found shmdev: %s, type: %u\n", name, d_type);
 	if (!is_import_shmdev(name)) {
 		callback->ret = 0;
 		return true;
@@ -345,20 +330,18 @@ static bool fill_obmmdev(struct dir_context *ctx, const char *name, int namelen,
 
 	ret = scnprintf(path, sizeof(path), "%s/%s/import_info/pa",
 			OBMM_SYS_DIR, name);
-	if (ret <= 0) {
-		pr_err("build obmm shmdev pa path for %s failed\n", name);
+	if (ret <= 0)
 		goto err;
-	}
+
 	ret = extract_hex_content(path, &pa);
 	if (ret != 0) {
 		goto err;
 	}
 
 	ret = scnprintf(path, sizeof(path), "%s/%s/size", OBMM_SYS_DIR, name);
-	if (ret <= 0) {
-		pr_err("build obmm shmdev size path for %s failed\n", name);
+	if (ret <= 0)
 		goto err;
-	}
+
 	ret = extract_hex_content(path, &size);
 	if (ret != 0) {
 		goto err;
@@ -366,10 +349,10 @@ static bool fill_obmmdev(struct dir_context *ctx, const char *name, int namelen,
 
 	ret = sscanf(name, "obmm_shmdev%llu", &memid);
 	if (ret != 1) {
-		pr_err("build obmm shmdev filename for %llu failed\n", memid);
 		ret = -ENOMEM;
 		goto err;
 	}
+
 	pr_debug("memid: %llu, pa: %#llx, size: %#llx\n", memid, pa, size);
 
 	update_obmm_dev(memid, pa, size);
@@ -401,7 +384,7 @@ int iterate_obmm_dev_dir(void)
 
 	ret = iterate_dir(dir_file, &callback.ctx);
 	if (ret == 0 && callback.ret != 0) {
-		pr_err("iterate obmm_dev dir callback.ret is %d\n",
+		pr_err("iterate obmm_dev directory callback ret: %d\n",
 		       callback.ret);
 		ret = callback.ret;
 	}
@@ -414,12 +397,11 @@ int iterate_obmm_dev(void)
 {
 	int ret;
 
-	pr_debug("enter iterate_obmm_dev\n");
 	mutex_lock(&obmm_dev.lock);
 	if (unlikely(list_empty(&obmm_dev.list))) {
 		ret = init_obmm_dev();
 		if (ret) {
-			pr_err("init obmm_dev failed: %d\n", ret);
+			pr_err("failed to init obmm_dev, ret: %d\n", ret);
 			goto out;
 		}
 	} else {
@@ -428,7 +410,7 @@ int iterate_obmm_dev(void)
 
 	ret = iterate_obmm_dev_dir();
 	if (ret) {
-		pr_err("iterate obmm_dev dir failed: %d\n", ret);
+		pr_err("failed to iterate obmm_dev directory, ret: %d\n", ret);
 		goto out;
 	}
 
@@ -436,7 +418,6 @@ int iterate_obmm_dev(void)
 
 out:
 	mutex_unlock(&obmm_dev.lock);
-	pr_debug("exit iterate_obmm_dev\n");
 
 	return ret;
 }
@@ -463,11 +444,10 @@ int refresh_remote_ram(void)
 	free_remote_ram(&remote_ram_list);
 	copy_remote_ram(&remote_ram_list, &tmp_head);
 	free_remote_ram(&tmp_head);
-	__print_remote_ram(&remote_ram_list);
 	remote_ram_changed = false;
 	ret = iterate_obmm_dev();
 	if (ret) {
-		pr_err("iterate obmm dev failed: %d\n", ret);
+		pr_err("failed to interate obmm_dev, ret: %d\n", ret);
 	}
 	return ret;
 }
@@ -500,10 +480,6 @@ int find_range_by_memid(u64 memid, u64 *start, u64 *end)
 	int retry_count = MAX_MEMID_RETRY + 1;
 
 	do {
-		if (retry_count < MAX_MEMID_RETRY) {
-			pr_warn("there are %d chances left to find memid %llu range\n",
-				retry_count, memid);
-		}
 		mutex_lock(&obmm_dev.lock);
 		list_for_each_entry(mr, &obmm_dev.list, node) {
 			if (mr->memid == memid) {

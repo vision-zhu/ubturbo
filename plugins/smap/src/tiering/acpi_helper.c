@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
- * Description: SMAP3.0 acpi helper module
+ * Description: SMAP ACPI helper module
  */
 
 #include "acpi_helper.h"
+
+#undef pr_fmt
+#define pr_fmt(fmt) "SMAP_ACPI_helper: " fmt
 
 static enum acpi_sub_type acpi_get_subtable_type(char *id)
 {

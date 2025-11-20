@@ -77,7 +77,7 @@ static struct ub_hist_ba_device *ub_hist_find_dev_by_tag(uint64_t ba_tag)
 			return ba_dev;
 		}
 	}
-	pr_err("failed to find ba device by ba_tag 0x%llx\n", ba_tag);
+	pr_err("failed to find BA device by BA tag %#llx\n", ba_tag);
 	ba_dev = NULL;
 	spin_unlock_irqrestore(&ub_hist_ba_list_lock, flags);
 	return ba_dev;
@@ -112,7 +112,8 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 
 	reg_ctrl.val = ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET);
 	if (!reg_ctrl.ram_init_done) {
-		dev_err(ba_dev->dev, "hist ba[0x%llx] init state error\n",
+		dev_err(ba_dev->dev,
+			"BA[%#llx] device didn't initialized correctly\n",
 			ba_dev->info.ba_tag);
 		return -EBUSY;
 	}
@@ -121,7 +122,7 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 	reg_ctrl.val = ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET);
 	if (reg_ctrl.val != BA_CTRL_REG_INIT) {
 		dev_err(ba_dev->dev,
-			"hist ba[0x%llx] ctrl reg mismatch(%d:%d)\n",
+			"BA[%#llx] device control register mismatch(%d:%d)\n",
 			ba_dev->info.ba_tag, reg_ctrl.val, BA_CTRL_REG_INIT);
 		return -EBUSY;
 	}
@@ -129,7 +130,8 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 	ub_hist_write_reg(ba_dev, BA_ECC_REG_OFFSET, reg_ecc.val);
 	reg_ecc.val = ub_hist_read_reg(ba_dev, BA_ECC_REG_OFFSET);
 	if ((reg_ecc.val & BA_ECC_REG_INIT_CHECK_MASK) != BA_ECC_REG_INIT) {
-		dev_err(ba_dev->dev, "hist ba[%lld] ecc reg mismatch(%d:%d)\n",
+		dev_err(ba_dev->dev,
+			"BA[%#llx] device ECC register mismatch(%d:%d)\n",
 			ba_dev->info.ba_tag,
 			reg_ecc.val & BA_ECC_REG_INIT_CHECK_MASK,
 			BA_ECC_REG_INIT);
@@ -140,7 +142,7 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 	reg_thresh.val = ub_hist_read_reg(ba_dev, BA_THRESH_REG_OFFSET);
 	if ((reg_thresh.val & BA_THRESH_REG_INIT) != BA_THRESH_REG_INIT) {
 		dev_err(ba_dev->dev,
-			"hist ba[0x%llx] intr reg mismatch(%d:%d)\n",
+			"BA[%#llx] interrupt register mismatch(%d:%d)\n",
 			ba_dev->info.ba_tag, reg_thresh.val,
 			BA_THRESH_REG_INIT);
 		return -EBUSY;
@@ -157,7 +159,7 @@ static int ub_hist_rd_clr_sts(struct ub_hist_ba_device *ba_dev, u32 *buf,
 
 	reg_ctrl.val = ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET);
 	if (reg_ctrl.sts_enable) {
-		pr_err("regs cannot be read when statistics are enabled\n");
+		pr_err("unable to read registers during counting\n");
 		return -EBUSY;
 	}
 
@@ -232,7 +234,7 @@ int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info)
 	struct ub_hist_ba_device *ba_dev;
 
 	if (!ba_info) {
-		pr_err("invalid ba info pointer\n");
+		pr_err("invalid BA info passed to query BA info\n");
 		return -EINVAL;
 	}
 
@@ -251,7 +253,7 @@ int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 	struct ub_hist_ba_device *ba_dev;
 
 	if (!config) {
-		pr_err("invalid config pointer\n");
+		pr_err("invalid config passed to histogram state set\n");
 		return -EINVAL;
 	}
 
@@ -263,19 +265,19 @@ int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 	if (config->mask & BA_CTRL_REG_CFG_MASK) {
 		ub_hist_write_reg(ba_dev, BA_CTRL_REG_OFFSET,
 				  config->regs.reg_ctrl.val);
-		pr_debug("ba %llu, write cfg val %#x", ba_dev->info.ba_tag,
+		pr_debug("BA %llu, value to write: %#x", ba_dev->info.ba_tag,
 			 config->regs.reg_ctrl.val);
 	}
 	if (config->mask & BA_ECC_REG_CFG_MASK) {
 		ub_hist_write_reg(ba_dev, BA_ECC_REG_OFFSET,
 				  config->regs.reg_ecc.val);
-		pr_debug("ba %llu, write ecc val %#x", ba_dev->info.ba_tag,
+		pr_debug("BA %llu, value to write: %#x", ba_dev->info.ba_tag,
 			 config->regs.reg_ecc.val);
 	}
 	if (config->mask & BA_THRESH_REG_CFG_MASK) {
 		ub_hist_write_reg(ba_dev, BA_THRESH_REG_OFFSET,
 				  config->regs.reg_thresh.val);
-		pr_debug("ba %llu, write thre val %#x", ba_dev->info.ba_tag,
+		pr_debug("BA %llu, value to write: %#x", ba_dev->info.ba_tag,
 			 config->regs.reg_thresh.val);
 	}
 
@@ -287,7 +289,7 @@ int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 	struct ub_hist_ba_device *ba_dev;
 
 	if (!config) {
-		pr_err("invalid config pointer\n");
+		pr_err("invalid config passed to histogram state get\n");
 		return -EINVAL;
 	}
 
@@ -318,7 +320,7 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 	struct ub_hist_ba_device *ba_dev;
 
 	if (!result) {
-		pr_err("invalid result pointer\n");
+		pr_err("invalid buffer passed to get histogram statistics result\n");
 		return -EINVAL;
 	}
 
@@ -521,19 +523,19 @@ static ssize_t device_config_show(struct device *dev,
 	spin_lock_irqsave(&ub_hist_ba_list_lock, flags);
 	list_for_each_entry(ba_dev, &ub_hist_ba_list, list) {
 		total_len += snprintf(buf + total_len, PAGE_SIZE,
-				      "ba_tag:0x%llx\n", ba_dev->info.ba_tag);
+				      "ba_tag:%#llx\n", ba_dev->info.ba_tag);
 		total_len += snprintf(
 			buf + total_len, PAGE_SIZE,
-			"\tcontrol reg:0x%08x, ecc reg:0x%08x, thresh reg:0x%08x\n",
+			"\tcontrol reg:%#08x, ecc reg:%#08x, thresh reg:%#08x\n",
 			ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET),
 			ub_hist_read_reg(ba_dev, BA_ECC_REG_OFFSET),
 			ub_hist_read_reg(ba_dev, BA_THRESH_REG_OFFSET));
 		total_len += snprintf(buf + total_len, PAGE_SIZE,
-				      "\tcc_start:0x%llx, cc_end:0x%llx\n",
+				      "\tcc_start:%#llx, cc_end:%#llx\n",
 				      ba_dev->info.cc_range.start,
 				      ba_dev->info.cc_range.end);
 		total_len += snprintf(buf + total_len, PAGE_SIZE,
-				      "\tnc_start:0x%llx, nc_end:0x%llx\n",
+				      "\tnc_start:%#llx, nc_end:%#llx\n",
 				      ba_dev->info.nc_range.start,
 				      ba_dev->info.nc_range.end);
 	}
@@ -597,7 +599,7 @@ void statistic_result_context_update_post(void)
 static ssize_t statistic_result_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
-#define WAIT_TIME_MS 10000 /* 10s */
+#define WAIT_TIME_MS 10000
 	int ret;
 	bool l_updated;
 	size_t l_offset, batch_size;
@@ -629,14 +631,14 @@ static ssize_t statistic_result_show(struct device *dev,
 		return 0;
 	} else if (l_offset == 0) {
 		total_len = snprintf(buf, PAGE_SIZE,
-				     "========== ba_tag [0x%llx] ==========\n",
+				     "========== ba_tag [%#llx] ==========\n",
 				     mirror_data->result.ba_tag);
 	}
 	batch_size = min_t(size_t, BA_STS_VALUE_COUNT - l_offset, DUMP_BATCH);
 	total_len += (ssize_t)print_mirror_buffer(
 		(uint16_t *)mirror_data->result.buffer, l_offset, batch_size,
 		buf + total_len);
-	/* the one who read tail of the buffer should do context reset */
+	/* The one who read tail of the buffer should do context reset */
 	if (l_offset + DUMP_BATCH >= BA_STS_VALUE_COUNT) {
 		statistic_result_context_update_post();
 	}
@@ -692,7 +694,7 @@ static int ub_hist_init_sysfs(void)
 	if (ret) {
 		kfree(mirror_data);
 		mirror_data = NULL;
-		pr_err("failed to create sysfs node for attr group\n");
+		pr_err("unable to create sysfs node for attr group of histogram tracking\n");
 	}
 
 	return ret;
@@ -720,53 +722,53 @@ static int ub_hist_get_ba_resource(struct platform_device *pdev,
 
 	ret = device_property_read_u64(&pdev->dev, "ba_reg_base_addr", &value);
 	if (ret) {
-		pr_err("Failed to read reg_base_addr: %d\n", ret);
+		pr_err("failed to read register base address: %d\n", ret);
 		return ret;
 	}
 
 	ba_dev->info.ba_tag = value;
 	ba_dev->base_addr = ioremap(value, DEVICE_MEM_LEN);
 	if (!ba_dev->base_addr) {
-		pr_err("Failed to remap reg_base_addr: 0x%llx\n", value);
+		pr_err("failed to remap register base address: %#llx\n", value);
 		return -ENOMEM;
 	}
-	pr_debug("reg_base_addr: 0x%llx\n", value);
+	pr_debug("register base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "cc_mem_base_addr", &value);
 	if (ret) {
-		pr_err("Failed to read cc_mem_base_addr: %d\n", ret);
+		pr_err("failed to read CC memory base address: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.cc_range.start = value;
-	pr_debug("cc_mem_base_addr: 0x%llx\n", value);
+	pr_debug("CC memory base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "cc_mem_size", &value);
 	if (ret) {
-		pr_err("Failed to read cc_mem_size: %d\n", ret);
+		pr_err("failed to read CC memory size: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.cc_range.end = ba_dev->info.cc_range.start + value;
-	pr_debug("cc_mem_size: 0x%llx\n", value);
+	pr_debug("CC memory size: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "nc_mem_base_addr", &value);
 	if (ret) {
-		pr_err("Failed to read nc_mem_base_addr: %d\n", ret);
+		pr_err("failed to read NC memory base address: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.nc_range.start = value;
-	pr_debug("nc_mem_base_addr: 0x%llx\n", value);
+	pr_debug("NC memory base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "nc_mem_size", &value);
 	if (ret) {
-		pr_err("Failed to read nc_mem_size: %d\n", ret);
+		pr_err("failed to read NC memory size: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.nc_range.end = ba_dev->info.nc_range.start + value;
-	pr_debug("nc_mem_size: 0x%llx\n", value);
+	pr_debug("NC memory size: %#llx\n", value);
 
 	return 0;
 }
@@ -843,23 +845,24 @@ int ub_hist_init(enum platform_type platform)
 	int ret;
 	ret = misc_register(&ub_hist_miscdev);
 	if (ret) {
-		pr_err("register misc failed %d\n", ret);
+		pr_err("failed to register MISC, ret: %d\n", ret);
 		return ret;
 	}
 	ret = platform_driver_register(&ub_hist_platform_driver);
 	if (ret) {
 		misc_deregister(&ub_hist_miscdev);
-		pr_err("register platform failed %d\n", ret);
+		pr_err("failed to register platform driver, ret: %d\n", ret);
 		return ret;
 	}
 	ret = ub_hist_init_sysfs();
 	if (ret) {
 		platform_driver_unregister(&ub_hist_platform_driver);
 		misc_deregister(&ub_hist_miscdev);
-		pr_err("init ub hist failed %d\n", ret);
+		pr_err("failed to init UB histogram system file system, ret: %d\n",
+		       ret);
 		return ret;
 	}
-	pr_info("ub_hist init success.\n");
+	pr_info("UB histogram init successfully\n");
 	return ret;
 }
 
@@ -868,5 +871,5 @@ void ub_hist_exit(void)
 	ub_hist_deinit_sysfs();
 	platform_driver_unregister(&ub_hist_platform_driver);
 	misc_deregister(&ub_hist_miscdev);
-	pr_info("ub_hist exit success.\n");
+	pr_info("UB histogram exit successfully\n");
 }

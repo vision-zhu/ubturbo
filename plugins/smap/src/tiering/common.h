@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
- * Description: SMAP3.0 通用头文件
+ * Description: SMAP common header
  */
 
 #ifndef _SRC_TIERING_COMMON_H
@@ -34,7 +34,7 @@
 #define SMAP_MAX_NUMNODES 22
 #define HUGE_PAGE_SIZE 2097152
 
-// last physical address before hole
+/* last physical address before hole */
 #define ADDR_BH 0x7FFFFFFF
 
 enum node_level {
@@ -131,7 +131,6 @@ typedef enum {
 	MAX_MIGRATE_TYPE,
 } migrate_type;
 
-/* calculate 2M count by addr range */
 static inline u64 calc_2m_count(u64 range)
 {
 	return (range & ~TWO_MEGA_MASK) == 0 ?
@@ -139,7 +138,6 @@ static inline u64 calc_2m_count(u64 range)
 		       (u64)((range >> TWO_MEGA_SHIFT) + 1);
 }
 
-/* calculate 4K count by addr range */
 static inline u64 calc_4k_count(u64 range)
 {
 	return (range & ~PAGE_MASK) == 0 ? (u64)(range >> PAGE_SHIFT) :

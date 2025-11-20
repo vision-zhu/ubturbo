@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
- * Description: smap ioctl module
+ * Description: SMAP ioctl module
  */
 
 #include <linux/cdev.h>
@@ -13,6 +13,9 @@
 #include "work.h"
 #include "iomem.h"
 #include "pid_ioctl.h"
+
+#undef pr_fmt
+#define pr_fmt(fmt) "SMAP_pid_ioctl: " fmt
 
 static dev_t dev = 0;
 static struct class *dev_class;
@@ -43,7 +46,7 @@ static int check_duplicate_task(struct migrate_back_task *task)
 	task_ret = dup_task(task->task_id, &migrate_back_task_list);
 	if (task_ret == DUP_ID) {
 		spin_unlock(&migrate_back_task_lock);
-		pr_err("SmapIoctlMigrateBack task id is duplicated. Won't migrate back. task id:%llu\n",
+		pr_err("duplicated migrate back task id: %llu\n",
 		       task->task_id);
 		return DUP_ID;
 	}
@@ -63,10 +66,9 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 	struct migrate_back_task *task;
 	struct migrate_back_subtask *subtask, *tmp;
 
-	pr_info("received migrate back msg\n");
 	ret = 0;
 	if (msg->count == 0) {
-		pr_err("The migrate back message is empty.\n");
+		pr_err("null message passed to migrate back\n");
 		goto err_param;
 	}
 
@@ -77,7 +79,7 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 		goto err_param;
 	}
 
-	/* check duplicate task */
+	/* Deduplicate */
 	ret = -EINVAL;
 	task_ret = check_duplicate_task(task);
 	if (task_ret == DUP_ID) {
@@ -92,11 +94,9 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 		ret = init_migrate_back_subtask(task, &msg->payload[i],
 						&subtask);
 		if (ret < 0) {
-			pr_err("init migrate back subtask fail, %d->%d, %#llx-%#llx\n",
+			pr_err("failed to init migrate back subtask, source node: %d, destination node: %d\n",
 			       msg->payload[i].src_nid,
-			       msg->payload[i].dest_nid,
-			       msg->payload[i].pa_start,
-			       msg->payload[i].pa_end);
+			       msg->payload[i].dest_nid);
 			goto err_subtask;
 		}
 		list_add(&subtask->task_list, &task->subtask);
@@ -130,17 +130,11 @@ static struct file_operations smap_fops = {
 	.release = smap_release,
 };
 
-/*
- * This function will be called when we open the Device file
- */
 static int smap_open(struct inode *inode, struct file *file)
 {
 	return 0;
 }
 
-/*
- * This function will be called when we close the Device file
- */
 static int smap_release(struct inode *inode, struct file *file)
 {
 	return 0;
@@ -153,12 +147,12 @@ static int __ioctl_migrate_back(void __user *argp)
 	struct migrate_back_inner_msg mb_imsg;
 
 	if (copy_from_user(&mb_msg, argp, sizeof(mb_msg))) {
-		pr_err("IoctlMigrateBack copy_from_user err\n");
+		pr_err("failed to copy migrate back message from user space\n");
 		return -EFAULT;
 	}
 
 	if (mb_msg.count <= 0 || mb_msg.count > MAX_NR_MIGBACK) {
-		pr_err("mig back msg count %d invalid.\n", mb_msg.count);
+		pr_err("invalid message count passed to migrate back\n");
 		return -EINVAL;
 	}
 
@@ -170,29 +164,28 @@ static int __ioctl_migrate_back(void __user *argp)
 		struct migrate_back_inner_payload *i_p = &(mb_imsg.payload[i]);
 
 		if (is_node_invalid(p->src_nid)) {
-			pr_err("IoctlMigrateBack %dth src_nid %d is invalid\n",
-			       i, p->src_nid);
+			pr_err("invalid source node: %d of %dth message\n", i,
+			       p->src_nid);
 			return -EINVAL;
 		}
 		if (p->dest_nid != NUMA_NO_NODE &&
 		    is_node_invalid(p->dest_nid)) {
-			pr_err("IoctlMigrateBack %dth dest_nid %d is invalid\n",
+			pr_err("invalid destination node: %d of %dth message\n",
 			       i, p->dest_nid);
 			return -EINVAL;
 		}
-		/* Assign values to i_p->pa_start and i_p->pa_end */
 		ret = find_range_by_memid(p->memid, &i_p->pa_start,
 					  &i_p->pa_end);
 		if (ret) {
-			pr_err("IoctlMigrateBack cannot find memid %llu range: %d\n",
+			pr_err("unable to find range of memid: %llu, ret: %d\n",
 			       p->memid, ret);
 			return ret;
 		}
 
 		if (smap_is_remote_addr_valid(p->src_nid, i_p->pa_start,
 					      i_p->pa_end)) {
-			pr_err("IoctlMigrateBack range %#llx-%#llx mismatch with node%d\n",
-			       i_p->pa_start, i_p->pa_end, p->src_nid);
+			pr_err("memory range mismatch with node: %d\n",
+			       p->src_nid);
 			return -EINVAL;
 		}
 
@@ -207,9 +200,7 @@ static long smap_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	void __user *argp = (void __user *)arg;
 	int rc;
 
-	pr_info("enter smap_ioctl, cmd %u\n", _IOC_NR(cmd));
 	if (_IOC_TYPE(cmd) != SMAP_MAGIC) {
-		pr_err("SmapIoctl ioctl type err. type:%u\n", _IOC_NR(cmd));
 		return -EINVAL;
 	}
 
@@ -220,7 +211,6 @@ static long smap_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	default:
 		rc = -ENOTTY;
 	}
-	pr_info("exit smap_ioctl, rc %d\n", rc);
 
 	return rc;
 }
@@ -229,7 +219,7 @@ int smap_dev_init(void)
 {
 	int rc = alloc_chrdev_region(&dev, BASE_MINOR, NR_MINOR, SMAP_DEV);
 	if (rc < 0) {
-		pr_err("Cannot allocate major number\n");
+		pr_err("unable to allocate major number\n");
 		return rc;
 	}
 
@@ -237,20 +227,20 @@ int smap_dev_init(void)
 
 	rc = cdev_add(&smap_cdev, dev, 1);
 	if (rc) {
-		pr_err("Cannot add the device to the system\n");
+		pr_err("unable to add SMAP character device to system\n");
 		goto err_cdev;
 	}
 
 	dev_class = class_create(SMAP_CLASS);
 	if (IS_ERR(dev_class)) {
-		pr_err("Cannot create the struct class\n");
+		pr_err("unable to create SMAP class\n");
 		rc = PTR_ERR(dev_class);
 		goto err_class;
 	}
 
 	smap_device = device_create(dev_class, NULL, dev, NULL, SMAP_DEVICE);
 	if (IS_ERR(smap_device)) {
-		pr_err("Cannot create the Device 1\n");
+		pr_err("unable to create the SMAP device\n");
 		rc = PTR_ERR(smap_device);
 		goto err_device;
 	}
