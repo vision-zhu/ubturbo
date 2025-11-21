@@ -546,6 +546,10 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
     attr->initLocalMemRatio = param->localMemRatio;
     attr->migrateMode = param->migrateMode;
     attr->remoteNumaCnt = param->count;
+    if (time(&attr->scanStart) == (time_t)-1) {
+        SMAP_LOGGER_ERROR("get time error");
+    }
+    SMAP_LOGGER_INFO("attr->scanStart time: %s", ctime(&attr->scanStart));
     int localNumaCnt = GetL1Count(attr->numaAttr.numaNodes);
     SMAP_LOGGER_INFO("Pid: %d local numa cnt :%d.", attr->pid, localNumaCnt);
     SMAP_LOGGER_INFO("Pid: %d remote numa cnt :%d.", attr->pid, attr->remoteNumaCnt);
@@ -574,10 +578,6 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
         }
         SetAttrL2(attr, param->numaParam[0].nid);
     }
-    if (time(&attr->scanStart) == (time_t)-1) {
-        SMAP_LOGGER_ERROR("get time error");
-    }
-    SMAP_LOGGER_INFO("attr->scanStart time: %s", ctime(&attr->scanStart));
 }
 
 int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
