@@ -140,9 +140,9 @@ static uint64_t CalcMigrateNumByFreq(ProcessAttr *process)
     // removing excessively large outliers
     if (l2Len > 0 && l2Act && l2Act->freqMax > 0) {
         int percentile = GetRemoteFreqPercentileConfig();
-        double num_to_skip = ((double)(PERCENTAGE_BASE_INT - percentile) / PERCENTAGE_BASE_DOUBLE) * l2Len;
-        size_t max_index = (size_t)floor(num_to_skip);
-        l2FreqMax = process->scanAttr.actcData[l2Node][max_index].freq;
+        double numToSkip = ((double)(PERCENTAGE_BASE_INT - percentile) / PERCENTAGE_BASE_DOUBLE) * l2Len;
+        size_t maxIndex = (size_t)floor(numToSkip);
+        l2FreqMax = process->scanAttr.actcData[l2Node][maxIndex].freq;
     } else {
         l2FreqMax = 0;
     }
@@ -757,9 +757,8 @@ static int GroupMigPagesByNode(LevelActcData *levelActcData[NR_LEVEL], uint64_t 
     return 0;
 }
 
-static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray[MAX_NODES],
-                                    uint64_t nrMig[MAX_NODES], uint64_t destFreeList[MAX_NODES],
-                                    struct MigList mlist[MAX_NODES][MAX_NODES])
+static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray[MAX_NODES], uint64_t nrMig[MAX_NODES],
+                                    uint64_t destFreeList[MAX_NODES], struct MigList mlist[MAX_NODES][MAX_NODES])
 {
     int nrLocalNuma = GetNrLocalNuma();
     if (dir != PROMOTE && dir != DEMOTE) {
@@ -1027,7 +1026,7 @@ static int BuildSwapMigLists(ProcessAttr *process, struct MigList mlist[MAX_NODE
 
     int ret = BuildMigListForDirection(PROMOTE, migAddrArray, nrMig, freeHugePages, mlist);
     if (ret) {
-        SMAP_LOGGER_ERROR("Failed to build promote mig lists for pid %d, ret :%d.", process->pid, ret);
+        SMAP_LOGGER_ERROR("Failed to build promote mig lists for pid %d, ret: %d.", process->pid, ret);
         return ret;
     }
 

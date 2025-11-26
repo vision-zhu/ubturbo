@@ -160,7 +160,6 @@ target_include_directories(smap_dt PUBLIC
 
 target_compile_definitions(smap_dt PUBLIC
     SKIP_STATIC
-    ENV_USER
     CONFIG_NUMA
     CONFIG_MODULES
     CONFIG_NODES_SHIFT=7

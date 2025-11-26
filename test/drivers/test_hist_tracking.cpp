@@ -5,6 +5,9 @@
  * Create: 2024-12-28
  */
 
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <asm/types.h>
 #include <linux/fs.h>
 #include <linux/slab.h>
@@ -12,9 +15,6 @@
 #include <linux/device.h>
 #include <linux/workqueue.h>
 #include <linux/container_of.h>
-
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 
 #include "check.h"
 #include "bus.h"

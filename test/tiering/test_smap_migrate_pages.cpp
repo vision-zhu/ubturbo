@@ -2,6 +2,9 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
  * Description: SMAP3.0 attr模块测试代码
  */
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <asm/page_no.h>
 #include <linux/nodemask.h>
 #include <linux/slab.h>
@@ -15,8 +18,6 @@
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
 #include <linux/completion.h>
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 
 #include "iomem.h"
 #include "smap_migrate_pages.h"

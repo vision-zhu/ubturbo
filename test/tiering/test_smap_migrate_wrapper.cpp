@@ -2,10 +2,10 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
  * Description: SMAP3.0 模块测试代码
  */
-#include <linux/slab.h>
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
 
+#include <linux/slab.h>
 #include "smap_migrate_wrapper.h"
 
 using namespace std;

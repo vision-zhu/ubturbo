@@ -176,77 +176,6 @@ static u64 calc_access_len_v2(struct access_tracking_dev *adev)
 	return page_count;
 }
 
-#ifdef ENV_USER
-int init_acpi_msg(struct acpi_msg *acpi_msg)
-{
-	int i = 0;
-	struct acpi_mem_segment *mem;
-
-	if (!acpi_msg)
-		return -EINVAL;
-	acpi_msg->cnt = acpi_mem.len;
-	acpi_msg->acpi_seg = vzalloc(sizeof(struct acpi_seg) * acpi_msg->cnt);
-	if (!acpi_msg->acpi_seg) {
-		return -ENOMEM;
-	}
-	list_for_each_entry(mem, &acpi_mem.mem, segment) {
-		acpi_msg->acpi_seg[i].node = mem->node;
-		acpi_msg->acpi_seg[i].pxm = mem->pxm;
-		acpi_msg->acpi_seg[i].start = mem->start;
-		acpi_msg->acpi_seg[i].end = mem->end;
-		i++;
-	}
-	return 0;
-}
-
-int init_iomem_msg(struct iomem_msg *iomem_msg)
-{
-	int i = 0;
-	int tmp_cnt;
-	struct ram_segment *seg;
-	struct iomem_seg *tmp_iomem = NULL;
-
-	if (!iomem_msg)
-		return -EINVAL;
-
-	read_lock(&rem_ram_list_lock);
-	tmp_cnt = get_remote_ram_len();
-	read_unlock(&rem_ram_list_lock);
-	if (tmp_cnt) {
-		tmp_iomem = vzalloc(sizeof(struct iomem_seg) * tmp_cnt);
-		if (!tmp_iomem) {
-			return -ENOMEM;
-		}
-	}
-	write_lock(&rem_ram_list_lock);
-	iomem_msg->cnt = get_remote_ram_len();
-	if (iomem_msg->cnt != tmp_cnt) {
-		write_unlock(&rem_ram_list_lock);
-		pr_err("remote ram number has been refreshed unexpectedly\n");
-		vfree(tmp_iomem);
-		iomem_msg->cnt = 0;
-		return -EINVAL;
-	}
-	if (iomem_msg->cnt != 0) {
-		iomem_msg->iomem_seg = tmp_iomem;
-		list_for_each_entry(seg, &remote_ram_list, node) {
-			iomem_msg->iomem_seg[i].node = seg->numa_node;
-			iomem_msg->iomem_seg[i].start = seg->start;
-			iomem_msg->iomem_seg[i].end = seg->end;
-			i++;
-		}
-	}
-
-	/*
-	 * User space has detected iomem changes and fetched newest iomem,
-	 * therefore we set remote_ram_changed to false here
-	 */
-	remote_ram_changed = false;
-	pr_info("remote ram wasn't changed\n");
-	write_unlock(&rem_ram_list_lock);
-	return 0;
-}
-#endif
 static int access_tracking_mode_set(struct device *ldev, u8 mode)
 {
 	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
@@ -293,8 +222,8 @@ static int actc_buffer_reinit(struct access_tracking_dev *adev)
 		return 0;
 	}
 	pr_debug(
-		 "page amount of tracking device on node %d has been changed from %llu to %llu\n",
-		 adev->node, adev->page_count, page_count);
+		"page amount of tracking device on node %d has been changed from %llu to %llu\n",
+		adev->node, adev->page_count, page_count);
 	actc_buffer_deinit(adev);
 	if (page_count == 0) {
 		return 0;
@@ -344,23 +273,6 @@ static int access_tracking_set_page_size(struct device *ldev,
 	return 0;
 }
 
-static int access_tracking_reinit_node(struct device *ldev)
-{
-	int ret;
-	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
-
-	down_write(&adev->buffer_lock);
-	ret = actc_buffer_reinit(adev);
-	if (ret) {
-		up_write(&adev->buffer_lock);
-		return ret;
-	}
-	init_actc_data(adev);
-	up_write(&adev->buffer_lock);
-	return 0;
-}
-
-#ifdef ENV_USER
 static int access_tracking_ram_change(struct device *ldev, void __user *argp)
 {
 	int is_change = (ram_changed()) ? 1 : 0;
@@ -372,88 +284,13 @@ static int access_tracking_ram_change(struct device *ldev, void __user *argp)
 	return 0;
 }
 
-static int access_tracking_acpi_len_get(struct device *ldev, void __user *argp)
-{
-	size_t acpi_len = acpi_mem.len;
-	if (copy_to_user(argp, &acpi_len, sizeof(size_t))) {
-		pr_err("unable to copy local memory length to user space\n");
-		return -EFAULT;
-	}
-	return 0;
-}
-
-static int access_tracking_iomem_len_get(struct device *ldev, void __user *argp)
-{
-	int iomem_len;
-	read_lock(&rem_ram_list_lock);
-	iomem_len = get_remote_ram_len();
-	read_unlock(&rem_ram_list_lock);
-	if (copy_to_user(argp, &iomem_len, sizeof(int))) {
-		pr_err("unable to copy remote memory length to user space\n");
-		return -EFAULT;
-	}
-	return 0;
-}
-
-static int access_tracking_acpi_mem_get(struct device *ldev, void __user *argp)
-{
-	int ret = 0;
-	struct acpi_msg msg;
-
-	ret = init_acpi_msg(&msg);
-	if (ret) {
-		pr_err("unable to init ACPI segment info, ret: %d\n", ret);
-		return ret;
-	}
-	if (copy_to_user(argp, msg.acpi_seg,
-			 sizeof(struct acpi_seg) * msg.cnt)) {
-		pr_err("unable to copy ACPI segment info to user space\n");
-		return -EFAULT;
-	}
-	vfree(msg.acpi_seg);
-	return 0;
-}
-
-static int access_tracking_iomem_get(struct device *ldev, void __user *argp)
-{
-	int ret;
-	struct iomem_msg msg;
-
-	ret = init_iomem_msg(&msg);
-	if (ret) {
-		pr_err("unable to init iomem resources segment info, ret: %d\n",
-		       ret);
-		return ret;
-	}
-
-	if (msg.cnt == 0)
-		return 0;
-
-	if (copy_to_user(argp, msg.iomem_seg,
-			 sizeof(struct iomem_seg) * msg.cnt)) {
-		pr_err("unable to copy iomem resources segment info to user space\n");
-		vfree(msg.iomem_seg);
-		return -EFAULT;
-	}
-	vfree(msg.iomem_seg);
-	return 0;
-}
-#endif
-
 static struct tracking_operations access_tracking_ops = {
 	.tracking_enable = access_tracking_enable,
 	.tracking_disable = access_tracking_disable,
-#ifdef ENV_USER
 	.tracking_ram_change = access_tracking_ram_change,
-	.tracking_acpi_len_get = access_tracking_acpi_len_get,
-	.tracking_iomem_len_get = access_tracking_iomem_len_get,
-	.tracking_acpi_mem_get = access_tracking_acpi_mem_get,
-	.tracking_iomem_get = access_tracking_iomem_get,
-#endif
 	.tracking_reinit_actc_buffer = access_tracking_reinit_actc_buffer,
 	.tracking_set_page_size = access_tracking_set_page_size,
 	.tracking_mode_set = access_tracking_mode_set,
-	.tracking_reinit_node = access_tracking_reinit_node,
 };
 
 int calc_access_len(struct access_tracking_dev *adev)
@@ -535,6 +372,7 @@ buff_deinit:
 	actc_buffer_deinit(adev);
 adev_free:
 	kfree(adev);
+	adev = NULL;
 put_dev:
 	list_for_each_entry_safe(adev, n, &access_dev, list) {
 		tracking_dev_remove(adev->tracking_dev);

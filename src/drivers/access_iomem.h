@@ -31,7 +31,6 @@ struct ram_segment {
 bool ram_changed(void);
 void release_remote_ram(void);
 int refresh_remote_ram(void);
-int get_remote_ram_len(void);
 int get_numa_by_pfn(unsigned long pfn);
 u64 get_node_page_cnt_iomem(int nid, int page_size);
 int calc_paddr_acidx_iomem(u64 pa, int *nid, u64 *index, int page_size);

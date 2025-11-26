@@ -321,47 +321,6 @@ TEST_F(MigrationTest, TestInitMigrateMsg)
     free(mMsg.migList);
 }
 
-extern "C" int UpdateRemoteRamInfo(struct ProcessManager *manager);
-TEST_F(MigrationTest, TestUpdateRemoteRamInfoGetRemoteNumaFailed)
-{
-    int ret;
-    struct ProcessManager manager;
-    manager.iomMsg.iomemSegArray = NULL;
-    manager.nrLocalNuma = 4;
-    EnvMutexInit(&manager.lock);
-    MOCKER(GetIomemAddresses).stubs().will(returnValue(-1));
-    ret = UpdateRemoteRamInfo(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(MigrationTest, TestUpdateRemoteRamInfoGetActcLenFailed)
-{
-    int ret;
-    struct ProcessManager manager;
-    manager.nrLocalNuma = 4;
-    EnvMutexInit(&manager.lock);
-    MOCKER(GetIomemAddresses).stubs().will(returnValue(0));
-    MOCKER(GetNodeActcLenIomem).stubs().will(returnValue(-1));
-    ret = UpdateRemoteRamInfo(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(MigrationTest, TestUpdateRemoteRamInfoSuccess)
-{
-    int ret;
-    g_processManager.nrLocalNuma = 4;
-    g_processManager.iomMsg.iomemSegArray = (IomemSeg *)malloc(sizeof(IomemSeg) * 1);
-
-    for (int i = 0; i < 16; i++) {
-        g_processManager.nodeActcLen[i] = 100 + (i * 100);
-    }
-
-    MOCKER(GetIomemAddresses).stubs().will(returnValue(0));
-    MOCKER(GetNodeActcLenIomem).stubs().will(returnValue(0));
-    ret = UpdateRemoteRamInfo(&g_processManager);
-    EXPECT_EQ(0, ret);
-}
-
 extern "C" int PerformMigrationPreparation(struct ProcessManager *manager);
 extern "C" int GetRamIsChange(struct ProcessManager *manager, int *change);
 extern "C" int BuildAllPidData(void);

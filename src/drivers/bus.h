@@ -18,16 +18,8 @@ struct tracking_operations {
 	int (*tracking_set_page_size)(struct device *ldev, u8 page_size);
 	int (*tracking_reinit_actc_buffer)(struct device *ldev);
 	int (*tracking_set_sample_rate)(struct device *ldev, u32 sample_rate);
-	int (*tracking_reinit_node)(struct device *ldev);
 	int (*tracking_read)(struct device *ldev, void *buffer, u32 length);
-
-#ifdef ENV_USER
 	int (*tracking_ram_change)(struct device *ldev, void __user *argp);
-	int (*tracking_acpi_len_get)(struct device *ldev, void __user *argp);
-	int (*tracking_iomem_len_get)(struct device *ldev, void __user *argp);
-	int (*tracking_acpi_mem_get)(struct device *ldev, void __user *argp);
-	int (*tracking_iomem_get)(struct device *ldev, void __user *argp);
-#endif
 };
 
 struct tracking_dev {
