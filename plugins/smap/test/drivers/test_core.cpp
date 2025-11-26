@@ -20,7 +20,6 @@
 
 using namespace std;
 
-#define SMAP_IOCTL_OUT _IOW('N', 15, struct iomem_seg)
 struct tracking_core_ctrl {
     unsigned long node_bitmap;
     struct list_head node_cdev;
@@ -286,32 +285,6 @@ TEST_F(DriversCoreTest, HandPageSizeSetCmd)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" long handle_reinit_node_cmd(struct tracking_node_dev *node_dev);
-extern "C" int node_tracking_reinit_node(struct tracking_node_dev *node_dev);
-TEST_F(DriversCoreTest, HandReinitNodeCmd)
-{
-    struct tracking_node_dev node_dev;
-    long ret = 0;
-
-    MOCKER(node_tracking_reinit_node).stubs().will(returnValue(-EINVAL));
-    ret = handle_reinit_node_cmd(&node_dev);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(node_tracking_reinit_node).stubs().will(returnValue(0));
-    ret = handle_reinit_node_cmd(&node_dev);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, HandNodeTrackingReinitNode)
-{
-    int ret;
-    trk_dev->ops = &stub_tracking_ops;
-    stub_tracking_ops.tracking_reinit_node = StubTrackingReinitNode;
-    ret = node_tracking_reinit_node(node_dev);
-    EXPECT_EQ(0, ret);
-}
-
 extern "C" int stub_tracking_ram_change(struct device *ldev, void __user *argp);
 extern "C" int node_ram_change_cmd(struct tracking_node_dev *node_dev, void __user *argp);
 TEST_F(DriversCoreTest, NodeRamChangeCmd)
@@ -344,146 +317,6 @@ TEST_F(DriversCoreTest, HandleRamChangeCmd)
 
     MOCKER(node_ram_change_cmd).stubs().will(returnValue(0));
     ret = handle_ram_change_cmd(&node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int stub_tracking_acpi_len_get(struct device *ldev, void __user *argp);
-extern "C" int node_acpi_len_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, NodeAcpiLenCmd)
-{
-    void __user *argp = NULL;
-    int ret;
-    trk_dev->ops = &stub_tracking_ops;
-    stub_tracking_ops.tracking_acpi_len_get = stub_tracking_acpi_len_get;
-    MOCKER(stub_tracking_acpi_len_get).stubs().will(returnValue(-EINVAL));
-    ret = node_acpi_len_cmd(node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(stub_tracking_acpi_len_get).stubs().will(returnValue(0));
-    ret = node_acpi_len_cmd(node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" long handle_acpi_len_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, HandleAcpiLenCmd)
-{
-    struct tracking_node_dev node_dev;
-    void __user *argp = NULL;
-    long ret = 0;
-
-    MOCKER(node_acpi_len_cmd).stubs().will(returnValue(-EINVAL));
-    ret = handle_acpi_len_cmd(&node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(node_acpi_len_cmd).stubs().will(returnValue(0));
-    ret = handle_acpi_len_cmd(&node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int stub_tracking_iomem_len_get(struct device *ldev, void __user *argp);
-extern "C" int node_iomem_len_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, NodeIomemLenCmd)
-{
-    void __user *argp = NULL;
-    int ret;
-    trk_dev->ops = &stub_tracking_ops;
-    stub_tracking_ops.tracking_iomem_len_get = stub_tracking_iomem_len_get;
-    MOCKER(stub_tracking_iomem_len_get).stubs().will(returnValue(-EINVAL));
-    ret = node_iomem_len_cmd(node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(stub_tracking_iomem_len_get).stubs().will(returnValue(0));
-    ret = node_iomem_len_cmd(node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" long handle_iomem_len_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, HandleIomemLenCmd)
-{
-    struct tracking_node_dev node_dev;
-    void __user *argp = NULL;
-    long ret = 0;
-
-    MOCKER(node_iomem_len_cmd).stubs().will(returnValue(-EINVAL));
-    ret = handle_iomem_len_cmd(&node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(node_iomem_len_cmd).stubs().will(returnValue(0));
-    ret = handle_iomem_len_cmd(&node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int stub_tracking_acpi_mem_get(struct device *ldev, void __user *argp);
-extern "C" int node_acpi_mem_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, NodeAcpiMemCmd)
-{
-    void __user *argp = NULL;
-    int ret;
-    trk_dev->ops = &stub_tracking_ops;
-    stub_tracking_ops.tracking_acpi_mem_get = stub_tracking_acpi_mem_get;
-    MOCKER(stub_tracking_acpi_mem_get).stubs().will(returnValue(-EINVAL));
-    ret = node_acpi_mem_cmd(node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(stub_tracking_acpi_mem_get).stubs().will(returnValue(0));
-    ret = node_acpi_mem_cmd(node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" long handle_acpi_mem_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, HandleAcpiMemCmd)
-{
-    struct tracking_node_dev node_dev;
-    void __user *argp = NULL;
-    long ret = 0;
-
-    MOCKER(node_acpi_mem_cmd).stubs().will(returnValue(-EINVAL));
-    ret = handle_acpi_mem_cmd(&node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(node_acpi_mem_cmd).stubs().will(returnValue(0));
-    ret = handle_acpi_mem_cmd(&node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int stub_tracking_iomem_get(struct device *ldev, void __user *argp);
-extern "C" int node_iomem_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, NodeIomemCmd)
-{
-    void __user *argp = NULL;
-    int ret;
-    trk_dev->ops = &stub_tracking_ops;
-    stub_tracking_ops.tracking_iomem_get = stub_tracking_iomem_get;
-    MOCKER(stub_tracking_iomem_get).stubs().will(returnValue(-EINVAL));
-    ret = node_iomem_cmd(node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(stub_tracking_iomem_get).stubs().will(returnValue(0));
-    ret = node_iomem_cmd(node_dev, argp);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" long handle_iomem_cmd(struct tracking_node_dev *node_dev, void __user *argp);
-TEST_F(DriversCoreTest, HandleIomemCmd)
-{
-    struct tracking_node_dev node_dev;
-    void __user *argp = NULL;
-    long ret = 0;
-
-    MOCKER(node_iomem_cmd).stubs().will(returnValue(-EINVAL));
-    ret = handle_iomem_cmd(&node_dev, argp);
-    EXPECT_EQ(-EINVAL, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(node_iomem_cmd).stubs().will(returnValue(0));
-    ret = handle_iomem_cmd(&node_dev, argp);
     EXPECT_EQ(0, ret);
 }
 
@@ -527,19 +360,6 @@ TEST_F(DriversCoreTest, NodeCdevUserIoctlPgSize)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(DriversCoreTest, NodeCdevUserIoctlReInit)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_REINIT_NODE_CMD;
-    MOCKER(handle_reinit_node_cmd).stubs().will(returnValue(0));
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(0, ret);
-}
-
 TEST_F(DriversCoreTest, NodeCdevUserIoctlRamChange)
 {
     struct file file;
@@ -551,70 +371,6 @@ TEST_F(DriversCoreTest, NodeCdevUserIoctlRamChange)
     MOCKER(handle_ram_change_cmd).stubs().will(returnValue(0));
     ret = node_cdev_user_ioctl(&file, cmd, arg);
     EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, NodeCdevUserIoctlAcpiLen)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_ACPI_LEN;
-    MOCKER(handle_acpi_len_cmd).stubs().will(returnValue(0));
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, NodeCdevUserIoctlIomemLen)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_IOMEM_LEN;
-    MOCKER(handle_iomem_len_cmd).stubs().will(returnValue(0));
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, NodeCdevUserIoctlAcpiAddr)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_ACPI_ADDR;
-    MOCKER(handle_acpi_mem_cmd).stubs().will(returnValue(0));
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, NodeCdevUserIoctlIomemAddr)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_IOMEM_ADDR;
-    MOCKER(handle_iomem_cmd).stubs().will(returnValue(0));
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DriversCoreTest, NodeCdevUserIoctlOut)
-{
-    struct file file;
-    unsigned int cmd = 0;
-    unsigned long arg = 0;
-    int ret;
-
-    cmd = SMAP_IOCTL_OUT;
-    ret = node_cdev_user_ioctl(&file, cmd, arg);
-    EXPECT_EQ(-EINVAL, ret);
 }
 
 extern "C" int node_trk_data_read(struct tracking_node_dev *node_dev, void *buffer, u32 length);

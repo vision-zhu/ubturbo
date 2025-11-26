@@ -31,17 +31,7 @@
 
 #define SMAP_IOCTL_PAGE_SIZE_SET_CMD _IOW('N', 4, unsigned long)
 
-#define SMAP_IOCTL_REINIT_NODE_CMD _IOW('N', 5, unsigned long)
-
-#define SMAP_IOCTL_RAM_CHANGE _IOW('N', 6, int)
-
-#define SMAP_IOCTL_ACPI_LEN _IOW('N', 7, int)
-
-#define SMAP_IOCTL_IOMEM_LEN _IOW('N', 8, int)
-
-#define SMAP_IOCTL_ACPI_ADDR _IOW('N', 9, AcpiSeg)
-
-#define SMAP_IOCTL_IOMEM_ADDR _IOW('N', 10, IomemSeg)
+#define SMAP_IOCTL_RAM_CHANGE _IOW('N', 5, int)
 
 #define SMAP_MIG_MAGIC 0xB9
 #define SMAP_MIG_MIGRATE _IOW(SMAP_MIG_MAGIC, 0, struct MigrateMsg)

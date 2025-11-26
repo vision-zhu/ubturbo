@@ -11,10 +11,13 @@
  */
 #include <dirent.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <errno.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/param.h>
 #include <time.h>
 #include "securec.h"
 #include "smap_env.h"
@@ -72,154 +75,6 @@ int DisableTracking(struct ProcessManager *manager)
     return SendCmdToAllNodes(manager->fds.nodes, SMAP_IOCTL_TRACKING_CMD, 0);
 }
 
-int ReadTracking(struct ProcessManager *manager)
-{
-    int i;
-    int ret = 0;
-    clock_t start, end;
-    double cpuTimeUsed;
-    start = clock();
-    for (i = 0; i < MAX_NODES; i++) {
-        if (manager->fds.nodes[i] < 0 || !manager->nodeActcLen[i] || !manager->tracking.nodeActc[i]) {
-            continue;
-        }
-        ret = memset_s(manager->tracking.nodeActc[i], sizeof(actc_t) * manager->nodeActcLen[i], 0,
-                       sizeof(actc_t) * manager->nodeActcLen[i]);
-        if (ret != EOK) {
-            return ret;
-        }
-        ret = read(manager->fds.nodes[i], manager->tracking.nodeActc[i], sizeof(actc_t) * manager->nodeActcLen[i]);
-        if (ret < 0) {
-            SMAP_LOGGER_ERROR("read for node%d failed: %d.", i, ret);
-            return ret;
-        }
-    }
-    end = clock();
-    cpuTimeUsed = (double)(end - start) / CLOCKS_PER_SEC * US_PER_SEC;
-    SMAP_LOGGER_DEBUG("ReadTracking used %.2fus.", cpuTimeUsed);
-    return 0;
-}
-
-// calculate 2M count by addr range
-static uint64_t Calc2MCount(uint64_t range)
-{
-    return (range & ~TWO_MEGA_MASK) == 0 ? (uint64_t)(range >> TWO_MEGA_SHIFT) :
-                                           (uint64_t)((range >> TWO_MEGA_SHIFT) + 1);
-}
-
-// calculate 4K count by addr range
-static uint64_t Calc4KCount(uint64_t range)
-{
-    return (range & ~PAGE_MASK) == 0 ? (uint64_t)(range >> PAGE_SHIFT) : (uint64_t)((range >> PAGE_SHIFT) + 1);
-}
-
-int GetNodeActcLenIomem(int len, uint64_t *nodeActcLen, IomemMsg *msg, uint16_t nrLocalNuma)
-{
-    int i;
-
-    if (len <= 0) {
-        return -EINVAL;
-    }
-
-    for (i = nrLocalNuma; i < len; i++) {
-        nodeActcLen[i] = 0;
-    }
-
-    for (i = 0; i < msg->cnt; i++) {
-        if (msg->iomemSegArray[i].node >= len || msg->iomemSegArray[i].node < nrLocalNuma) {
-            continue;
-        }
-        nodeActcLen[msg->iomemSegArray[i].node] +=
-            IsHugeMode() ? Calc2MCount(msg->iomemSegArray[i].end - msg->iomemSegArray[i].start + 1) :
-                           Calc4KCount(msg->iomemSegArray[i].end - msg->iomemSegArray[i].start + 1);
-    }
-    return 0;
-}
-
-static int GetNodeActcLenAcpi(int len, uint64_t *nodeActcLen, AcpiMsg *msg)
-{
-    int i;
-    uint64_t range;
-    uint64_t pageCnt;
-
-    if (len == 0) {
-        return -EINVAL;
-    }
-
-    for (i = 0; i < len; i++) {
-        nodeActcLen[i] = 0;
-    }
-
-    for (i = 0; i < msg->cnt; i++) {
-        if (msg->acpiSegArray[i].node >= len) {
-            continue;
-        }
-        range = msg->acpiSegArray[i].end - msg->acpiSegArray[i].start + 1;
-        if (IsHugeMode()) {
-            pageCnt = Calc2MCount(range);
-        } else {
-            pageCnt = Calc4KCount(range);
-        }
-        nodeActcLen[msg->acpiSegArray[i].node] += pageCnt;
-    }
-    return 0;
-}
-
-static int GetNodeActcLen(struct ProcessManager *manager)
-{
-    int ret;
-
-    ret = GetNodeActcLenIomem(MAX_NODES, manager->nodeActcLen, &manager->iomMsg, manager->nrLocalNuma);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Get node actc len from iomem failed : %d.", ret);
-        return ret;
-    }
-
-    ret = GetNodeActcLenAcpi(manager->nrLocalNuma, manager->nodeActcLen, &manager->acpiMsg);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Get node actc len from acpi or numa failed : %d.", ret);
-        return ret;
-    }
-    return 0;
-}
-
-void FreeNodeActcData(struct ProcessManager *manager)
-{
-    int nid;
-
-    for (nid = 0; nid < MAX_NODES; nid++) {
-        if (manager->tracking.nodeActc[nid]) {
-            free(manager->tracking.nodeActc[nid]);
-        }
-        manager->tracking.nodeActc[nid] = NULL;
-    }
-}
-
-static int InitNodeActcData(struct ProcessManager *manager)
-{
-    int nid;
-    int ret;
-
-    ret = GetNodeActcLen(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Error when get actc len : %d.", ret);
-        return ret;
-    }
-    FreeNodeActcData(manager);
-    for (nid = 0; nid < MAX_NODES; nid++) {
-        if (!manager->nodeActcLen[nid]) {
-            continue;
-        }
-        manager->tracking.nodeActc[nid] = malloc(sizeof(actc_t) * manager->nodeActcLen[nid]);
-        if (!manager->tracking.nodeActc[nid]) {
-            SMAP_LOGGER_ERROR("Alloc actc mem failed for node %d.", nid);
-            FreeNodeActcData(manager);
-            return -ENOMEM;
-        }
-    }
-    return 0;
-}
-
 static int ConfigTrackingDev(int *trackingFds, uint32_t pageSize)
 {
     int ret = 0;
@@ -233,140 +88,78 @@ static int ConfigTrackingDev(int *trackingFds, uint32_t pageSize)
     return ret;
 }
 
-void FreeAddrMemory(struct ProcessManager *manager)
+static bool IsLocalNuma(unsigned long nid)
 {
-    if (manager->acpiMsg.acpiSegArray) {
-        free(manager->acpiMsg.acpiSegArray);
-        manager->acpiMsg.acpiSegArray = NULL;
+#define SYS_NODE_REMOTE_LEN 50
+    char path[SYS_NODE_REMOTE_LEN] = { 0 };
+#undef SYS_NODE_REMOTE_LEN
+
+    if (nid >= LOCAL_NUMA_NUM) {
+        return false;
     }
 
-    if (manager->iomMsg.iomemSegArray) {
-        free(manager->iomMsg.iomemSegArray);
-        manager->iomMsg.iomemSegArray = NULL;
+    int ret = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/node%lu/remote", SYS_NODE_PATH, nid);
+    if (ret == -1) {
+        SMAP_LOGGER_ERROR("Failed to build node%lu remote path.", nid);
+        return false;
     }
+
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        SMAP_LOGGER_ERROR("Failed to open node%lu remote file.", nid);
+        return false;
+    }
+
+    int c = fgetc(file);
+    if (fclose(file) != 0) {
+        SMAP_LOGGER_WARNING("Failed to close node%lu remote file: %d.", nid, errno);
+    }
+    if (c == EOF) {
+        SMAP_LOGGER_ERROR("Failed to read node%lu remote file.", nid);
+        return false;
+    }
+
+    return c == '0';
 }
 
-static void GetLocalNrNuma(struct ProcessManager *manager)
+static int SetNrLocalNuma(struct ProcessManager *manager)
 {
-    int i = 0;
+    DIR *dir = opendir(SYS_NODE_PATH);
+    if (!dir) {
+        SMAP_LOGGER_ERROR("Failed to open node directory: %d.", -errno);
+        return -ENODEV;
+    }
+
+#define NODE_LITERAL_LEN 4
+    struct dirent *entry;
     manager->nrLocalNuma = 0;
-    for (i = 0; i < manager->acpiMsg.cnt; i++) {
-        if (manager->acpiMsg.acpiSegArray[i].node >= manager->nrLocalNuma) {
-            manager->nrLocalNuma = manager->acpiMsg.acpiSegArray[i].node + 1;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "node", NODE_LITERAL_LEN) == 0) {
+            char *numStr = entry->d_name + NODE_LITERAL_LEN;
+            char *endPtr;
+            unsigned long num = strtoul(numStr, &endPtr, DECIMAL);
+            if (*numStr != '\0' && *endPtr == '\0' && IsLocalNuma(num) && num >= manager->nrLocalNuma) {
+                manager->nrLocalNuma = num + 1;
+            }
         }
     }
-    SMAP_LOGGER_INFO("get local nr numa: %lu.", manager->nrLocalNuma);
-}
+    closedir(dir);
+#undef NODE_LITERAL_LEN
 
-static int GetAcpiAddresses(struct ProcessManager *manager)
-{
-    int ret = 0;
-    int fd;
-
-    fd = FindFdByNode(manager->fds.nodes, MAX_NODES);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Can't find fd by node %d.", fd);
-        return fd;
-    }
-    ret = ioctl(fd, SMAP_IOCTL_ACPI_LEN, &(manager->acpiMsg.cnt));
-    if (ret) {
-        SMAP_LOGGER_ERROR("ioctl get acpi len failed: %d.", ret);
-        return ret;
-    }
-    manager->acpiMsg.acpiSegArray = malloc(sizeof(AcpiSeg) * manager->acpiMsg.cnt);
-    if (!manager->acpiMsg.acpiSegArray) {
-        SMAP_LOGGER_ERROR("Alloc acpi mem failed.");
-        return -ENOMEM;
-    }
-    ret = ioctl(fd, SMAP_IOCTL_ACPI_ADDR, manager->acpiMsg.acpiSegArray);
-    if (ret) {
-        free(manager->acpiMsg.acpiSegArray);
-        manager->acpiMsg.acpiSegArray = NULL;
-        SMAP_LOGGER_ERROR("ioctl get acpi addr failed: %d.", ret);
-        return ret;
-    }
-    GetLocalNrNuma(manager);
-    return ret;
-}
-
-int GetIomemAddresses(struct ProcessManager *manager)
-{
-    int ret = 0;
-    int fd;
-
-    fd = FindFdByNode(manager->fds.nodes, MAX_NODES);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Can't find fd by node %d.", fd);
-        return fd;
-    }
-    ret = ioctl(fd, SMAP_IOCTL_IOMEM_LEN, &(manager->iomMsg.cnt));
-    if (ret) {
-        SMAP_LOGGER_ERROR("manager->iomMsg.cnt failed  ret : %d.", ret);
-        return ret;
-    }
-    if (manager->iomMsg.cnt == 0) {
-        SMAP_LOGGER_WARNING("manager->iomMsg.cnt is 0.");
-        free(manager->iomMsg.iomemSegArray);
-        manager->iomMsg.iomemSegArray = NULL;
-        return 0;
-    }
-    if (manager->iomMsg.iomemSegArray) {
-        free(manager->iomMsg.iomemSegArray);
-        manager->iomMsg.iomemSegArray = NULL;
-    }
-    manager->iomMsg.iomemSegArray = malloc(sizeof(IomemSeg) * manager->iomMsg.cnt);
-    if (!manager->iomMsg.iomemSegArray) {
-        SMAP_LOGGER_ERROR("Alloc iomem failed.");
-        return -ENOMEM;
-    }
-
-    return ioctl(fd, SMAP_IOCTL_IOMEM_ADDR, manager->iomMsg.iomemSegArray);
-}
-
-static int GetTrackingAddr(struct ProcessManager *manager)
-{
-    int ret = 0;
-
-    FreeAddrMemory(manager);
-    ret = GetAcpiAddresses(manager);
-    if (ret) {
-        FreeAddrMemory(manager);
-        SMAP_LOGGER_ERROR("GetAcpiAddresses failed. ret : %d.", ret);
-        return ret;
-    }
-    ret |= GetIomemAddresses(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("GetIomemAddresses failed. ret : %d.", ret);
-        FreeAddrMemory(manager);
-        return ret;
-    }
-    return ret;
+    return 0;
 }
 
 int ConfigureTrackingDevices(struct ProcessManager *manager)
 {
-    int ret;
-
-    if (!manager->nrNuma) {
-        SMAP_LOGGER_ERROR("cannot find node* under /dev.");
-        return -ENODEV;
+    int ret = SetNrLocalNuma(manager);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Unable to set local NUMA num: %d.", ret);
+        return ret;
     }
 
     ret = ConfigTrackingDev(manager->fds.nodes, manager->tracking.pageSize);
     if (ret) {
         SMAP_LOGGER_ERROR("Error when config tracking-node devices.");
-        return ret;
-    }
-
-    ret = GetTrackingAddr(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Error when get tracking addresses.");
-        return ret;
-    }
-    ret = InitNodeActcData(manager);
-    if (ret) {
-        FreeAddrMemory(manager);
-        SMAP_LOGGER_ERROR("Error when update node segment.");
         return ret;
     }
     return 0;
@@ -400,7 +193,6 @@ int InitTrackingDev(struct ProcessManager *manager)
     int ret = 0;
     int fd;
     char path[PATH_MAX];
-    manager->nrNuma = 0;
 
     ret = OpenAndFlockFd(&fd, TIERING_PATH);
     if (ret) {
@@ -433,9 +225,9 @@ int InitTrackingDev(struct ProcessManager *manager)
             continue;
         }
         manager->fds.nodes[i] = fd;
-        manager->nrNuma++;
         SMAP_LOGGER_INFO("%s is managed.", path);
     }
+
     ret = ConfigureTrackingDevices(manager);
     if (ret) {
         SMAP_LOGGER_ERROR("config tracking devices failed : %d.", ret);
@@ -466,8 +258,6 @@ void DeinitTrackingDev(struct ProcessManager *manager)
     int i;
 
     DisableTracking(manager);
-    FreeAddrMemory(manager);
-    FreeNodeActcData(manager);
     for (i = 0; i < MAX_NODES; i++) {
         if (manager->fds.nodes[i] >= 0) {
             close(manager->fds.nodes[i]);
@@ -482,5 +272,4 @@ void DeinitTrackingDev(struct ProcessManager *manager)
         close(manager->fds.access);
         manager->fds.access = DEFAULT_FD;
     }
-    manager->nrNuma = 0;
 }

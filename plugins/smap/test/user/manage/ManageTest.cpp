@@ -63,7 +63,6 @@ TEST_F(ManageTest, TestProcessManagerInitTwo)
     int ret = 0;
     uint32_t pageType = PAGETYPE_2M;
     MOCKER(EnvMutexInit).stubs().will(returnValue(0));
-    g_processManager.tracking.nodeActc[0] = (uint16_t*)&period;
     g_processManager.threadCtx[0] = (void*)&period;
     g_processManager.processes = (ProcessAttr*)&period;
     ret = ProcessManagerInit(pageType);
@@ -361,8 +360,8 @@ TEST_F(ManageTest, TestVMProcessReadDomainIdFailed)
     ProcessAttr attr;
     int ret;
 
-    MOCKER(IsQemuTask).stubs().will(returnValue(1));
-    MOCKER(ReadDomainIdByPid).stubs().will(returnValue(-errno));
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+    MOCKER(ReadDomainIdByPid).stubs().will(returnValue(-1));
 
     ret = VMPreprocess(pid, &attr);
     EXPECT_EQ(-EINVAL, ret);

@@ -7,6 +7,10 @@
 
 #include <linux/device.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void stub_tracking_enable(struct device *ldev);
 
 void stub_tracking_disable(struct device *ldev);
@@ -20,4 +24,9 @@ int stub_tracking_mode_set(struct device *ldev, u8 mode);
 int stub_tracking_set_page_size(struct device *ldev, u8 page_size);
 
 int StubTrackingReinitNode(struct device *ldev);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

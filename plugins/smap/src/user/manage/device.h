@@ -18,6 +18,8 @@
 
 #define TIERING_PATH "/dev/smap_mig_device"
 #define NODE_PATH "/dev/smap_node%d"
+#define SYS_NODE_PATH "/sys/devices/system/node"
+#define DECIMAL 10
 #define MS_PER_SEC 1000
 #define US_PER_MSEC 1000
 #define NS_PER_USEC 1000
@@ -31,20 +33,10 @@ int EnableTracking(struct ProcessManager *manager);
 
 int DisableTracking(struct ProcessManager *manager);
 
-int ReadTracking(struct ProcessManager *manager);
-
 int InitTrackingDev(struct ProcessManager *manager);
 
 void DeinitTrackingDev(struct ProcessManager *manager);
 
-void FreeAddrMemory(struct ProcessManager *manager);
-
-void FreeNodeActcData(struct ProcessManager *manager);
-
 int GetRamIsChange(struct ProcessManager *manager, int *change);
-
-int GetNodeActcLenIomem(int len, uint64_t *nodeActcLen, IomemMsg *msg, uint16_t nrLocalNuma);
-
-int GetIomemAddresses(struct ProcessManager *manager);
 
 #endif /* __DEVICE_H__ */

@@ -2,14 +2,14 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2023-2023. All rights reserved.
  * Description: SMAP3.0 attr模块测试代码
  */
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <linux/gfp.h>
 #include <linux/slab.h>
 #include <linux/numa.h>
 #include <linux/mm.h>
 #include <linux/list.h>
-
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 
 #include "common.h"
 #include "numa.h"

@@ -1,12 +1,13 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <linux/hugetlb.h>
 #include <linux/pagewalk.h>
 #include <linux/sched.h>
 #include <linux/sched/mm.h>
 
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 #include "coherence_maintain.h"
 
 extern "C" pte_t g_tmp_pte;

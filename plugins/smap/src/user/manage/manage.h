@@ -240,29 +240,6 @@ struct ProcessAttribute {
 typedef struct ProcessAttribute ProcessAttr;
 
 typedef struct {
-    int node;
-    int pxm;
-    uint64_t start;
-    uint64_t end;
-} AcpiSeg;
-
-typedef struct {
-    int cnt;
-    AcpiSeg *acpiSegArray;
-} AcpiMsg;
-
-typedef struct {
-    int node;
-    uint64_t start;
-    uint64_t end;
-} IomemSeg;
-
-typedef struct {
-    int cnt;
-    IomemSeg *iomemSegArray;
-} IomemMsg;
-
-typedef struct {
     uint16_t nrSegment;
     uint32_t nrPages;
     uint64_t startPa;
@@ -310,7 +287,6 @@ struct MigPidRemoteNumaIoctlMsg {
 // 反向扫描参数，所有process共享
 typedef struct {
     uint32_t pageSize;
-    actc_t *nodeActc[MAX_NODES]; // 每个node的actc扫描结果
     uint64_t nrColdPage; // 冷页数量
     uint64_t nrHotPage; // 热页数量
     uint16_t scanPeriod; // 扫描周期
@@ -343,13 +319,9 @@ struct ProcessManager {
     uint16_t smapMigTime; // 扫描次数
     SceneInfo sceneInfo;
     uint16_t nr[TYPE_MAX];
-    uint16_t nrNuma; // numa node数量
     uint16_t nrThread; // 线程数量
     uint16_t nrLocalNuma; // local numa数量
     DevFds fds;
-    uint64_t nodeActcLen[MAX_NODES]; // 每个node的页数量
-    AcpiMsg acpiMsg;
-    IomemMsg iomMsg;
     TrackingAttr tracking; // 反向扫描参数
     void *threadCtx[MAX_THREADS]; // 管理的线程上下文
     struct RemoteNumaInfo remoteNumaInfo; // 借用远端内存数量

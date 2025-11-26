@@ -29,16 +29,6 @@ DEFINE_RWLOCK(rem_ram_list_lock);
 EXPORT_SYMBOL(rem_ram_list_lock);
 bool remote_ram_changed; /* Protected by rem_ram_list_lock */
 
-int get_remote_ram_len(void)
-{
-	int len = 0;
-	struct ram_segment *seg, *tmp;
-	list_for_each_entry_safe(seg, tmp, &remote_ram_list, node) {
-		len++;
-	}
-	return len;
-}
-
 static void free_remote_ram(struct list_head *head)
 {
 	struct ram_segment *seg, *tmp;
@@ -157,9 +147,10 @@ bool ram_changed(void)
 	if (smap_scene == UB_QEMU_SCENE)
 		return false;
 
-	read_lock(&rem_ram_list_lock);
+	write_lock(&rem_ram_list_lock);
 	flag = remote_ram_changed;
-	read_unlock(&rem_ram_list_lock);
+	remote_ram_changed = false;
+	write_unlock(&rem_ram_list_lock);
 	return flag;
 }
 EXPORT_SYMBOL(ram_changed);

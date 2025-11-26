@@ -170,7 +170,11 @@ static int InitOomMigrateMsg(struct MigrateMsg *mMsg, struct ProcessManager *man
     mMsg->mulMig.isMulThread = manager->nrThread == 1 ? false : true;
     mMsg->mulMig.pageSize = manager->tracking.pageSize;
 
-    mMsg->migList = malloc(sizeof(struct MigList) * manager->nrNuma);
+    int maxProcessCnt = GetCurrentMaxNrPid();
+    if (maxProcessCnt == 0) {
+        return -EINVAL;
+    }
+    mMsg->migList = malloc(sizeof(struct MigList) * maxProcessCnt);
     if (!mMsg->migList) {
         SMAP_LOGGER_ERROR("mMsg->migList malloc failed.");
         return -ENOMEM;
