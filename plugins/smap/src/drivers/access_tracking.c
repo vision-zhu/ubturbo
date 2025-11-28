@@ -59,15 +59,20 @@ ktime_t calc_time_us(ktime_t start_time)
 }
 EXPORT_SYMBOL(calc_time_us);
 
+void cancel_ap_scan_work(struct access_pid *ap)
+{
+	if (ap && ap->scan_work.work.func) {
+		cancel_delayed_work_sync(&ap->scan_work);
+	}
+}
+
 void submit_one_work(struct access_pid *ap)
 {
 	struct access_tracking_dev *adev_head = get_first_access_dev();
 	pr_debug("submit_one_work: pid=%d, delay=%dms\n", ap->pid,
 		 ap->scan_time);
 	/* check if work was already initialized */
-	if (ap->scan_work.work.func) {
-		cancel_delayed_work_sync(&ap->scan_work);
-	}
+	cancel_ap_scan_work(ap);
 	init_completion(&ap->work_done);
 	INIT_DELAYED_WORK(&ap->scan_work, work_func);
 	queue_delayed_work(adev_head->scanq, &ap->scan_work,
@@ -124,7 +129,7 @@ static void destroy_scan_workqueue(void)
 	struct access_tracking_dev *adev = get_first_access_dev();
 	down_read(&ap_data.lock);
 	list_for_each_entry(ap, &ap_data.list, node) {
-		cancel_delayed_work_sync(&ap->scan_work);
+		cancel_ap_scan_work(ap);
 	}
 	up_read(&ap_data.lock);
 	flush_workqueue(adev->scanq);

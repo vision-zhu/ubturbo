@@ -63,7 +63,7 @@
 #define MMAP_TYPE_SHARED_SEG1 "memAccess='shared'"
 #define MMAP_TYPE_SHARED_SEG2 "access mode='shared'"
 
-#define PERIOD_CONFIG_PATH "/etc/smap/period.config"
+#define PERIOD_CONFIG_PATH "/opt/ubturbo/conf/smap/period.config"
 #define DEFAULT_NMEMB 1
 #define MAX_MIGRATE_BACK_WAIT_TIME 60
 #define MIGRATE_BACK_CHECK_PERIOD 1000
