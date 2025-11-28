@@ -44,10 +44,10 @@ protected:
 
 bool InterfaceTest::EnvMutexIsRelease(EnvMutex *mutex)
 {
-    if (pthread_mutex_trylock(&mutex->m)) {
+    if (pthread_mutex_trylock(&mutex->lock)) {
         return false;
     }
-    pthread_mutex_unlock(&mutex->m);
+    pthread_mutex_unlock(&mutex->lock);
     return true;
 }
 
@@ -295,7 +295,6 @@ TEST_F(InterfaceTest, IsRemoteNidValidOne)
 TEST_F(InterfaceTest, IsRemoteNidValidTwo)
 {
     int nid = 4;
-    IomemSeg seg[2] = { { .node = 4 }, { .node = 5 } };
     struct ProcessManager pm = {
         .nrLocalNuma = 2,
     };
@@ -668,12 +667,12 @@ TEST_F(InterfaceTest, TestCheckMigrateOutMsgCheckMigrateMode)
 }
 
 extern "C" int IoctlHandler(const void *msg, int pidType, const unsigned long *ioctlCommands);
-extern "C" int AddProcessNumaBitMap(struct MigrateOutHashNode *hashMsg,
-                                    int pidCount, uint32_t *nodeBitmap, int pidType);
+extern "C" int AddProcessNumaBitMap(struct MigrateOutHashNode *hashMsg, int pidCount, uint32_t *nodeBitmap,
+                                    int pidType);
 extern "C" int AddProcessesToGlobalManager(struct MigrateOutHashNode *hashMsg, int pidCount, int pidType,
                                            uint32_t *nodeBitmap, bool *hasInvalidPid);
-extern "C" int ProcessAddTrackingManage(struct MigrateOutHashNode *hashMsg,
-                                        int pidCount, int pidType, uint32_t *nodeBitmap);
+extern "C" int ProcessAddTrackingManage(struct MigrateOutHashNode *hashMsg, int pidCount, int pidType,
+                                        uint32_t *nodeBitmap);
 TEST_F(InterfaceTest, TestSmapMigrateOut)
 {
     int ret;

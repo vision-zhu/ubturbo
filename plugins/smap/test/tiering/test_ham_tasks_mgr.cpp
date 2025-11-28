@@ -1,5 +1,8 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <linux/fs.h>
 #include <linux/hugetlb.h>
 #include <linux/sort.h>
@@ -8,9 +11,6 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include "ham_tasks_mgr.h"
-
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 
 using namespace std;
 

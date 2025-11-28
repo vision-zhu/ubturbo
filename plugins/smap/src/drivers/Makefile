@@ -10,7 +10,7 @@ smap_tracking_core-objs += bus.o
 smap_access_tracking-objs := access_iomem.o access_acpi_helper.o access_acpi_mem.o accessed_bit.o access_ioctl.o access_pid.o access_mmu.o access_tracking.o kvm_pgtable.o access_tracking_wrapper.o memory_notifier.o
 smap_histogram_tracking-objs := access_acpi_helper.o access_acpi_mem.o hist_ops.o ub_hist.o smap_hist_mid.o hist_tracking.o
 
-ccflags-y += -DENV_USER -DACPI_NOT_READY
+ccflags-y += -DACPI_NOT_READY
 
 .PHONY: modules clean
 .default: modules

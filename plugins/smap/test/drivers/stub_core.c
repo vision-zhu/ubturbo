@@ -50,33 +50,3 @@ int stub_tracking_ram_change(struct device *ldev, void __user *argp)
 {
     return 0;
 }
-
-int stub_tracking_acpi_len_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}
-
-int stub_tracking_numa_len_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}
-
-int stub_tracking_iomem_len_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}
-
-int stub_tracking_acpi_mem_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}
-
-int stub_tracking_numa_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}
-
-int stub_tracking_iomem_get(struct device *ldev, void __user *argp)
-{
-    return 0;
-}

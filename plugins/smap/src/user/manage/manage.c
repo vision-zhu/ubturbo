@@ -94,7 +94,6 @@ int ProcessManagerInit(uint32_t pageType)
 
     for (i = 0; i < MAX_NODES; i++) {
         g_processManager.fds.nodes[i] = DEFAULT_FD;
-        g_processManager.tracking.nodeActc[i] = NULL;
     }
     g_processManager.fds.migrate = DEFAULT_FD;
     g_processManager.fds.access = DEFAULT_FD;
@@ -551,8 +550,8 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
     }
     SMAP_LOGGER_INFO("attr->scanStart time: %s", ctime(&attr->scanStart));
     int localNumaCnt = GetL1Count(attr->numaAttr.numaNodes);
-    SMAP_LOGGER_INFO("Pid: %d local numa cnt :%d.", attr->pid, localNumaCnt);
-    SMAP_LOGGER_INFO("Pid: %d remote numa cnt :%d.", attr->pid, attr->remoteNumaCnt);
+    SMAP_LOGGER_INFO("Pid: %d local numa cnt: %d.", attr->pid, localNumaCnt);
+    SMAP_LOGGER_INFO("Pid: %d remote numa cnt: %d.", attr->pid, attr->remoteNumaCnt);
     if ((param->count > 1 || localNumaCnt > 1) && GetPidType(&g_processManager) == VM_TYPE) { // multinuma vm
         for (int i = 0; i < param->count; i++) {
             attr->migrateParam[i].nid = param->numaParam[i].nid;
@@ -627,8 +626,8 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
     if (ret) {
         SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", param->pid, ret);
     }
-    SMAP_LOGGER_INFO("Add pid:%d success! localMemRatio:%d, migrateMode: %d.", param->pid,
-                     attr->initLocalMemRatio, attr->migrateMode);
+    SMAP_LOGGER_INFO("Add pid:%d success! localMemRatio:%d, migrateMode: %d.", param->pid, attr->initLocalMemRatio,
+                     attr->migrateMode);
 
     return 0;
 }
@@ -787,7 +786,7 @@ int ProcessAddManage(ProcessParam *param, uint32_t *nodeBitmap)
             SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", param->pid, ret);
         }
         for (int i = 0; i < param->count; i++) {
-            SMAP_LOGGER_INFO("Update pid:%d success! localMemRatio:%d, migrateMode: %d, destnid:%d, memSize: %llu.",
+            SMAP_LOGGER_INFO("Update pid:%d success! localMemRatio:%d, migrateMode: %d, destnid: %d, memSize: %llu.",
                              current->pid, current->initLocalMemRatio, current->migrateMode,
                              current->migrateParam[i].nid, current->migrateParam[i].memSize);
         }
@@ -2176,8 +2175,8 @@ bool MigOutIsDone(pid_t pid, bool *isMultiNumaPid)
         for (int i = 0; i < attr->remoteNumaCnt; i++) {
             int l2node = attr->migrateParam[i].nid;
             remoteNum = KBTo2M(attr->migrateParam[i].memSize);
-            SMAP_LOGGER_INFO("Pid %d, l2node: %d, remoteNum: %lu, actcLen: %lu.", pid, l2node,
-                             remoteNum, attr->scanAttr.actcLen[l2node]);
+            SMAP_LOGGER_INFO("Pid: %d, l2node: %d, remoteNum: %lu, actcLen: %lu.", pid, l2node, remoteNum,
+                             attr->scanAttr.actcLen[l2node]);
             if (attr->scanAttr.actcLen[l2node] != remoteNum) {
                 EnvMutexUnlock(&g_processManager.lock);
                 return false;

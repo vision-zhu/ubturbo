@@ -7,7 +7,6 @@ KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD       := $(shell pwd)
 KBUILD_EXTRA_SYMBOLS = $(src)/depends/Module.symvers
 
-ccflags-y += -DENV_USER
 .PHONY: modules
 default: modules
 

@@ -3,6 +3,9 @@
  * Description: SMAP : tests for smap_hist_mid
  * Create: 2025-7-2
  */
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <asm/types.h>
 #include <linux/acpi.h>
 #include <linux/fs.h>
@@ -11,8 +14,6 @@
 #include <linux/string.h>
 #include <linux/platform_device.h>
 
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 #include "smap_hist_mid.h"
 #include "ub_hist.h"
 

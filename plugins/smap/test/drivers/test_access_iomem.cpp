@@ -35,16 +35,6 @@ protected:
 };
 
 extern "C" struct list_head drivers_remote_ram_list;
-extern "C" int get_remote_ram_len(void);
-TEST_F(AccessIomemTest, get_remote_ram_len)
-{
-    int len;
-    LIST_HEAD(drivers_remote_ram_list);
-
-    len = get_remote_ram_len();
-    EXPECT_EQ(0, len);
-}
-
 extern "C" void drivers_free_remote_ram(struct list_head *head);
 TEST_F(AccessIomemTest, free_remote_ram)
 {

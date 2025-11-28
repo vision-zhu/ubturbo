@@ -227,57 +227,6 @@ static int InitMigrateMsg(struct MigrateMsg *mMsg, struct ProcessManager *manage
     return 0;
 }
 
-static int UpdateRemoteRamInfo(struct ProcessManager *manager)
-{
-    int ret = 0;
-    int i;
-    uint64_t nodeActcLenOld[MAX_NODES] = { 0 };
-
-    EnvMutexLock(&manager->lock);
-    for (i = manager->nrLocalNuma; i < MAX_NODES; i++) {
-        nodeActcLenOld[i] = manager->nodeActcLen[i];
-    }
-
-    ret = GetIomemAddresses(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Get iomem address failed! ret:%d.", ret);
-        if (manager->iomMsg.iomemSegArray) {
-            free(manager->iomMsg.iomemSegArray);
-            manager->iomMsg.iomemSegArray = NULL;
-        }
-        EnvMutexUnlock(&manager->lock);
-        return ret;
-    }
-    ret = GetNodeActcLenIomem(MAX_NODES, manager->nodeActcLen, &manager->iomMsg, manager->nrLocalNuma);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Get node actc len from iomem failed : %d.", ret);
-        EnvMutexUnlock(&manager->lock);
-        return ret;
-    }
-    for (i = manager->nrLocalNuma; i < MAX_NODES; i++) {
-        if (nodeActcLenOld[i] == manager->nodeActcLen[i]) {
-            continue;
-        }
-        if (manager->tracking.nodeActc[i]) {
-            free(manager->tracking.nodeActc[i]);
-            manager->tracking.nodeActc[i] = NULL;
-        }
-        if (manager->nodeActcLen[i] == 0) {
-            continue;
-        }
-        manager->tracking.nodeActc[i] = calloc(manager->nodeActcLen[i], sizeof(actc_t));
-        if (!manager->tracking.nodeActc[i]) {
-            SMAP_LOGGER_ERROR("calloc nodeActc[%d] failed.", i);
-            manager->nodeActcLen[i] = 0;
-            EnvMutexUnlock(&manager->lock);
-            return -ENOMEM;
-        }
-    }
-    SMAP_LOGGER_INFO("Iomem address info update successfully.");
-    EnvMutexUnlock(&manager->lock);
-    return 0;
-}
-
 static int CleanStrategyAttribute(struct ProcessManager *manager)
 {
     ProcessAttr *current;
@@ -330,10 +279,6 @@ static int PerformMigrationPreparation(struct ProcessManager *manager)
         return ret;
     }
     if (isRamChanged) {
-        ret = UpdateRemoteRamInfo(manager);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Update ram info failed! ret: %d.", ret);
-        }
         return -EBUSY;
     }
     if (!current) {

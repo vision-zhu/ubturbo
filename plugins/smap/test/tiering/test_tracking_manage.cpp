@@ -3,13 +3,13 @@
  * Description: SMAP5.0 测试代码
  */
 
+#include "gtest/gtest.h"
+#include "mockcpp/mokc.h"
+
 #include <linux/nodemask.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/version.h>
-
-#include "gtest/gtest.h"
-#include "mockcpp/mokc.h"
 
 #include "tracking_manage.h"
 

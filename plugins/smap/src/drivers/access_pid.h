@@ -131,7 +131,6 @@ static inline bool access_pid_is_scanning(pid_t pid)
 	return ap && ap->type != NO_SCAN;
 }
 
-
 static inline void clear_vm_mapping(u32 *mapping, u32 len)
 {
 	if (mapping)

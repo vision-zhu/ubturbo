@@ -90,19 +90,6 @@ int node_tracking_set_page_size(struct tracking_node_dev *node_dev,
 	return 0;
 }
 
-int node_tracking_reinit_node(struct tracking_node_dev *node_dev)
-{
-	struct tracking_dev *trk_dev;
-	int ret = 0;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_reinit_node)
-			ret = trk_dev->ops->tracking_reinit_node(trk_dev->dev);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
 int node_tracking_set_trk_mode(struct tracking_node_dev *node_dev, u8 mode)
 {
 	struct tracking_dev *trk_dev;
@@ -114,7 +101,6 @@ int node_tracking_set_trk_mode(struct tracking_node_dev *node_dev, u8 mode)
 	return 0;
 }
 
-#ifdef ENV_USER
 static long handle_tracking_cmd(struct tracking_node_dev *node_dev,
 				unsigned long arg)
 {
@@ -150,16 +136,6 @@ static long handle_page_size_set_cmd(struct tracking_node_dev *node_dev,
 	return 0;
 }
 
-static long handle_reinit_node_cmd(struct tracking_node_dev *node_dev)
-{
-	int ret = node_tracking_reinit_node(node_dev);
-	if (ret) {
-		pr_err("failed to reinit node, ret: %d\n", ret);
-		return ret;
-	}
-	return 0;
-}
-
 int node_ram_change_cmd(struct tracking_node_dev *node_dev, void __user *argp)
 {
 	struct tracking_dev *trk_dev;
@@ -186,108 +162,6 @@ static long handle_ram_change_cmd(struct tracking_node_dev *node_dev,
 	return 0;
 }
 
-int node_acpi_len_cmd(struct tracking_node_dev *node_dev, void __user *argp)
-{
-	struct tracking_dev *trk_dev;
-	int ret = 0;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_acpi_len_get)
-			ret = trk_dev->ops->tracking_acpi_len_get(trk_dev->dev,
-								  argp);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-static long handle_acpi_len_cmd(struct tracking_node_dev *node_dev,
-				void __user *argp)
-{
-	int ret = node_acpi_len_cmd(node_dev, argp);
-	if (ret) {
-		pr_err("failed to synchron local memory length, ret: %d\n",
-		       ret);
-		return ret;
-	}
-	return 0;
-}
-
-int node_iomem_len_cmd(struct tracking_node_dev *node_dev, void __user *argp)
-{
-	struct tracking_dev *trk_dev;
-	int ret = 0;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_iomem_len_get)
-			ret = trk_dev->ops->tracking_iomem_len_get(trk_dev->dev,
-								   argp);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-static long handle_iomem_len_cmd(struct tracking_node_dev *node_dev,
-				 void __user *argp)
-{
-	int ret = node_iomem_len_cmd(node_dev, argp);
-	if (ret) {
-		pr_err("failed to synchron remote memory length, ret: %d\n",
-		       ret);
-		return ret;
-	}
-	return 0;
-}
-
-int node_acpi_mem_cmd(struct tracking_node_dev *node_dev, void __user *argp)
-{
-	struct tracking_dev *trk_dev;
-	int ret = 0;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_acpi_mem_get)
-			ret = trk_dev->ops->tracking_acpi_mem_get(trk_dev->dev,
-								  argp);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-static long handle_acpi_mem_cmd(struct tracking_node_dev *node_dev,
-				void __user *argp)
-{
-	int ret = node_acpi_mem_cmd(node_dev, argp);
-	if (ret) {
-		pr_err("failed to synchron local memory info, ret: %d\n", ret);
-		return ret;
-	}
-	return 0;
-}
-
-int node_iomem_cmd(struct tracking_node_dev *node_dev, void __user *argp)
-{
-	struct tracking_dev *trk_dev;
-	int ret = 0;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_iomem_get)
-			ret = trk_dev->ops->tracking_iomem_get(trk_dev->dev,
-							       argp);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-static long handle_iomem_cmd(struct tracking_node_dev *node_dev,
-			     void __user *argp)
-{
-	int ret = node_iomem_cmd(node_dev, argp);
-	if (ret) {
-		pr_err("failed to synchron remote memory info, ret: %d\n", ret);
-		return ret;
-	}
-	return 0;
-}
-
 static long node_cdev_user_ioctl(struct file *file, unsigned int cmd,
 				 unsigned long arg)
 {
@@ -301,18 +175,8 @@ static long node_cdev_user_ioctl(struct file *file, unsigned int cmd,
 		return handle_mode_set_cmd(node_dev, arg);
 	case SMAP_IOCTL_PAGE_SIZE_SET_CMD:
 		return handle_page_size_set_cmd(node_dev, arg);
-	case SMAP_IOCTL_REINIT_NODE_CMD:
-		return handle_reinit_node_cmd(node_dev);
 	case SMAP_IOCTL_RAM_CHANGE:
 		return handle_ram_change_cmd(node_dev, argp);
-	case SMAP_IOCTL_ACPI_LEN:
-		return handle_acpi_len_cmd(node_dev, argp);
-	case SMAP_IOCTL_IOMEM_LEN:
-		return handle_iomem_len_cmd(node_dev, argp);
-	case SMAP_IOCTL_ACPI_ADDR:
-		return handle_acpi_mem_cmd(node_dev, argp);
-	case SMAP_IOCTL_IOMEM_ADDR:
-		return handle_iomem_cmd(node_dev, argp);
 	default:
 		pr_err("invalid command type: %d passed to ioctl\n", cmd);
 		return -EINVAL;
@@ -335,8 +199,6 @@ int node_trk_data_read(struct tracking_node_dev *node_dev, void *buffer,
 	}
 	return result;
 }
-
-#endif
 
 ssize_t node_cdev_read_iter(struct kiocb *iocb, struct iov_iter *iov)
 {

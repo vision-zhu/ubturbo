@@ -21,17 +21,7 @@
 
 #define SMAP_IOCTL_PAGE_SIZE_SET_CMD _IOW('N', 4, unsigned long)
 
-#define SMAP_IOCTL_REINIT_NODE_CMD _IOW('N', 5, unsigned long)
-
-#define SMAP_IOCTL_RAM_CHANGE _IOW('N', 6, int)
-
-#define SMAP_IOCTL_ACPI_LEN _IOW('N', 7, int)
-
-#define SMAP_IOCTL_IOMEM_LEN _IOW('N', 8, int)
-
-#define SMAP_IOCTL_ACPI_ADDR _IOW('N', 9, struct acpi_seg)
-
-#define SMAP_IOCTL_IOMEM_ADDR _IOW('N', 10, struct iomem_seg)
+#define SMAP_IOCTL_RAM_CHANGE _IOW('N', 5, int)
 
 enum node_tracking_cmd {
 	TRACKING_DISABLED,

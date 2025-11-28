@@ -38,7 +38,6 @@ TEST_F(OomMigrateTest, TestInitOomMigrateMsg)
     TrackingAttr tracking;
     tracking.pageSize = PAGESIZE_4K;
     struct ProcessManager manager = {
-        .nrNuma = 10,
         .nrThread = 2,
     };
     manager.tracking = tracking;
@@ -59,7 +58,6 @@ TEST_F(OomMigrateTest, TestInitMigList)
     struct MigrateMsg mMsg;
     struct MigList mList;
     struct ProcessManager manager = {
-        .nrNuma = 10,
         .nrThread = 2,
         .nrLocalNuma = 10
     };
@@ -88,7 +86,6 @@ TEST_F(OomMigrateTest, TestInitMigListSecond)
     struct MigrateMsg mMsg;
     struct MigList mList;
     struct ProcessManager manager = {
-        .nrNuma = 10,
         .nrThread = 2,
         .nrLocalNuma = 10
     };

@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <dirent.h>
 
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
@@ -146,31 +147,6 @@ TEST_F(DeviceTest, TestSendCmdToAllNodesGroup)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(DeviceTest, TestReadTracking)
-{
-    struct ProcessManager pm = {
-        .nrNuma = 0
-    };
-    int ret;
-    MOCKER(read).stubs().will(returnValue(0));
-    ret = ReadTracking(&pm);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" ssize_t read(int fd, void *buf, size_t count);
-TEST_F(DeviceTest, TestReadTrackingTwo)
-{
-    ProcessManager *pm = (ProcessManager *)malloc(sizeof(ProcessManager));
-    pm->fds.nodes[0] = 1;
-    pm->nodeActcLen[0] = 1;
-    pm->tracking.nodeActc[0] = (uint16_t *)malloc(sizeof(uint16_t) * pm->nodeActcLen[0]);
-    int ret;
-    MOCKER(read).stubs().will(returnValue(-1));
-    ret = ReadTracking(pm);
-    EXPECT_EQ(-1, ret);
-    free(pm);
-}
-
 TEST_F(DeviceTest, TestConfigTrackingDev)
 {
     int fds[100] = {0};
@@ -188,49 +164,23 @@ extern "C" int DisableTracking(struct ProcessManager *manager);
 TEST_F(DeviceTest, TestDeinitTrackingDev)
 {
     struct ProcessManager pm = {
-        .nrNuma = 1
+        .fds = {
+            .nodes = { 1, 2 },
+            .migrate = 3,
+            .access = 4,
+        }
     };
-    pm.nodeActcLen[0] = 1;
-    pm.tracking.nodeActc[0] = (uint16_t *)malloc(sizeof(uint16_t) * pm.nodeActcLen[0]);
+    for (int i = 2; i < MAX_NODES; i++) {
+        pm.fds.nodes[i] = DEFAULT_FD;
+    }
 
     MOCKER(DisableTracking).stubs().will(returnValue(0));
+    MOCKER(static_cast<int (*)(int)>(close)).expects(exactly(4)).will(ignoreReturnValue());
     DeinitTrackingDev(&pm);
-    EXPECT_EQ(0, pm.nrNuma);
-
-    pm.fds.nodes[0] = -1;
-    pm.fds.migrate = -1;
-    DeinitTrackingDev(&pm);
-    EXPECT_EQ(0, pm.nrNuma);
-}
-
-extern "C" uint64_t Calc2MCount(uint64_t range);
-TEST_F(DeviceTest, TestCalc2MCountOne)
-{
-    uint64_t range = 0;
-    uint64_t ret = Calc2MCount(range);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DeviceTest, TestCalc2MCountTwo)
-{
-    uint64_t range = 1;
-    uint64_t ret = Calc2MCount(range);
-    EXPECT_EQ(1, ret);
-}
-
-extern "C" uint64_t Calc4KCount(uint64_t range);
-TEST_F(DeviceTest, TestCalc4KCountOne)
-{
-    uint64_t range = 0;
-    uint64_t ret = Calc4KCount(range);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(DeviceTest, TestCalc4KCountTwo)
-{
-    uint64_t range = 3;
-    uint64_t ret = Calc4KCount(range);
-    EXPECT_EQ(1, ret);
+    EXPECT_EQ(DEFAULT_FD, pm.fds.nodes[0]);
+    EXPECT_EQ(DEFAULT_FD, pm.fds.nodes[1]);
+    EXPECT_EQ(DEFAULT_FD, pm.fds.migrate);
+    EXPECT_EQ(DEFAULT_FD, pm.fds.access);
 }
 
 extern "C" int FindFdByNode(int fds[], int fdsLength);
@@ -246,398 +196,232 @@ TEST_F(DeviceTest, TestFindFdByNode)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" void FreeNodeActcData(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestFreeNodeActcData)
+extern "C" bool IsLocalNuma(unsigned long nid);
+TEST_F(DeviceTest, TestIsLocalNumaExceedLocalNumaNum)
 {
-    struct ProcessManager manager;
-    for (int i = 0; i < MAX_NODES; i++) {
-        manager.tracking.nodeActc[i] = new uint16_t(1);
-    }
-    FreeNodeActcData(&manager);
-    for (int i = 0; i < MAX_NODES; i++) {
-        EXPECT_EQ(NULL, manager.tracking.nodeActc[i]);
-    }
+    bool ret = IsLocalNuma(LOCAL_NUMA_NUM);
+    EXPECT_FALSE(ret);
 }
 
-extern "C" void FreeAddrMemory(struct ProcessManager *manager);
-extern "C" int GetTrackingAddr(struct ProcessManager *manager);
-extern "C" int GetNodeActcLenIomem(int len, uint64_t *nodeActcLen, IomemMsg *msg, uint16_t nrLocalNuma);
-TEST_F(DeviceTest, TestGetNodeActcLenIomemOne)
+TEST_F(DeviceTest, TestIsLocalNumaBuildFailed)
 {
-    int len = 0;
-    uint64_t nodeActcLen[10];
-    IomemMsg msg;
-    uint16_t nrLocalNuma;
-    int ret = GetNodeActcLenIomem(len, nodeActcLen, &msg, nrLocalNuma);
-    EXPECT_EQ(-EINVAL, ret);
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(-1));
+    bool ret = IsLocalNuma(0);
+    EXPECT_FALSE(ret);
 }
 
-TEST_F(DeviceTest, TestGetNodeActcLenIomemTwo)
+extern "C" FILE *fopen(const char *filename, const char *modes);
+TEST_F(DeviceTest, TestIsLocalNumaOpenFailed)
 {
-    int len = 1;
-    uint64_t nodeActcLen[10];
-    uint16_t nrLocalNuma = 0;
-    IomemMsg *msg = (IomemMsg *)malloc(sizeof(IomemMsg) * 1);
-    msg->cnt = 1;
-    IomemSeg *iomemSegArray = (IomemSeg *)malloc(sizeof(IomemSeg) *10);
-    msg->iomemSegArray = iomemSegArray;
-    msg->iomemSegArray[0].node = 0;
-    msg->iomemSegArray[0].start = 0;
-    msg->iomemSegArray[0].end = 10;
-    int ret = GetNodeActcLenIomem(len, nodeActcLen, msg, nrLocalNuma);
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue((FILE *)nullptr));
+    bool ret = IsLocalNuma(0);
+    EXPECT_FALSE(ret);
+}
+
+extern "C" int fgetc(FILE *stream);
+extern "C" int fclose(FILE *stream);
+TEST_F(DeviceTest, TestIsLocalNumaReadFailed)
+{
+    FILE tmpFile;
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(EOF));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsLocalNuma(0);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsLocalNumaReadRemote)
+{
+    FILE tmpFile;
+    int remoteValue = '1';
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(remoteValue));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsLocalNuma(0);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsLocalNumaReadLocal)
+{
+    FILE tmpFile;
+    int localValue = '0';
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(localValue));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsLocalNuma(0);
+    EXPECT_TRUE(ret);
+}
+
+extern "C" int SetNrLocalNuma(struct ProcessManager *manager);
+TEST_F(DeviceTest, TestSetNrLocalNumaOpenDirFailed)
+{
+    int ret;
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
+
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(static_cast<DIR *>(nullptr)));
+    ret = SetNrLocalNuma(&manager);
+    EXPECT_EQ(-ENODEV, ret);
+    EXPECT_EQ(99, manager.nrLocalNuma);
+}
+
+TEST_F(DeviceTest, TestSetNrLocalNumaNoNodeDir)
+{
+    int ret;
+    DIR *dirp;
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
+
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
+    MOCKER(static_cast<struct dirent *(*)(DIR *)>(readdir))
+        .stubs()
+        .will(returnValue(static_cast<struct dirent *>(nullptr)));
+    MOCKER(static_cast<int (*)(DIR *)>(closedir)).stubs().will(returnValue(0));
+    ret = SetNrLocalNuma(&manager);
     EXPECT_EQ(0, ret);
-    free(msg);
-    free(iomemSegArray);
-}
-
-extern "C" int GetNodeActcLenAcpi(int len, uint64_t *nodeActcLen, AcpiMsg *msg);
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiOne)
-{
-    int len = 0;
-    uint64_t nodeActcLen [10];
-    AcpiMsg msg;
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, &msg);
-    EXPECT_EQ(-EINVAL, ret);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiTwo)
-{
-    uint64_t nodeActcLen[10];
-    int len = 1;
-    AcpiMsg *msg = (AcpiMsg *)malloc(sizeof(AcpiMsg) * 1);
-    msg->cnt = 1;
-    AcpiSeg *acpiSegArray = (AcpiSeg *)malloc(sizeof(AcpiSeg) * 1);
-    msg->acpiSegArray = acpiSegArray;
-    msg->acpiSegArray[0].node = 0;
-    msg->acpiSegArray[0].start = 0;
-    msg->acpiSegArray[0].end = 10;
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, msg);
-    EXPECT_EQ(0, ret);
-    free(msg);
-    free(acpiSegArray);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiThree)
-{
-    uint64_t nodeActcLen[10] = {0};
-    int len = 1;
-    AcpiMsg *msg = (AcpiMsg *)malloc(sizeof(AcpiMsg) * len);
-    msg->cnt = 1;
-    AcpiSeg *acpiSegArray = (AcpiSeg *)malloc(sizeof(AcpiSeg) * 1);
-    msg->acpiSegArray = acpiSegArray;
-    msg->acpiSegArray[0].node = 0;
-    msg->acpiSegArray[0].start = 0;
-    msg->acpiSegArray[0].end = 2097151;
-    MOCKER(IsHugeMode).stubs().will(returnValue(true));
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, msg);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(1, nodeActcLen[0]);
-    free(acpiSegArray);
-    free(msg);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiFour)
-{
-    uint64_t nodeActcLen [10] = {0};
-    int len = 1;
-    AcpiMsg *msg = (AcpiMsg *)malloc(sizeof(AcpiMsg) * 1);
-    msg->cnt = 1;
-    AcpiSeg *acpiSegArray = (AcpiSeg *)malloc(sizeof(AcpiSeg) * 1);
-    msg->acpiSegArray = acpiSegArray;
-    msg->acpiSegArray[0].node = 0;
-    msg->acpiSegArray[0].start = 0;
-    msg->acpiSegArray[0].end = 20971519;
-    MOCKER(IsHugeMode).stubs().will(returnValue(true));
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, msg);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(10, nodeActcLen[0]);
-    free(acpiSegArray);
-    free(msg);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiFive)
-{
-    uint64_t nodeActcLen [10] = {0};
-    int len = 1;
-    AcpiMsg *msg = (AcpiMsg *)malloc(sizeof(AcpiMsg) * 1);
-    msg->cnt = 1;
-    AcpiSeg *acpiSegArray = (AcpiSeg *)malloc(sizeof(AcpiSeg) * 1);
-    msg->acpiSegArray = acpiSegArray;
-    msg->acpiSegArray[0].node = 0;
-    msg->acpiSegArray[0].start = 0;
-    msg->acpiSegArray[0].end = 4095;
-    MOCKER(IsHugeMode).stubs().will(returnValue(false));
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, msg);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(1, nodeActcLen[0]);
-    free(acpiSegArray);
-    free(msg);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenAcpiSix)
-{
-    uint64_t nodeActcLen [10] = {0};
-    int len = 1;
-    AcpiMsg *msg = (AcpiMsg *)malloc(sizeof(AcpiMsg) * 1);
-    msg->cnt = 1;
-    AcpiSeg *acpiSegArray = (AcpiSeg *)malloc(sizeof(AcpiSeg) * 1);
-    msg->acpiSegArray = acpiSegArray;
-    msg->acpiSegArray[0].node = 0;
-    msg->acpiSegArray[0].start = 0;
-    msg->acpiSegArray[0].end = 40959;
-    MOCKER(IsHugeMode).stubs().will(returnValue(false));
-    int ret = GetNodeActcLenAcpi(len, nodeActcLen, msg);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(10, nodeActcLen[0]);
-    free(acpiSegArray);
-    free(msg);
-}
-
-extern "C" int GetNodeActcLen(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestGetNodeActcLenOne)
-{
-    struct ProcessManager manager;
-    MOCKER(GetNodeActcLenIomem).stubs().will(returnValue(-1));
-    int ret = GetNodeActcLen(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenTwo)
-{
-    struct ProcessManager manager;
-    MOCKER(GetNodeActcLenIomem).stubs().will(returnValue(0));
-    MOCKER(GetNodeActcLenAcpi).stubs().will(returnValue(1));
-    int ret = GetNodeActcLen(&manager);
-    EXPECT_EQ(1, ret);
-}
-
-TEST_F(DeviceTest, TestGetNodeActcLenThree)
-{
-    struct ProcessManager manager;
-    MOCKER(GetNodeActcLenIomem).stubs().will(returnValue(0));
-    MOCKER(GetNodeActcLenAcpi).stubs().will(returnValue(0));
-    int ret = GetNodeActcLen(&manager);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int InitNodeActcData(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestInitNodeActcData)
-{
-    struct ProcessManager manager;
-    MOCKER(GetNodeActcLen).stubs().will(returnValue(1));
-    int ret = InitNodeActcData(&manager);
-    EXPECT_EQ(1, ret);
-}
-
-TEST_F(DeviceTest, TestInitNodeActcDataTwo)
-{
-    struct ProcessManager manager;
-    MOCKER(GetNodeActcLen).stubs().will(returnValue(0));
-    MOCKER(FreeNodeActcData).stubs().will(ignoreReturnValue());
-    int ret = InitNodeActcData(&manager);
-    EXPECT_EQ(-ENOMEM, ret);
-    for (int i = 0; i < MAX_NODES; i++) {
-        manager.nodeActcLen[i] = 0;
-    }
-    ret = InitNodeActcData(&manager);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" void FreeAddrMemory(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestFreeAddrMemory)
-{
-    struct ProcessManager manager;
-    AcpiSeg *acpiSegArray = (AcpiSeg*)malloc(sizeof(AcpiSeg) * 10);
-    manager.acpiMsg.acpiSegArray = acpiSegArray;
-    IomemSeg *iomemSegArray = (IomemSeg *)malloc(sizeof(IomemSeg) * 10);
-    manager.iomMsg.iomemSegArray = iomemSegArray;
-    FreeAddrMemory(&manager);
-    EXPECT_EQ(NULL, manager.acpiMsg.acpiSegArray);
-    EXPECT_EQ(NULL, manager.iomMsg.iomemSegArray);
-}
-
-extern "C" void GetLocalNrNuma(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestGetLocalNrNuma)
-{
-    struct ProcessManager manager;
-    manager.acpiMsg.cnt = 1;
-    AcpiSeg acpiSegArray[10];
-    manager.acpiMsg.acpiSegArray = acpiSegArray;
-    manager.acpiMsg.acpiSegArray[0].node = 1;
-    GetLocalNrNuma(&manager);
-    EXPECT_EQ(2, manager.nrLocalNuma);
-
-    acpiSegArray[0].node = -1;
-    GetLocalNrNuma(&manager);
     EXPECT_EQ(0, manager.nrLocalNuma);
 }
 
-extern "C" int GetAcpiAddresses(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestGetAcpiAddressesOne)
+TEST_F(DeviceTest, TestSetNrLocalNumaFourNode)
 {
-    struct ProcessManager manager;
-    MOCKER(FindFdByNode).stubs().will(returnValue(-1));
-    int ret = GetAcpiAddresses(&manager);
-    EXPECT_EQ(-1, ret);
-}
+    int ret;
+    DIR *dirp;
+    struct dirent entry1 = { .d_name = { "node0" } };
+    struct dirent entry2 = { .d_name = { "node3" } };
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
 
-TEST_F(DeviceTest, TestGetAcpiAddressesTwo)
-{
-    struct ProcessManager manager;
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(-1));
-    int ret = GetAcpiAddresses(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(DeviceTest, TestGetAcpiAddressesThree)
-{
-    struct ProcessManager manager = {
-        .acpiMsg = { .cnt = 1 }
-    };
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(0));
-    MOCKER(GetLocalNrNuma).stubs().will(ignoreReturnValue());
-    int ret = GetAcpiAddresses(&manager);
-    free(manager.acpiMsg.acpiSegArray);
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
+    MOCKER(static_cast<struct dirent *(*)(DIR *)>(readdir))
+        .stubs()
+        .will(returnValue(&entry1))
+        .then(returnValue(&entry2))
+        .then(returnValue(static_cast<struct dirent *>(nullptr)));
+    MOCKER(static_cast<int (*)(DIR *)>(closedir)).stubs().will(returnValue(0));
+    MOCKER(IsLocalNuma).stubs().will(returnValue(true));
+    ret = SetNrLocalNuma(&manager);
     EXPECT_EQ(0, ret);
+    EXPECT_EQ(4, manager.nrLocalNuma);
 }
 
-TEST_F(DeviceTest, TestGetAcpiAddressesFour)
+TEST_F(DeviceTest, TestSetNrLocalNumaFourNodeReversed)
 {
-    struct ProcessManager manager = {
-        .acpiMsg = { .cnt = 1 }
-    };
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(0)).then(returnValue(-1));
-    int ret = GetAcpiAddresses(&manager);
-    EXPECT_EQ(-1, ret);
-}
+    int ret;
+    DIR *dirp;
+    struct dirent entry1 = { .d_name = { "node3" } };
+    struct dirent entry2 = { .d_name = { "node0" } };
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
 
-extern "C" int GetIomemAddresses(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestGetIomemAddressesOne)
-{
-    struct ProcessManager manager;
-    MOCKER(FindFdByNode).stubs().will(returnValue(-1));
-    int ret = GetIomemAddresses(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(DeviceTest, TestGetIomemAddressesTwo)
-{
-    struct ProcessManager manager;
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(-1));
-    int ret = GetIomemAddresses(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(DeviceTest, TestGetIomemAddressesThree)
-{
-    struct ProcessManager manager = {
-        .iomMsg = { .cnt = 1 }
-    };
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(0));
-    int ret = GetIomemAddresses(&manager);
-    free(manager.iomMsg.iomemSegArray);
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
+    MOCKER(static_cast<struct dirent *(*)(DIR *)>(readdir))
+        .stubs()
+        .will(returnValue(&entry1))
+        .then(returnValue(&entry2))
+        .then(returnValue(static_cast<struct dirent *>(nullptr)));
+    MOCKER(static_cast<int (*)(DIR *)>(closedir)).stubs().will(returnValue(0));
+    MOCKER(IsLocalNuma).stubs().will(returnValue(true));
+    ret = SetNrLocalNuma(&manager);
     EXPECT_EQ(0, ret);
+    EXPECT_EQ(4, manager.nrLocalNuma);
 }
 
-TEST_F(DeviceTest, TestGetIomemAddressesFour)
+TEST_F(DeviceTest, TestSetNrLocalNumaFiveNode)
 {
-    struct ProcessManager manager = {
-        .iomMsg = { .cnt = 0 }
-    };
-    IomemSeg *iomemSegArray = (IomemSeg *)malloc(sizeof(IomemSeg));
-    manager.iomMsg.iomemSegArray = iomemSegArray;
-    MOCKER(FindFdByNode).stubs().will(returnValue(0));
-    MOCKER(reinterpret_cast<int (*)(int, int, int *)>(ioctl)).stubs().will(returnValue(0));
-    int ret = GetIomemAddresses(&manager);
+    int ret;
+    DIR *dirp;
+    struct dirent entry1 = { .d_name = { "node0" } };
+    struct dirent entry2 = { .d_name = { "node1" } };
+    struct dirent entry3 = { .d_name = { "node2" } };
+    struct dirent entry4 = { .d_name = { "node3" } };
+    struct dirent entry5 = { .d_name = { "node4" } };
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
+
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
+    MOCKER(static_cast<struct dirent *(*)(DIR *)>(readdir))
+        .stubs()
+        .will(returnValue(&entry1))
+        .then(returnValue(&entry2))
+        .then(returnValue(&entry3))
+        .then(returnValue(&entry4))
+        .then(returnValue(&entry5))
+        .then(returnValue(static_cast<struct dirent *>(nullptr)));
+    MOCKER(static_cast<int (*)(DIR *)>(closedir)).stubs().will(returnValue(0));
+    MOCKER(IsLocalNuma).stubs().with(eq(0)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(1)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(2)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(3)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(4)).will(returnValue(false));
+    ret = SetNrLocalNuma(&manager);
     EXPECT_EQ(0, ret);
+    EXPECT_EQ(4, manager.nrLocalNuma);
 }
 
-extern "C" int GetTrackingAddr(struct ProcessManager *manager);
-TEST_F(DeviceTest, TestGetTrackingAddr)
+TEST_F(DeviceTest, TestSetNrLocalNumaTwoNode)
 {
-    struct ProcessManager manager;
-    manager.nrNuma = 0;
-    MOCKER(FreeAddrMemory).stubs().will(ignoreReturnValue());
-    MOCKER(GetAcpiAddresses).stubs().will(returnValue(1));
-    int ret = GetTrackingAddr(&manager);
-    EXPECT_EQ(1, ret);
-}
+    int ret;
+    DIR *dirp;
+    struct dirent entry1 = { .d_name = { "node0" } };
+    struct dirent entry2 = { .d_name = { "node1" } };
+    struct dirent entry3 = { .d_name = { "node2" } };
+    struct dirent entry4 = { .d_name = { "node3" } };
+    struct ProcessManager manager = { .nrLocalNuma = 99 };
 
-TEST_F(DeviceTest, TestGetTrackingAddrTwo)
-{
-    struct ProcessManager manager;
-    manager.nrNuma = 0;
-    MOCKER(FreeAddrMemory).stubs().will(ignoreReturnValue());
-    MOCKER(GetAcpiAddresses).stubs().will(returnValue(0));
-    MOCKER(GetIomemAddresses).stubs().will(returnValue(1));
-    int ret = GetTrackingAddr(&manager);
-    EXPECT_EQ(1, ret);
-}
-
-TEST_F(DeviceTest, TestGetTrackingAddrThree)
-{
-    struct ProcessManager manager;
-    manager.nrNuma = 0;
-    MOCKER(FreeAddrMemory).stubs().will(ignoreReturnValue());
-    MOCKER(GetAcpiAddresses).stubs().will(returnValue(0));
-    MOCKER(GetIomemAddresses).stubs().will(returnValue(0));
-    int ret = GetTrackingAddr(&manager);
+    MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
+    MOCKER(static_cast<struct dirent *(*)(DIR *)>(readdir))
+        .stubs()
+        .will(returnValue(&entry1))
+        .then(returnValue(&entry2))
+        .then(returnValue(&entry3))
+        .then(returnValue(&entry4))
+        .then(returnValue(static_cast<struct dirent *>(nullptr)));
+    MOCKER(static_cast<int (*)(DIR *)>(closedir)).stubs().will(returnValue(0));
+    MOCKER(IsLocalNuma).stubs().with(eq(0)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(1)).will(returnValue(true));
+    MOCKER(IsLocalNuma).stubs().with(eq(2)).will(returnValue(false));
+    MOCKER(IsLocalNuma).stubs().with(eq(3)).will(returnValue(false));
+    ret = SetNrLocalNuma(&manager);
     EXPECT_EQ(0, ret);
+    EXPECT_EQ(2, manager.nrLocalNuma);
 }
 
-TEST_F(DeviceTest, TestConfigureTrackingDevicesOne)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesSetNrLocalNumaFailed)
 {
     struct ProcessManager manager;
-    manager.nrNuma = 0;
+    MOCKER(SetNrLocalNuma).stubs().will(returnValue(-1));
     int ret = ConfigureTrackingDevices(&manager);
-    EXPECT_EQ(-ENODEV, ret);
+    EXPECT_EQ(-1, ret);
 }
 
-TEST_F(DeviceTest, TestConfigureTrackingDevicesTwo)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesConfigTrackingDevFailed)
 {
     struct ProcessManager manager;
-    manager.nrNuma = 1;
+    MOCKER(SetNrLocalNuma).stubs().will(returnValue(0));
     MOCKER(ConfigTrackingDev).stubs().will(returnValue(-1));
     int ret = ConfigureTrackingDevices(&manager);
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(DeviceTest, TestConfigureTrackingDevicesThree)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesSuccess)
 {
     struct ProcessManager manager;
-    manager.nrNuma = 1;
+    MOCKER(SetNrLocalNuma).stubs().will(returnValue(0));
     MOCKER(ConfigTrackingDev).stubs().will(returnValue(0));
-    MOCKER(GetTrackingAddr).stubs().will(returnValue(-1));
-    int ret = ConfigureTrackingDevices(&manager);
-    EXPECT_EQ(-1, ret);
-}
-
-TEST_F(DeviceTest, TestConfigureTrackingDevicesFour)
-{
-    struct ProcessManager manager;
-    manager.nrNuma = 1;
-    MOCKER(ConfigTrackingDev).stubs().will(returnValue(0));
-    MOCKER(GetTrackingAddr).stubs().will(returnValue(0));
-    MOCKER(InitNodeActcData).stubs().will(returnValue(0));
     int ret = ConfigureTrackingDevices(&manager);
     EXPECT_EQ(0, ret);
-}
-
-TEST_F(DeviceTest, TestConfigureTrackingDevicesFive)
-{
-    struct ProcessManager manager;
-    manager.nrNuma = 1;
-    MOCKER(ConfigTrackingDev).stubs().will(returnValue(0));
-    MOCKER(GetTrackingAddr).stubs().will(returnValue(0));
-    MOCKER(InitNodeActcData).stubs().will(returnValue(1));
-    MOCKER(FreeAddrMemory).stubs().will(ignoreReturnValue());
-    int ret = ConfigureTrackingDevices(&manager);
-    EXPECT_EQ(1, ret);
 }
 
 extern "C" int GetRamIsChange(struct ProcessManager *manager, int *change);
