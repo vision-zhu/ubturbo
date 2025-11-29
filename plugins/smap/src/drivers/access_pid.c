@@ -729,7 +729,7 @@ void access_remove_pid(int len, struct access_remove_pid_payload *payload)
 		list_for_each_entry_safe(ap, tmp, &ap_data.list, node) {
 			if (ap->pid == payload[i].pid) {
 				list_del(&ap->node);
-				cancel_delayed_work_sync(&ap->scan_work);
+				cancel_ap_scan_work(ap);
 				destroy_access_pid(ap);
 				break;
 			}
@@ -749,7 +749,7 @@ void access_remove_all_pid(void)
 	down_write(&ap_data.lock);
 	list_for_each_entry_safe(ap, tmp, &ap_data.list, node) {
 		list_del(&ap->node);
-		cancel_delayed_work_sync(&ap->scan_work);
+		cancel_ap_scan_work(ap);
 		destroy_access_pid(ap);
 	}
 	up_write(&ap_data.lock);

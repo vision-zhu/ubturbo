@@ -70,6 +70,7 @@ static inline struct access_tracking_dev *get_first_access_dev(void)
 	return list_first_entry(&access_dev, struct access_tracking_dev, list);
 }
 
+void cancel_ap_scan_work(struct access_pid *ap);
 bool is_access_hugepage(void);
 void submit_one_work(struct access_pid *ap);
 ktime_t calc_time_us(ktime_t start_time);
