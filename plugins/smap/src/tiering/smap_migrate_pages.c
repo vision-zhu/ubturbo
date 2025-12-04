@@ -371,35 +371,29 @@ static int smap_add_page_for_migrate_back(u64 pa,
 					  unsigned int *mig_pages_cnt,
 					  int dest_nid, bool migrate_all)
 {
-	int err, nid;
+	int ret;
+	int nid = NUMA_NO_NODE;
 	unsigned long pfn;
 	struct page *page;
 	struct page_task_arg pta = { 0 };
 
 	pfn = PHYS_PFN(pa);
 	if (!pfn_valid(pfn)) {
-		err = -ENXIO;
-		goto out;
+		return -ENXIO;
 	}
 	page = pfn_to_online_page(pfn);
 	if (!page) {
-		err = -EIO;
-		goto out;
-	}
-	err = PTR_ERR(page);
-	if (IS_ERR(page)) {
-		goto out;
+		return -EIO;
 	}
 
-	err = -ENOENT;
-	if (!page) {
-		goto out;
+	if (IS_ERR(page)) {
+		return PTR_ERR(page);
 	}
-	err = -EACCES;
+
 	if (page_mapcount(page) > 1 && !migrate_all) {
-		goto out;
+		return -EACCES;
 	}
-	err = 0;
+	ret = 0;
 	pta.type = PAGE_NODE_TYPE;
 	if (PageHuge(page)) {
 		if (PageHead(page)) {
@@ -408,29 +402,26 @@ static int smap_add_page_for_migrate_back(u64 pa,
 			    pta.nr_cpus_allowed < num_online_cpus()) {
 				nid = pta.node;
 			} else {
-				err = find_node_to_migrate_rr(dest_nid, &nid);
-			}
-			if (err < 0) {
-				goto out;
+				ret = find_node_to_migrate_rr(dest_nid, &nid);
 			}
 		}
 	} else {
 		struct page *head = compound_head(page);
+		if (__folio_test_movable(page_folio(head))) {
+			return -EINVAL;
+		}
+
 		find_page_task(head, 0, &pta);
 		if (pta.found && pta.nr_cpus_allowed < num_online_cpus()) {
 			nid = pta.node;
 		} else {
-			err = find_node_to_migrate_rr(dest_nid, &nid);
-		}
-		if (err < 0) {
-			goto out;
-		}
-		if (__folio_test_movable(page_folio(head))) {
-			err = -EINVAL;
-			goto out;
+			ret = find_node_to_migrate_rr(dest_nid, &nid);
 		}
 	}
-	if (nid >= nr_local_numa) {
+	if (ret)
+		return ret;
+
+	if (nid < 0 || nid >= nr_local_numa) {
 		pr_err("invalid local NUMA node: %d passed to add pages for migrate back\n",
 		       nid);
 		return -EINVAL;
@@ -441,9 +432,8 @@ static int smap_add_page_for_migrate_back(u64 pa,
 	}
 	migrate_folios[nid][mig_pages_cnt[nid]] = page_folio(page);
 	mig_pages_cnt[nid]++;
-	err = 0;
-out:
-	return err;
+
+	return 0;
 }
 
 static bool check_addr_range_valid(struct migrate_back_subtask *task)

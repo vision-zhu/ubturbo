@@ -403,7 +403,7 @@ static void write_bitmap_white_list(char **buffer, struct access_pid *ap)
 
 static void write_bitmap_mappig(char **buffer, struct access_pid *ap)
 {
-	size_t length = sizeof(u32) * ap->info.vm_size;
+	size_t length;
 	if (unlikely(!buffer || !(*buffer) || !ap)) {
 		pr_err("invalid buffer or access pid passed to write VM mapping info\n");
 		return;
@@ -412,6 +412,7 @@ static void write_bitmap_mappig(char **buffer, struct access_pid *ap)
 		pr_debug("no need to write pid %d mapping\n", ap->pid);
 		return;
 	}
+	length = sizeof(u32) * ap->info.vm_size;
 	memcpy(*buffer, ap->info.mapping, length);
 	*buffer += length;
 }
