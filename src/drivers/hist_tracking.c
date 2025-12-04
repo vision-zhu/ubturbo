@@ -303,7 +303,7 @@ static int hist_tracking_init(void)
 		if (ret) {
 			pr_err("unable to set histogram tracking device name, ret: %d\n",
 			       ret);
-			return ret;
+			goto deinit_buf;
 		}
 
 		ret = device_add(&hdev->ldev);

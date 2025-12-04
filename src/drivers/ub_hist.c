@@ -338,7 +338,7 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 	spin_lock(&mirror_data->context_lock);
 	if (!mirror_data->reader_waiting) {
 		spin_unlock(&mirror_data->context_lock);
-		return ret;
+		return -EFAULT;
 	}
 
 	mirror_data->updated = true;

@@ -384,7 +384,7 @@ static void smap_hist_middle_update_roi_info(void)
 
 int smap_hist_middle_add_roi(uint64_t start_addr, size_t length)
 {
-	int i, ret;
+	int i, ret = 0;
 	struct ub_hist_ba_info info;
 	struct hist_roi_node *new_roi;
 
@@ -416,8 +416,8 @@ int smap_hist_middle_add_roi(uint64_t start_addr, size_t length)
 			smap_hist_middle_insert_roi(
 				new_roi, &hist_mid->rois.list[i].head);
 			smap_hist_middle_update_roi_info();
-			mutex_unlock(&hist_mid->rois.roi_lock);
-			return 0;
+			ret = 0;
+			break;
 		}
 	}
 
@@ -918,7 +918,7 @@ static int smap_hist_scan_thread_run(void *data)
 	return 0;
 }
 
-union hist_status smap_hist_middle_run_status()
+union hist_status smap_hist_middle_run_status(void)
 {
 	return hist_mid->status;
 }

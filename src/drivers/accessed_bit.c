@@ -181,22 +181,22 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 			      loff_t *pos)
 {
 	int ret = 0;
-	struct ham_tracking_info *info;
+	struct ham_tracking_info *info = NULL;
 	u64 num = 0;
 	struct freq_info *freq_info_array;
-
 	int pid = get_pid_from_tracking_file(file);
 	if (pid < 0)
 		return -EINVAL;
 
 	spin_lock(&ham_lock);
 	list_for_each_entry(info, &ham_pid_list, node) {
-		if (info->pid == pid)
+		if (info->pid == pid) {
 			break;
+		}
 	}
 	spin_unlock(&ham_lock);
 
-	if (info->pid != pid) {
+	if (!info) {
 		pr_err("unable to find tracking file of pid: %d in process file system\n",
 		       pid);
 		return -ENXIO;
@@ -272,28 +272,29 @@ int smap_create_tracking_info_file(struct ham_tracking_info *info)
 int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 			uint64_t *freq_info_num)
 {
-	struct ham_tracking_info *info;
+	struct ham_tracking_info *info = NULL;
 	if (!access_pid_is_scanning(pid)) {
 		pr_info("the current access pid: %d is not scanning\n", pid);
 		return -EINVAL;
 	}
 	spin_lock(&ham_lock);
 	list_for_each_entry(info, &ham_pid_list, node) {
-		if (info->pid == pid)
+		if (info->pid == pid) {
 			break;
+		}
 	}
 	spin_unlock(&ham_lock);
 
-	if (info->pid != pid) {
+	if (!NULL) {
 		pr_err("unable to find pid: %d in HAM managed pid list\n",
-		       info->pid);
+		       pid);
 		return -ENXIO;
 	}
 
 	change_ap_type(pid);
 	*freq_info_array = get_freq_info(info, freq_info_num);
 	if (!*freq_info_array) {
-		pr_err("unable to get frequency info of pid: %d\n", info->pid);
+		pr_err("unable to get frequency info of pid: %d\n", pid);
 		return -ENOMEM;
 	}
 	clear_tracking_info(info);
