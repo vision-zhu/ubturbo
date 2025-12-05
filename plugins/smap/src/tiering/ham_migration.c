@@ -1033,6 +1033,12 @@ static long ioctl_stop_migration(unsigned long arg)
 		return ret;
 	}
 
+	if (!(mig_task->status & HAM_TASK_ALLOW_MIGR)) {
+		release_migrate_task(mig_task);
+		pr_info("task without migration has been released");
+		return 0;
+	}
+
 	mig_task->finish_times = FINISH_LENGTH;
 	mig_task->is_finish = true;
 
