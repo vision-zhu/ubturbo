@@ -190,9 +190,8 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 
 	spin_lock(&ham_lock);
 	list_for_each_entry(info, &ham_pid_list, node) {
-		if (info->pid == pid) {
+		if (info->pid == pid)
 			break;
-		}
 	}
 	spin_unlock(&ham_lock);
 
@@ -279,9 +278,8 @@ int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 	}
 	spin_lock(&ham_lock);
 	list_for_each_entry(info, &ham_pid_list, node) {
-		if (info->pid == pid) {
+		if (info->pid == pid)
 			break;
-		}
 	}
 	spin_unlock(&ham_lock);
 
