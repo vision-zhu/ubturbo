@@ -283,7 +283,7 @@ int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 	}
 	spin_unlock(&ham_lock);
 
-	if (!NULL) {
+	if (!info) {
 		pr_err("unable to find pid: %d in HAM managed pid list\n",
 		       pid);
 		return -ENXIO;
