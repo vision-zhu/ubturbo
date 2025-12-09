@@ -416,8 +416,8 @@ int smap_hist_middle_add_roi(uint64_t start_addr, size_t length)
 			smap_hist_middle_insert_roi(
 				new_roi, &hist_mid->rois.list[i].head);
 			smap_hist_middle_update_roi_info();
-			ret = 0;
-			break;
+			mutex_unlock(&hist_mid->rois.roi_lock);
+			return 0;
 		}
 	}
 
