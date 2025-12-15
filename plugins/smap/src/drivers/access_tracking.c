@@ -352,7 +352,7 @@ static int access_tracking_add(void)
 		if (ret) {
 			pr_err("unable to set name for access bit device, ret: %d\n",
 			       ret);
-			return ret;
+			goto buff_deinit;
 		}
 
 		ret = device_add(&adev->ldev);

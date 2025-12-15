@@ -75,7 +75,7 @@ static int config_system_huge_page(unsigned long huge_page_number,
 	struct file *file;
 	char data[MAX_DATA_SIZE];
 	char path[MAX_PATH_SIZE];
-	unsigned int nr_page;
+	unsigned int nr_page = 0;
 	int retry_times = 0;
 	buf_size =
 		snprintf(path, MAX_PATH_SIZE, NODE_2MB_HUGEPAGES_PATH, node_id);
