@@ -52,7 +52,7 @@ UBTURBO/
 - **RMRS**：资源腾挪，调度模块，负责虚机、容器内存资源的调度。
 - **SMAP**：分级内存使能模块，通过页面扫描和迁移使能分级内存能力。
 
-具体的，在灵衢2.0的项目范围内，主要包含以下关键技术和方案：
+具体的，在BeiMing的项目范围内，主要包含以下关键技术和方案：
 1. **配置加载**：从/opt/ubturbo/conf目录下读取ubturbo.conf、ubturbo_plugin_admission.conf以及每个插件的配置文件。
 2. **插件加载**：从指定目录下查找so，通过dlopen加载插件，卸载时通过dlclose关闭动态库。
 3. **进程通信**：通过unix domain socket机制，进行节点内进程间通信，提供面向连接的可靠数据传输功能。使用Reactor模式，server端启动线程监听指定socket文件，接受client端连接后创建一个新线程，调用指定回调函数，将结果发送给client端。
