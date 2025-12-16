@@ -460,8 +460,6 @@ std::string OsHelper::ExecCommand(const std::string &cmd)
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [OsHelper] ExecCommand start.";
     std::array<char, CMD_BUFFER_SIZE> buffer;
     std::string result;
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
-        << "[RmrsResourceExport] [OsHelper] ExecCommand cmd = " << cmd << ".";
     FILE *pipe = popen(cmd.c_str(), "r");
     if (!pipe) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [OsHelper] Failed to popen!";
@@ -544,7 +542,6 @@ uint32_t OsHelper::GetInfoFromNumaMaps(const std::string &uuid, const std::strin
     ReadNumaMap(path, fileContent);
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
         << "[RmrsResourceExport] [OsHelper] Size = " << fileContent.size() << ".";
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsResourceExport] [OsHelper]" << fileContent << ".";
 
     std::istringstream file(fileContent);
     std::string line;
