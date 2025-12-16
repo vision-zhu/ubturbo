@@ -14,14 +14,14 @@
 
 Demo使用说明：
 ```bash
-# 环境要求：已安装UBTurbo、SMAP、libboundscheck
+# 环境要求：已安装ubturbo-rmrs、ubturbo-devel、ubturbo-smap、libboundscheck
 
 # 编译
 g++ -lboundscheck -lubturbo_client demo.cpp -o demo
 
 # 运行
 # 参数说明
-# ratio: 最大迁出比例
+# pid: 虚拟机对应pid
 # borrowRemoteNuma: 借用过来的内存呈现的远端numa
 ./demo <ratio> <borrowRemoteNuma>
 ```
@@ -33,7 +33,7 @@ Demo源码：
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "turbo_rmrs_interface.h"
+#include "ubturbo/turbo_rmrs_interface.h"
 
 using namespace std;
 
@@ -52,7 +52,7 @@ void PrintStrategyResult(turbo::rmrs::MigrateStrategyResult migrateStrategyResul
 
 int main(int argc, char* argv[])
 {
-    // ---- 1. Prepare input parameters for migration strategy ---
+    // ---- Prepare input parameters for migration strategy ---
     if (argc != 3) {
         std::cout << "Invalid number of input parameters." << std::endl;
     }
@@ -69,103 +69,24 @@ int main(int argc, char* argv[])
     // borrowSize
     .borrowSize = 131072,
 
-    // remoteNumaInfo
-    .remoteNumaInfo = {
+    // pidRemoteNumaMap    
+    .pidRemoteNumaMap = {
         {
-            .borrowRemoteNuma = static_cast<int16_t>(std::stol(argv[2])),
-            .lentNode = "2",
-            .lentSocketId = 36
-        }
-    },
-
-    // nodeTopology
-    .nodeTopology = {
-        {   // ---- NodeId=2-216 ----
-            "2-216",
+            static_cast<pid_t>(std::stol(argv[1])),
             {
-                {
-                    .nodeId = "1",
-                    .socket = {
-                        .socketId = "216",
-                        .numas = { { .numaId = "1" } },
-                        .cpus = {
-                            { .CpuId = "8" }, { .CpuId = "9" }, { .CpuId = "10" },
-                            { .CpuId = "11" }, { .CpuId = "12" }, { .CpuId = "13" },
-                            { .CpuId = "14" }, { .CpuId = "15" }
-                        }
-                    },
-                    .hostname = "computer01",
-                    .isRegisterRm = true
-                }
-            }
-        },
-        {   // ---- NodeId=2-36 ----
-            "2-36",
-            {
-                {
-                    .nodeId = "1",
-                    .socket = {
-                        .socketId = "36",
-                        .numas = { { .numaId = "0" } },
-                        .cpus = {
-                            { .CpuId = "0" }, { .CpuId = "1" }, { .CpuId = "2" },
-                            { .CpuId = "3" }, { .CpuId = "4" }, { .CpuId = "5" },
-                            { .CpuId = "6" }, { .CpuId = "7" }
-                        }
-                    },
-                    .hostname = "computer01",
-                    .isRegisterRm = true
-                }
-            }
-        },
-        {   // ---- NodeId=1-36 ----
-            "1-36",
-            {
-                {
-                    .nodeId = "2",
-                    .socket = {
-                        .socketId = "36",
-                        .numas = { { .numaId = "0" } },
-                        .cpus = {
-                            { .CpuId = "0" }, { .CpuId = "1" }, { .CpuId = "2" },
-                            { .CpuId = "3" }, { .CpuId = "4" }, { .CpuId = "5" },
-                            { .CpuId = "6" }, { .CpuId = "7" }
-                        }
-                    },
-                    .hostname = "computer02",
-                    .isRegisterRm = true
-                }
-            }
-        },
-        {   // ---- NodeId=1-216 ----
-            "1-216",
-            {
-                {
-                    .nodeId = "2",
-                    .socket = {
-                        .socketId = "216",
-                        .numas = { { .numaId = "1" } },
-                        .cpus = {
-                            { .CpuId = "8" }, { .CpuId = "9" }, { .CpuId = "10" },
-                            { .CpuId = "11" }, { .CpuId = "12" }, { .CpuId = "13" },
-                            { .CpuId = "14" }, { .CpuId = "15" }
-                        }
-                    },
-                    .hostname = "computer02",
-                    .isRegisterRm = true
-                }
+                static_cast<uint16_t>(std::stol(argv[2]))
             }
         }
     },
 
-    // nodeId
-    .nodeId = "1"
-};
+    // timeOutNumas
+    .timeOutNumas = {
+            3
+        }
+    };
 
     // --- 2. Run migration strategy. ---
     turbo::rmrs::MigrateStrategyResult migrateStrategyResult;
-
-    migrateStrategyParam.nodeId = "0";
 
     uint32_t ret = turbo::rmrs::UBTurboRMRSAgentMigrateStrategy(migrateStrategyParam, migrateStrategyResult);
     if (ret != 0) {
