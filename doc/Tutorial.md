@@ -23,7 +23,7 @@ g++ -lboundscheck -lubturbo_client demo.cpp -o demo
 # 参数说明
 # pid: 虚拟机对应pid
 # borrowRemoteNuma: 借用过来的内存呈现的远端numa
-./demo <ratio> <borrowRemoteNuma>
+./demo <pid> <borrowRemoteNuma>
 ```
 
 Demo源码：
