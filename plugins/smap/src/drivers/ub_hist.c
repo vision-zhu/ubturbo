@@ -331,21 +331,6 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 
 	ret = ub_hist_rd_clr_sts(ba_dev, (u32 *)result->buffer,
 				 BA_STS_WORD_COUNT);
-	if (ret) {
-		return ret;
-	}
-
-	spin_lock(&mirror_data->context_lock);
-	if (!mirror_data->reader_waiting) {
-		spin_unlock(&mirror_data->context_lock);
-		return -EFAULT;
-	}
-
-	mirror_data->updated = true;
-	mirror_data->reader_waiting = false;
-	memcpy(&mirror_data->result, result, sizeof(struct ub_hist_ba_result));
-	spin_unlock(&mirror_data->context_lock);
-	wake_up_interruptible(&mirror_data->wq);
 	return ret;
 }
 
