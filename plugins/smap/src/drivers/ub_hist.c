@@ -331,21 +331,6 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 
 	ret = ub_hist_rd_clr_sts(ba_dev, (u32 *)result->buffer,
 				 BA_STS_WORD_COUNT);
-	if (ret) {
-		return ret;
-	}
-
-	spin_lock(&mirror_data->context_lock);
-	if (!mirror_data->reader_waiting) {
-		spin_unlock(&mirror_data->context_lock);
-		return -EFAULT;
-	}
-
-	mirror_data->updated = true;
-	mirror_data->reader_waiting = false;
-	memcpy(&mirror_data->result, result, sizeof(struct ub_hist_ba_result));
-	spin_unlock(&mirror_data->context_lock);
-	wake_up_interruptible(&mirror_data->wq);
 	return ret;
 }
 
@@ -807,19 +792,26 @@ static int ub_hist_remove(struct platform_device *pdev)
 {
 	struct ub_hist_ba_device *ba_dev, *tmp;
 	unsigned long flags;
+	void __iomem *base_addr_to_unmap = NULL;
+	struct ub_hist_ba_device *device_to_remove = NULL;
 
 	spin_lock_irqsave(&ub_hist_ba_list_lock, flags);
 	list_for_each_entry_safe(ba_dev, tmp, &ub_hist_ba_list, list) {
 		if (ba_dev->dev == &pdev->dev) {
-			iounmap(ba_dev->base_addr);
+			device_to_remove = ba_dev;
+			base_addr_to_unmap = ba_dev->base_addr;
 			list_del(&ba_dev->list);
-			if (ba_dev) {
-				devm_kfree(&pdev->dev, ba_dev);
-			}
 			break;
 		}
 	}
 	spin_unlock_irqrestore(&ub_hist_ba_list_lock, flags);
+
+	if (device_to_remove) {
+		if (base_addr_to_unmap) {
+			iounmap(base_addr_to_unmap);
+		}
+		devm_kfree(&pdev->dev, device_to_remove);
+	}
 	return 0;
 }
 

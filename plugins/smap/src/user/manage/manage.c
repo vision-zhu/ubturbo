@@ -468,7 +468,7 @@ static int CheckPid(pid_t pid)
     }
     ret = IsQemuTask(pid);
     if (ret != type) {
-        SMAP_LOGGER_ERROR("Pid %d ret %d conflict with current mode %d.", pid, ret, type);
+        SMAP_LOGGER_ERROR("Pid %d type(%d) conflict with current pid type(%d).", pid, ret, type);
         return -EINVAL;
     }
     return 0;
@@ -2282,7 +2282,6 @@ bool IsMemoryLow(pid_t pid)
     ProcessAttr *process = GetProcessAttrLocked(pid);
     if (process && process->isLowMem) {
         SMAP_LOGGER_INFO("Pid %d dest nid memory is low.", pid);
-        process->isLowMem = false;
         isLow = true;
     }
     EnvMutexUnlock(&g_processManager.lock);

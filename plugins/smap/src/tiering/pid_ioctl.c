@@ -140,29 +140,16 @@ static int smap_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int __ioctl_migrate_back(void __user *argp)
+static int check_migrate_back_msg(struct migrate_back_msg *mb_msg)
 {
-	int i, ret;
-	struct migrate_back_msg mb_msg;
-	struct migrate_back_inner_msg mb_imsg;
-
-	if (copy_from_user(&mb_msg, argp, sizeof(mb_msg))) {
-		pr_err("failed to copy migrate back message from user space\n");
-		return -EFAULT;
-	}
-
-	if (mb_msg.count <= 0 || mb_msg.count > MAX_NR_MIGBACK) {
+	int i;
+	if (mb_msg->count <= 0 || mb_msg->count > MAX_NR_MIGBACK) {
 		pr_err("invalid message count passed to migrate back\n");
 		return -EINVAL;
 	}
 
-	mb_imsg.task_id = mb_msg.task_id;
-	mb_imsg.count = mb_msg.count;
-
-	for (i = 0; i < mb_msg.count; i++) {
-		struct migrate_back_payload *p = &(mb_msg.payload[i]);
-		struct migrate_back_inner_payload *i_p = &(mb_imsg.payload[i]);
-
+	for (i = 0; i < mb_msg->count; i++) {
+		struct migrate_back_payload *p = &(mb_msg->payload[i]);
 		if (is_node_invalid(p->src_nid)) {
 			pr_err("invalid source node: %d of %dth message\n", i,
 			       p->src_nid);
@@ -174,25 +161,63 @@ static int __ioctl_migrate_back(void __user *argp)
 			       i, p->dest_nid);
 			return -EINVAL;
 		}
+	}
+
+	return 0;
+}
+
+static int __ioctl_migrate_back(void __user *argp)
+{
+	int i, ret;
+	struct migrate_back_msg mb_msg;
+	struct migrate_back_inner_msg *mb_imsg;
+
+	if (copy_from_user(&mb_msg, argp, sizeof(mb_msg))) {
+		pr_err("failed to copy migrate back message from user space\n");
+		return -EFAULT;
+	}
+
+	ret = check_migrate_back_msg(&mb_msg);
+	if (ret)
+		return ret;
+
+	mb_imsg = kmalloc(sizeof(*mb_imsg), GFP_KERNEL);
+	if (!mb_imsg) {
+		pr_err("failed to malloc migrate back inner msg\n");
+		return -ENOMEM;
+	}
+	mb_imsg->task_id = mb_msg.task_id;
+	mb_imsg->count = mb_msg.count;
+
+	for (i = 0; i < mb_msg.count; i++) {
+		struct migrate_back_payload *p = &(mb_msg.payload[i]);
+		struct migrate_back_inner_payload *i_p = &(mb_imsg->payload[i]);
+
 		ret = find_range_by_memid(p->memid, &i_p->pa_start,
 					  &i_p->pa_end);
 		if (ret) {
 			pr_err("unable to find range of memid: %llu, ret: %d\n",
 			       p->memid, ret);
-			return ret;
+			goto free_imsg;
 		}
 
 		if (smap_is_remote_addr_valid(p->src_nid, i_p->pa_start,
 					      i_p->pa_end)) {
 			pr_err("memory range mismatch with node: %d\n",
 			       p->src_nid);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto free_imsg;
 		}
 
 		i_p->src_nid = p->src_nid;
 		i_p->dest_nid = p->dest_nid;
 	}
-	return smap_ioctl_migrate_back(&mb_imsg);
+
+	ret = smap_ioctl_migrate_back(mb_imsg);
+
+free_imsg:
+	kfree(mb_imsg);
+	return ret;
 }
 
 static long smap_ioctl(struct file *file, unsigned int cmd, unsigned long arg)

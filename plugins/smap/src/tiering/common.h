@@ -43,36 +43,6 @@ enum node_level {
 	NR_LEVEL,
 };
 
-struct migrate_page {
-	u64 ac_idx;
-	u32 freq;
-	u64 addr;
-};
-
-struct migrate_list {
-	u32 nr_pages;
-	u32 nr_migrate;
-	int from;
-	int to;
-	struct list_head node;
-	struct migrate_page *pages;
-};
-
-struct migrate_path {
-	int from;
-	int to;
-	unsigned int nr_expected;
-	unsigned int nr_should;
-	unsigned int nr_isolated;
-	unsigned int nr_failed;
-	struct list_head node;
-};
-
-struct smap_huge_page {
-	struct list_head smap_lru;
-	struct page *page;
-};
-
 struct mig_list {
 	bool success_to_user;
 	u64 nr;
