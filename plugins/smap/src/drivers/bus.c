@@ -109,12 +109,18 @@ void tracking_driver_unregister(struct tracking_driver *tracking_drv)
 	driver_unregister(drv);
 }
 
+static void tracking_dev_release(struct device *dev)
+{
+	pr_debug("Releasing device %s\n", dev_name(dev));
+}
+
 static void init_dev(struct tracking_dev *trk_dev, struct device *dev)
 {
 	device_initialize(dev);
 	dev_set_name(dev, "tracking_dev%d", trk_dev->id);
 	dev->bus = &tracking_bus_type;
 	dev->parent = trk_dev->dev;
+	dev->release = tracking_dev_release;
 	dev_set_drvdata(dev, trk_dev);
 }
 
@@ -170,6 +176,7 @@ trk_dev_del:
 	device_del(&trk_dev->tdev);
 ida_remove:
 	ida_simple_remove(&tracking_instance_ida, trk_dev->id);
+	put_device(&trk_dev->tdev);
 out:
 	kfree(trk_dev);
 	return NULL;
@@ -180,7 +187,7 @@ EXPORT_SYMBOL_GPL(tracking_dev_add);
 void tracking_dev_remove(struct tracking_dev *trk_dev)
 {
 	sysfs_remove_link(&trk_dev->tdev.kobj, "low_level_dev");
-	device_del(&trk_dev->tdev);
+	device_unregister(&trk_dev->tdev);
 	ida_simple_remove(&tracking_instance_ida, trk_dev->id);
 	kfree(trk_dev);
 }

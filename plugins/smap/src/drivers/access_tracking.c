@@ -324,6 +324,11 @@ static int actc_buffer_init(struct access_tracking_dev *adev)
 	return 0;
 }
 
+static void access_tracking_dev_release(struct device *dev)
+{
+	pr_debug("Releasing device %s\n", dev_name(dev));
+}
+
 static int access_tracking_add(void)
 {
 	int ret;
@@ -348,6 +353,7 @@ static int access_tracking_add(void)
 
 		init_rwsem(&adev->buffer_lock);
 		device_initialize(&adev->ldev);
+		adev->ldev.release = access_tracking_dev_release;
 		ret = dev_set_name(&adev->ldev, "access_bit%d", devno);
 		if (ret) {
 			pr_err("unable to set name for access bit device, ret: %d\n",
@@ -374,6 +380,7 @@ static int access_tracking_add(void)
 attr_del:
 	device_del(&adev->ldev);
 buff_deinit:
+	put_device(&adev->ldev);
 	actc_buffer_deinit(adev);
 adev_free:
 	kfree(adev);
@@ -382,7 +389,7 @@ put_dev:
 	list_for_each_entry_safe(adev, n, &access_dev, list) {
 		tracking_dev_remove(adev->tracking_dev);
 		actc_buffer_deinit(adev);
-		device_del(&adev->ldev);
+		device_unregister(&adev->ldev);
 		kfree(adev);
 	}
 
@@ -528,7 +535,7 @@ static void __exit access_tracking_exit(void)
 	destroy_scan_workqueue();
 	list_for_each_entry_safe(adev, n, &access_dev, list) {
 		tracking_dev_remove(adev->tracking_dev);
-		device_del(&adev->ldev);
+		device_unregister(&adev->ldev);
 		vfree(adev->access_bit_actc_data);
 		adev->access_bit_actc_data = NULL;
 		kfree(adev);

@@ -1200,6 +1200,7 @@ int smap_hist_mid_init(void)
 	}
 
 	mutex_init(&hist_mid->rois.roi_lock);
+	spin_lock_init(&hist_mid->result.buffer_lock);
 	INIT_WORK(&hist_mid->work.async_work, smap_hist_scan_worker);
 	hist_mid->config.result_ratio = SCAN_RESULT_RATIO_MAX;
 	hist_mid->config.scan_interval = SCAN_TIME_INTERVAL_MIN;

@@ -1625,7 +1625,7 @@ int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pidType, uint64
                 return -EBUSY;
             }
             if (maxWaitTime == 0 && !isMultiNumaPid) {
-                SMAP_LOGGER_ERROR("Pid %d is single numa pid.", msg->payload[i].pid);
+                SMAP_LOGGER_ERROR("Pid %d is single numa pid or unmanaged pid.", msg->payload[i].pid);
                 return -EINVAL;
             }
         }
