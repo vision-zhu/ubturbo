@@ -35,6 +35,8 @@ struct device {
     dev_t			devt;	/* dev_t, creates the sysfs "dev" */
     struct class_stub *class_stub;
     u32 scan_time;
+    void    (*release)(struct device *dev);
+    const char      *init_name;
 };
 
 void device_initialize(struct device *dev);
@@ -44,6 +46,8 @@ int dev_set_name(struct device *dev, const char *name, ...);
 int device_add(struct device *dev);
 
 void device_del(struct device *dev);
+
+void device_unregister(struct device *dev);
 
 struct device_attribute {
     ssize_t (*store)(struct device *dev, struct device_attribute *attr, const char *buf, size_t count);
@@ -75,6 +79,14 @@ static inline void devm_kfree(struct device *dev, void *ptr)
 static inline void dev_set_drvdata(struct device *dev, void *data)
 {
     dev->driver_data = data;
+}
+
+static inline const char *dev_name(const struct device *dev)
+{
+    if (dev->init_name) {
+        return dev->init_name;
+    }
+    return dev->kobj.name;
 }
 
 int device_property_read_u64(struct device *dev, const char *propname, u64 *val);

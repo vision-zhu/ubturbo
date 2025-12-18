@@ -221,6 +221,11 @@ static const struct file_operations node_dev_fops = {
 	.read_iter = node_cdev_read_iter,
 };
 
+static inline void tracking_device_release(struct device *dev)
+{
+	pr_debug("Releasing device %s\n", dev_name(dev));
+}
+
 static int init_tracking_device(struct tracking_node_dev *node_dev, int node_id)
 {
 	int result;
@@ -233,11 +238,13 @@ static int init_tracking_device(struct tracking_node_dev *node_dev, int node_id)
 		MKDEV(MAJOR(tracking_chr_devt), (u32)node_dev->target_node);
 	node_dev->device->class = tracking_class;
 	node_dev->device->parent = NULL;
+	node_dev->device->release = tracking_device_release;
 	dev_set_drvdata(node_dev->device, node_dev);
 
 	result = dev_set_name(node_dev->device, "smap_node%d",
 			      node_dev->target_node);
 	if (result) {
+		put_device(node_dev->device);
 		return result;
 	}
 
@@ -247,6 +254,7 @@ static int init_tracking_device(struct tracking_node_dev *node_dev, int node_id)
 	if (result) {
 		pr_err("unable to add SMAP tracking device on NUMA node: %d\n",
 		       node_dev->target_node);
+		put_device(node_dev->device);
 		return result;
 	}
 
@@ -339,6 +347,7 @@ static void tracking_device_remove(struct tracking_dev *dev)
 
 	if (list_empty(&node_dev->dev_list)) {
 		cdev_device_del(&node_dev->cdev, &node_dev->cdev_device);
+		put_device(node_dev->device);
 		list_del(&node_dev->list);
 		clear_bit(node_id, &trk_core_ctrl->node_bitmap);
 		kfree(node_dev);

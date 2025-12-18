@@ -265,9 +265,14 @@ static void hist_tracking_deinit(void)
 	list_for_each_entry_safe(hdev, n, &g_hist_tracking_dev, list) {
 		tracking_dev_remove(hdev->tracking_dev);
 		actc_buffer_deinit(hdev);
-		device_del(&hdev->ldev);
+		device_unregister(&hdev->ldev);
 		kfree(hdev);
 	}
+}
+
+static void hist_tracking_dev_release(struct device *dev)
+{
+	pr_debug("Releasing device %s\n", dev_name(dev));
 }
 
 static int hist_tracking_init(void)
@@ -299,6 +304,7 @@ static int hist_tracking_init(void)
 
 		mutex_init(&hdev->mutex);
 		device_initialize(&hdev->ldev);
+		hdev->ldev.release = hist_tracking_dev_release;
 		ret = dev_set_name(&hdev->ldev, "hist_tracking_dev%d", node);
 		if (ret) {
 			pr_err("unable to set histogram tracking device name, ret: %d\n",
@@ -329,6 +335,7 @@ del_dev:
 	device_del(&hdev->ldev);
 deinit_buf:
 	actc_buffer_deinit(hdev);
+	put_device(&hdev->ldev);
 free_hdev:
 	kfree(hdev);
 put_dev:

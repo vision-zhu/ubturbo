@@ -64,6 +64,11 @@ void device_del(struct device *dev)
 
 }
 
+void device_unregister(struct device *dev)
+{
+
+}
+
 struct device *get_device(struct device *dev)
 {
 	return NULL;

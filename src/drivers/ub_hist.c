@@ -807,19 +807,26 @@ static int ub_hist_remove(struct platform_device *pdev)
 {
 	struct ub_hist_ba_device *ba_dev, *tmp;
 	unsigned long flags;
+	void __iomem *base_addr_to_unmap = NULL;
+	struct ub_hist_ba_device *device_to_remove = NULL;
 
 	spin_lock_irqsave(&ub_hist_ba_list_lock, flags);
 	list_for_each_entry_safe(ba_dev, tmp, &ub_hist_ba_list, list) {
 		if (ba_dev->dev == &pdev->dev) {
-			iounmap(ba_dev->base_addr);
+			device_to_remove = ba_dev;
+			base_addr_to_unmap = ba_dev->base_addr;
 			list_del(&ba_dev->list);
-			if (ba_dev) {
-				devm_kfree(&pdev->dev, ba_dev);
-			}
 			break;
 		}
 	}
 	spin_unlock_irqrestore(&ub_hist_ba_list_lock, flags);
+
+	if (device_to_remove) {
+		if (base_addr_to_unmap) {
+			iounmap(base_addr_to_unmap);
+		}
+		devm_kfree(&pdev->dev, device_to_remove);
+	}
 	return 0;
 }
 
