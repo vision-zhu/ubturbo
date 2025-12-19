@@ -119,23 +119,23 @@ static int config_system_huge_page(unsigned long huge_page_number,
 
 static int compare_page_list(const void *a, const void *b)
 {
-	struct ham_page_map *struct_a = (struct ham_page_map *)a;
-	struct ham_page_map *struct_b = (struct ham_page_map *)b;
+	struct ham_page_map *hpm_a = (struct ham_page_map *)a;
+	struct ham_page_map *hpm_b = (struct ham_page_map *)b;
 
-	u64 hpa_a = PFN_PHYS(folio_pfn(struct_a->dst_folio));
-	u64 hpa_b = PFN_PHYS(folio_pfn(struct_b->dst_folio));
+	u64 hpa_a = PFN_PHYS(folio_pfn(hpm_a->dst_folio));
+	u64 hpa_b = PFN_PHYS(folio_pfn(hpm_b->dst_folio));
 	return (hpa_a > hpa_b) - (hpa_a < hpa_b);
 }
 
 static int compare_page_freq(const void *a, const void *b)
 {
-	struct ham_page_map *struct_a =
-		list_entry(a, struct ham_page_map, list);
-	struct ham_page_map *struct_b =
-		list_entry(b, struct ham_page_map, list);
+	struct list_head * const *list_a = a;
+	struct list_head * const *list_b = b;
+	struct ham_page_map *hpm_a = list_entry(*list_a, struct ham_page_map, list);
+	struct ham_page_map *hpm_b = list_entry(*list_b, struct ham_page_map, list);
 
-	return (struct_a->freq < struct_b->freq) -
-	       (struct_a->freq > struct_b->freq);
+	return (hpm_a->freq > hpm_b->freq) -
+	       (hpm_a->freq < hpm_b->freq);
 }
 
 static int init_numa_page_map(struct ham_migrate_task *mig_task,
