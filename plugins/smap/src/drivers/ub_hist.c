@@ -187,11 +187,13 @@ int ub_hist_lock_device(void)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_lock_device);
 
 void ub_hist_unlock_device(void)
 {
 	mutex_unlock(&dev_sta_mutex);
 }
+EXPORT_SYMBOL(ub_hist_unlock_device);
 
 int ub_hist_query_ba_count(void)
 {
@@ -205,6 +207,7 @@ int ub_hist_query_ba_count(void)
 	spin_unlock(&ub_hist_ba_list_lock);
 	return ba_count;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_count);
 
 int ub_hist_query_ba_tags(uint64_t *p_tags, int count)
 {
@@ -228,6 +231,7 @@ int ub_hist_query_ba_tags(uint64_t *p_tags, int count)
 	spin_unlock(&ub_hist_ba_list_lock);
 	return ret;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_tags);
 
 int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info)
 {
@@ -247,6 +251,7 @@ int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_info);
 
 int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 {
@@ -283,6 +288,7 @@ int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_set_state);
 
 int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 {
@@ -313,6 +319,7 @@ int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_get_state);
 
 int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 {
@@ -333,6 +340,7 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 				 BA_STS_WORD_COUNT);
 	return ret;
 }
+EXPORT_SYMBOL(ub_hist_get_statistic_result);
 
 static long ub_hist_ioctl_info_check(unsigned int cmd, unsigned long arg)
 {
@@ -857,6 +865,7 @@ int ub_hist_init(enum platform_type platform)
 	pr_info("UB histogram init successfully\n");
 	return ret;
 }
+EXPORT_SYMBOL(ub_hist_init);
 
 void ub_hist_exit(void)
 {
@@ -865,3 +874,21 @@ void ub_hist_exit(void)
 	misc_deregister(&ub_hist_miscdev);
 	pr_info("UB histogram exit successfully\n");
 }
+EXPORT_SYMBOL(ub_hist_exit);
+
+static int __init histogram_module_init(void)
+{
+	pr_info("smap hist tracking init successfully.\n");
+	return 0;
+}
+
+static void __exit histogram_module_exit(void)
+{
+	pr_info("smap hist tracking exit successfully.\n");
+}
+
+MODULE_DESCRIPTION("SMAP hist driver");
+MODULE_AUTHOR("Huawei Tech. Co., Ltd.");
+MODULE_LICENSE("GPL v2");
+module_init(histogram_module_init);
+module_exit(histogram_module_exit);

@@ -37,10 +37,6 @@ struct access_pid_struct ap_data = {
 	.state_flag = AP_STATE_WALK,
 };
 
-actc_t *g_hist_actc_data[SMAP_MAX_NUMNODES];
-u64 g_hist_actc_page_count[SMAP_MAX_NUMNODES] = { 0 };
-int g_hist_actc_data_ret[SMAP_MAX_NUMNODES] = { 0 };
-
 void destroy_access_pid(struct access_pid *elem)
 {
 	int i;
@@ -993,43 +989,6 @@ struct access_pid *find_access_pid(pid_t pid)
 	return NULL;
 }
 
-void update_hist_tracking(void)
-{
-	int i;
-	int ret;
-	struct file *tempfile;
-	ssize_t length;
-	loff_t pos;
-	char path[NODE_PATH_MAX];
-	for (i = nr_local_numa; i < SMAP_MAX_NUMNODES; i++) {
-		if (g_hist_actc_data[i] == NULL ||
-		    g_hist_actc_page_count[i] == 0) {
-			continue;
-		}
-		ret = snprintf(path, sizeof(path), NODE_PATH, i);
-		if (!ret) {
-			pr_err("filePath = %d snprintf error\n", i);
-			continue;
-		}
-		tempfile = filp_open(path, O_RDWR, 0);
-		if (tempfile == NULL || IS_ERR(tempfile)) {
-			pr_err("invalid file pointer of SMAP histogram tracking device passed to update histogram tracking\n");
-			continue;
-		}
-		pos = 0;
-		length = kernel_read(tempfile, g_hist_actc_data[i],
-				     sizeof(actc_t) * g_hist_actc_page_count[i],
-				     &pos);
-		if (length <= 0) {
-			g_hist_actc_data_ret[i] = 0;
-		} else {
-			g_hist_actc_data_ret[i] = 1;
-		}
-		filp_close(tempfile, NULL);
-		tempfile = NULL;
-	}
-}
-
 int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 {
 	int i;
@@ -1074,13 +1033,7 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 					adev->page_count, acidx, i);
 				break;
 			}
-			if (i >= nr_local_numa && g_hist_actc_data[i] &&
-			    g_hist_actc_data_ret[i] != 0) {
-				data[i][index++] = g_hist_actc_data[i][acidx];
-			} else {
-				data[i][index++] =
-					adev->access_bit_actc_data[acidx];
-			}
+			data[i][index++] = adev->access_bit_actc_data[acidx];
 			pr_debug("Node%d acidx %zu index %u\n", i, acidx,
 				 index - 1);
 		}
@@ -1228,77 +1181,3 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 	return 0;
 }
 EXPORT_SYMBOL(convert_pos_to_paddr_sorted);
-
-int hist_actc_data_reinit(void)
-{
-	int i;
-	u64 page_count;
-	int page_size = is_access_hugepage() ? PAGE_SIZE_2M : PAGE_SIZE_4K;
-	for (i = nr_local_numa; i < SMAP_MAX_NUMNODES; i++) {
-		g_hist_actc_data_ret[i] = 0;
-		page_count = get_node_page_cnt_iomem(i, page_size);
-		if (page_count == 0) {
-			if (g_hist_actc_data[i]) {
-				vfree(g_hist_actc_data[i]);
-				g_hist_actc_data[i] = NULL;
-			}
-			g_hist_actc_page_count[i] = 0;
-			continue;
-		}
-		if (page_count == g_hist_actc_page_count[i]) {
-			memset(g_hist_actc_data[i], 0,
-			       sizeof(actc_t) * page_count);
-			continue;
-		}
-		if (g_hist_actc_data[i]) {
-			vfree(g_hist_actc_data[i]);
-			g_hist_actc_data[i] = NULL;
-		}
-		g_hist_actc_data[i] = vzalloc(sizeof(actc_t) * page_count);
-		if (!g_hist_actc_data[i]) {
-			pr_err("unable to allocate memory for histogram tracking ACTC buffer\n");
-			g_hist_actc_page_count[i] = 0;
-			return -ENOMEM;
-		}
-		g_hist_actc_page_count[i] = page_count;
-	}
-	return 0;
-}
-
-int hist_actc_data_init(void)
-{
-	int ret = -ENOMEM;
-	int i;
-	u64 page_count;
-	int page_size = is_access_hugepage() ? PAGE_SIZE_2M : PAGE_SIZE_4K;
-	for (i = nr_local_numa; i < SMAP_MAX_NUMNODES; i++) {
-		page_count = get_node_page_cnt_iomem(i, page_size);
-		if (page_count == 0) {
-			g_hist_actc_data[i] = NULL;
-			continue;
-		}
-		g_hist_actc_data[i] = vzalloc(page_count * sizeof(actc_t));
-		if (!g_hist_actc_data[i]) {
-			pr_err("unable to allocate memory for histogram tracking ACTC buffer\n");
-			goto out_g_node_actc;
-		}
-		g_hist_actc_page_count[i] = page_count;
-	}
-	pr_info("hist_actc_data_init success\n");
-	return 0;
-out_g_node_actc:
-	hist_actc_data_deinit();
-	return ret;
-}
-
-void hist_actc_data_deinit(void)
-{
-	int i;
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		if (!g_hist_actc_data[i]) {
-			continue;
-		}
-		vfree(g_hist_actc_data[i]);
-		g_hist_actc_data[i] = NULL;
-	}
-}

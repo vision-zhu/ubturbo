@@ -372,7 +372,8 @@ static void actc_data_add(phys_addr_t paddr, u32 page_size)
 	if (unlikely(pa_index >= adev->page_count)) {
 		return;
 	}
-	adev->access_bit_actc_data[pa_index]++;
+	if (!adev->is_hist)
+		adev->access_bit_actc_data[pa_index]++;
 }
 
 static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)

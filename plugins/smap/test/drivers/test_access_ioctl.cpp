@@ -429,7 +429,6 @@ TEST_F(AccessIoctlTestKernel, IoctlWalkPagemap)
     GlobalMockObject::verify();
     MOCKER(calc_bitmap_len).stubs().will(returnValue(360UL));
     MOCKER(copy_to_user).stubs().will(returnValue(0UL));
-    MOCKER(hist_actc_data_reinit).stubs().will(returnValue(0));
     ret = ioctl_walk_pagemap(NULL);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(AP_STATE_WALK | AP_STATE_READ, ap_data.state_flag);
@@ -695,7 +694,6 @@ TEST_F(AccessIoctlTestKernel, AccessIoctlInit)
 
 
 extern "C" long ioctl_read_pid_freq(void __user *argp);
-extern "C" void update_hist_tracking(void);
 extern "C" int read_pid_freq(pid_t pid, size_t *data_len, u16 **data);
 extern "C" int transfer_frequency_data(struct access_pid_freq_msg *msg, u16 **data);
 
@@ -717,7 +715,6 @@ TEST_F(AccessIoctlTestKernel, IoctlReadPidFreqSuccess)
     list_add_tail(&ap2->node, &ap_data.list);
 
     MOCKER(copy_from_user).stubs().with(outBoundP((void *)&msg, sizeof(msg))).will(returnValue(0UL));
-    MOCKER(update_hist_tracking).stubs();
     MOCKER(read_pid_freq).stubs().will(returnValue(0));
     MOCKER(transfer_frequency_data).stubs().will(returnValue(0));
 
@@ -747,7 +744,6 @@ TEST_F(AccessIoctlTestKernel, IoctlReadPidFreqFail)
     list_add_tail(&ap2->node, &ap_data.list);
 
     MOCKER(copy_from_user).stubs().with(outBoundP((void *)&msg, sizeof(msg))).will(returnValue(0UL));
-    MOCKER(update_hist_tracking).stubs();
     MOCKER(read_pid_freq).stubs().will(returnValue(0)).then(returnValue(-EINVAL));
 
     MOCKER(transfer_frequency_data).stubs().will(returnValue(-EFAULT));

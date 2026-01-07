@@ -33,20 +33,21 @@ SMAP是一款Huawei计算产品线自研, 开源的内存迁移工具, 搭配OBM
 2. 载入扫描驱动。
    
    <pre class="screen" id="screen8274308918"><p class="p" id="p1958548202716">cd /lib/modules/smap</p><p class="p" id="p295820488271">insmod smap_tracking_core.ko</p></pre>
-
+   
+     
    * 安装smap_histogram_tracking.ko。
      
-     <pre class="screen" id="screen1675912812910"><p class="p" id="p195894802714">insmod smap_histogram_tracking.ko</p></pre>
-   * 安装smap_access_tracking.ko。在仿真版本中，需指定smap_scene=2，UB硬件场景不传入此参数。
+     <pre class="screen" id="screen1810215131197"><p class="p" id="p995994814275">insmod smap_histogram_tracking.ko</p></pre>
+   * 安装smap_access_tracking.ko。在UB仿真中安装时，如使能SMAP硬件判热功能，则增加enable_hist=1参数。
      
-     <pre class="screen" id="screen1810215131197"><p class="p" id="p995994814275">insmod smap_access_tracking.ko smap_scene=2</p></pre>
+     <pre class="screen"><p class="p" id="p8959848192712">insmod smap_access_tracking.ko smap_scene=2</p></pre>
 3. 检查扫描驱动是否载入成功。
    
    <pre class="screen" id="screen1884674894220"><p class="p" id="p9960648142719">lsmod | grep tracking</p></pre>
    
-   * 查询到插入的3个ko，则表示载入成功，示例如下：
+   * 在环境能查询到插入的3个ko，则表示载入成功，示例如下：
      
-     <pre class="screen" id="screen81169214579"><p class="p" id="p179602488279">[root@controller ~]# lsmod | grep tracking</p><p class="p" id="p15960174814274">smap_access_tracking        118784  0</p><p class="p" id="p15960174814274">smap_histogram_tracking     24576  1 smap_access_tracking</p><p class="p" id="p1696084810278">smap_tracking_core          20480  1 smap_access_tracking</p></pre>
+     <pre class="screen" id="screen81169214579"><p class="p" id="p179602488279">[root@controller ~]# lsmod | grep tracking</p><p class="p" id="p15960174814274">smap_access_tracking         65536  0</p><p class="p" id="p1696084810278">smap_histogram_tracking      28672  1 access_tracking</p><p class="p" id="p179602488279">smap_tracking_core           28672  1 smap_access_tracking</p></pre>
 4. 虚拟化场景需安装qemu-system-aarch64。
    
    <pre class="screen" id="ZH-CN_TOPIC_0000002029393654__screen113013468319"><p class="p" id="p17961114816271">yum install qemu-system-aarch64 -y</p></pre>
@@ -54,9 +55,9 @@ SMAP是一款Huawei计算产品线自研, 开源的内存迁移工具, 搭配OBM
    
    <pre class="screen" id="ZH-CN_TOPIC_0000002029393654__screen14933143815411"><p class="p" id="p8962164813273">cd /lib/modules/smap</p></pre>
    
-   * 容器场景。
-     <pre class="screen" id="ZH-CN_TOPIC_0000002029393654__screen10449144916557"><p class="p" id="p4962648122720">insmod smap_tiering.ko smap_mode=2 smap_pgsize=0</p></pre>
-   * 虚拟化场景/HAM场景。
+   * 容器场景
+     <pre class="screen" id="ZH-CN_TOPIC_0000002029393654__screen10449144916557"><p class="p" id="p4962648122720">insmod smap_tiering.ko smap_pgsize=0</p></pre>
+   * 虚拟化场景
      <pre class="screen" id="screen10850151716211"><p class="p" id="p1296384811277">insmod smap_tiering.ko smap_scene=2</p></pre>
 6. 检查迁移驱动是否载入成功，返回smap信息即表示安装成功。
    
