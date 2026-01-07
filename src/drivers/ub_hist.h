@@ -134,15 +134,4 @@ enum platform_type {
 	PLATFORM_EVB_TWO_SOCKETS = 3,
 };
 
-int ub_hist_init(enum platform_type platform);
-void ub_hist_exit(void);
-int ub_hist_lock_device(void);
-void ub_hist_unlock_device(void);
-int ub_hist_query_ba_count(void);
-int ub_hist_query_ba_tags(uint64_t *p_tags, int count);
-int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info);
-int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_ga);
-int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_ga);
-int ub_hist_get_statistic_result(struct ub_hist_ba_result *result);
-
 #endif

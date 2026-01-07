@@ -19,32 +19,28 @@ extern rwlock_t rem_ram_list_lock;
 extern bool ram_changed(void);
 extern u64 get_node_page_cnt_iomem(int nid, int page_size);
 
-struct node_info {
-	u32 node;
-	u64 pa;
-	u64 size;
-};
-
-struct hist_tracking_dev {
+struct access_tracking_dev {
 	struct list_head list;
 	struct device ldev;
 	s8 node;
 
 	void *tracking_dev;
-	u16 *hist_actc_data;
+	u16 *access_bit_actc_data;
 	u64 page_count;
 	u8 page_size_mode;
-	u8 scan_mode;
 	bool enable_on;
+	bool is_hist;
 
 	u8 ba;
-	struct node_info node_info;
 
 	char workq_name[32];
 	struct workqueue_struct *scanq;
 	struct delayed_work scan_work;
-	struct mutex mutex;
+	struct rw_semaphore buffer_lock;
 	struct completion work_done;
 } __attribute__((aligned(8)));
+
+void access_tracking_dev_release(struct device *dev);
+int hist_module_init(void);
 
 #endif

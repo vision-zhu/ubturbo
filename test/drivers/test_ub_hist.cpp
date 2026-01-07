@@ -44,6 +44,8 @@ static uint64_t reg_base_cpp_addrs[] = {
 extern "C" int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev);
 extern "C" int ub_hist_probe(struct platform_device *pdev);
 extern "C" int ub_hist_remove(struct platform_device *pdev);
+extern "C" int ub_hist_init(enum platform_type platform);
+extern "C" void ub_hist_exit(void);
 class DriversUbHistMidTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -103,6 +105,7 @@ TEST_F(DriversUbHistMidTest, comprehensive_blocking)
     smap_hist_middle_scan_disable();
 }
 
+extern "C" int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info);
 TEST_F(DriversUbHistMidTest, comprehensive_threading)
 {
     struct ub_hist_ba_info ba_info[4];

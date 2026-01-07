@@ -95,9 +95,6 @@ extern struct list_head ham_pid_list;
 extern struct list_head statistic_pid_list;
 extern spinlock_t ham_lock;
 extern spinlock_t statistic_lock;
-extern u16 *g_hist_actc_data[SMAP_MAX_NUMNODES];
-extern u64 g_hist_actc_page_count[SMAP_MAX_NUMNODES];
-extern int g_hist_actc_data_ret[SMAP_MAX_NUMNODES];
 
 void print_access_ham_pid_list(void);
 void print_access_statistic_pid_list(void);
@@ -120,11 +117,6 @@ int access_walk_pagemap(struct access_pid *ap);
 struct access_pid *find_access_pid(pid_t pid);
 int read_pid_freq(pid_t pid, size_t *data_len, u16 **data);
 int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr);
-
-int hist_actc_data_init(void);
-void hist_actc_data_deinit(void);
-void update_hist_tracking(void);
-int hist_actc_data_reinit(void);
 
 static inline bool access_pid_is_scanning(pid_t pid)
 {

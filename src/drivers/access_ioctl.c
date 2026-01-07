@@ -298,7 +298,6 @@ static size_t calc_bitmap_len(void)
 
 static long ioctl_walk_pagemap(void __user *argp)
 {
-	int ret;
 	size_t buf_len;
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_WALK)) {
 		pr_err("walk pagemap of access pid is not allowed\n");
@@ -306,17 +305,12 @@ static long ioctl_walk_pagemap(void __user *argp)
 	}
 	buf_len = calc_bitmap_len();
 	if (!buf_len || copy_to_user(argp, &buf_len, sizeof(buf_len))) {
-		ret = -EFAULT;
 		set_ap_whole_state(&ap_data, AP_STATE_WALK);
-		return ret;
+		return -EFAULT;
 	} else {
 		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ);
 	}
-	ret = hist_actc_data_reinit();
-	if (!ret) {
-		update_hist_tracking();
-	}
-	return ret;
+	return 0;
 }
 
 static inline void write_bitmap_pid(char **buffer, struct access_pid *ap)

@@ -30,10 +30,10 @@
 #include "hist_ops.h"
 #include "hist_tracking.h"
 
-#define to_hist_tracking_dev(n) container_of(n, struct hist_tracking_dev, ldev)
+#define to_access_tracking_dev(n) container_of(n, struct access_tracking_dev, ldev)
 #define to_delay_work(n) container_of(n, struct delayed_work, work)
 #define delay_work_to_dev(n) \
-	container_of(n, struct hist_tracking_dev, scan_work)
+	container_of(n, struct access_tracking_dev, scan_work)
 #define WORK_QUEUE_NAME_LEN 32
 #define HIST_TRACKING_DEFAULT_PERIOD 200
 #define SCAN_TIME_MAX 100000
@@ -41,47 +41,47 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "hist: " fmt
 
-unsigned int smap_scene = NORMAL_SCENE;
-module_param(smap_scene, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_scene, "SMAP usage scenarios: 0 for HCCS, 1 for UB_QEMU");
+extern struct list_head access_dev;
 
-static struct list_head g_hist_tracking_dev;
+static inline void reset_actc_data(struct access_tracking_dev *hdev)
+{
+	size_t len = hdev->page_count * sizeof(u16);
+
+	if (hdev->access_bit_actc_data)
+		memset(hdev->access_bit_actc_data, 0, len);
+}
 
 static void hist_tracking_enable(struct device *ldev)
 {
-	struct hist_tracking_dev *hdev;
-	hdev = to_hist_tracking_dev(ldev);
+	struct access_tracking_dev *hdev;
+
+	hdev = to_access_tracking_dev(ldev);
+	down_write(&hdev->buffer_lock);
+	reset_actc_data(hdev);
+	up_write(&hdev->buffer_lock);
 	hdev->enable_on = true;
 	hist_thread_resume();
 }
 
 static void hist_tracking_disable(struct device *ldev)
 {
-	struct hist_tracking_dev *hdev;
-	hdev = to_hist_tracking_dev(ldev);
+	struct access_tracking_dev *hdev;
+
+	hdev = to_access_tracking_dev(ldev);
 	hdev->enable_on = false;
 	hist_thread_pause();
 }
 
-static inline void reset_actc_data(struct hist_tracking_dev *hdev)
-{
-	size_t len = hdev->page_count * sizeof(u16);
-
-	if (hdev->hist_actc_data) {
-		memset(hdev->hist_actc_data, 0, len);
-	}
-}
-
-static void actc_buffer_deinit(struct hist_tracking_dev *hdev)
+static void actc_buffer_deinit(struct access_tracking_dev *hdev)
 {
 	hdev->page_count = 0;
-	if (hdev->hist_actc_data) {
-		vfree(hdev->hist_actc_data);
-		hdev->hist_actc_data = NULL;
+	if (hdev->access_bit_actc_data) {
+		vfree(hdev->access_bit_actc_data);
+		hdev->access_bit_actc_data = NULL;
 	}
 }
 
-static inline int hist_get_page_size(struct hist_tracking_dev *hdev)
+static inline int hist_get_page_size(struct access_tracking_dev *hdev)
 {
 	if (hdev->page_size_mode == PAGE_MODE_2M) {
 		return PAGE_SIZE_2M;
@@ -89,7 +89,7 @@ static inline int hist_get_page_size(struct hist_tracking_dev *hdev)
 	return PAGE_SIZE_4K;
 }
 
-static u64 calc_access_len(struct hist_tracking_dev *hdev)
+static u64 calc_access_len(struct access_tracking_dev *hdev)
 {
 	int page_size = hist_get_page_size(hdev);
 	u64 page_count;
@@ -110,7 +110,7 @@ static void hist_dev_pgsize_update(u8 page_size_mode)
 	hist_update_pgsize(pgsize);
 }
 
-static int actc_buffer_reinit(struct hist_tracking_dev *hdev)
+static int actc_buffer_reinit(struct access_tracking_dev *hdev)
 {
 	u64 page_count;
 	page_count = calc_access_len(hdev);
@@ -123,8 +123,8 @@ static int actc_buffer_reinit(struct hist_tracking_dev *hdev)
 	}
 	actc_buffer_deinit(hdev);
 	if (page_count) {
-		hdev->hist_actc_data = vzalloc(page_count * sizeof(u16));
-		if (!hdev->hist_actc_data) {
+		hdev->access_bit_actc_data = vzalloc(page_count * sizeof(u16));
+		if (!hdev->access_bit_actc_data) {
 			return -ENOMEM;
 		}
 	}
@@ -135,67 +135,39 @@ static int actc_buffer_reinit(struct hist_tracking_dev *hdev)
 static int hist_tracking_reinit_actc_buffer(struct device *ldev)
 {
 	int ret;
-	struct hist_tracking_dev *hdev = to_hist_tracking_dev(ldev);
+	struct access_tracking_dev *hdev = to_access_tracking_dev(ldev);
 	hist_set_iomem();
-	mutex_lock(&hdev->mutex);
+	down_write(&hdev->buffer_lock);
 	ret = actc_buffer_reinit(hdev);
 	if (ret) {
 		pr_err("Actc buffer reinit failed. ret:%d\n", ret);
 	}
-	mutex_unlock(&hdev->mutex);
+	up_write(&hdev->buffer_lock);
 	return ret;
 }
 
 static int hist_tracking_set_page_size(struct device *ldev, u8 pgsize)
 {
 	int ret;
-	struct hist_tracking_dev *hdev;
-	hdev = to_hist_tracking_dev(ldev);
+	struct access_tracking_dev *hdev;
+	hdev = to_access_tracking_dev(ldev);
 
 	if (pgsize != PAGE_MODE_4K && pgsize != PAGE_MODE_2M) {
 		pr_err("invalid page size\n");
 		return -EINVAL;
 	}
-	mutex_lock(&hdev->mutex);
+	down_write(&hdev->buffer_lock);
 	hdev->enable_on = false;
 	hdev->page_size_mode = pgsize;
 	hist_dev_pgsize_update(pgsize);
 	ret = actc_buffer_reinit(hdev);
 	if (ret) {
-		mutex_unlock(&hdev->mutex);
+		up_write(&hdev->buffer_lock);
 		pr_err("Actc buffer reinit failed. ret:%d\n", ret);
 		return ret;
 	}
-	mutex_unlock(&hdev->mutex);
+	up_write(&hdev->buffer_lock);
 	return ret;
-}
-
-static int hist_tracking_read(struct device *ldev, void *buffer, u32 length)
-{
-	struct hist_tracking_dev *hdev;
-	if (unlikely(!buffer)) {
-		pr_err("null buffer passed to histogram tracking read\n");
-		return -EINVAL;
-	}
-	if (unlikely(length == 0)) {
-		pr_err("buffer of length zero passed to histogram tracking read\n");
-		return -EINVAL;
-	}
-
-	hdev = to_hist_tracking_dev(ldev);
-	mutex_lock(&hdev->mutex);
-	if (hdev->page_count == 0) {
-		mutex_unlock(&hdev->mutex);
-		return 0;
-	}
-	if (length > hdev->page_count * sizeof(u16)) {
-		length = hdev->page_count * sizeof(u16);
-	}
-
-	memcpy(buffer, hdev->hist_actc_data, length);
-	reset_actc_data(hdev);
-	mutex_unlock(&hdev->mutex);
-	return length;
 }
 
 static struct tracking_operations g_hist_tracking_ops = {
@@ -203,18 +175,17 @@ static struct tracking_operations g_hist_tracking_ops = {
 	.tracking_disable = hist_tracking_disable,
 	.tracking_reinit_actc_buffer = hist_tracking_reinit_actc_buffer,
 	.tracking_set_page_size = hist_tracking_set_page_size,
-	.tracking_read = hist_tracking_read,
 };
 
-static int actc_buffer_init(struct hist_tracking_dev *hdev)
+static int actc_buffer_init(struct access_tracking_dev *hdev)
 {
 	hdev->page_count = calc_access_len(hdev);
 	pr_info("page count: %llu for node: %d\n", hdev->page_count,
 		hdev->node);
 	if (!hdev->page_count)
 		return 0;
-	hdev->hist_actc_data = vzalloc(hdev->page_count * sizeof(u16));
-	if (!hdev->hist_actc_data) {
+	hdev->access_bit_actc_data = vzalloc(hdev->page_count * sizeof(u16));
+	if (!hdev->access_bit_actc_data) {
 		pr_err("unable to alloc mem for histogram tracking ACTC buffer\n");
 		hdev->page_count = 0;
 		return -ENOMEM;
@@ -222,7 +193,7 @@ static int actc_buffer_init(struct hist_tracking_dev *hdev)
 	return 0;
 }
 
-static void scan_hist(struct hist_tracking_dev *hdev)
+static void scan_hist(struct access_tracking_dev *hdev)
 {
 	u32 pgcount = 0, addr_pg = 0;
 	struct ram_segment *rseg, *tmp;
@@ -243,7 +214,7 @@ static void scan_hist(struct hist_tracking_dev *hdev)
 				pgcount + addr_pg, hdev->page_count);
 			break;
 		}
-		fetch_hist_actc_buf(hdev->hist_actc_data + pgcount, &addr_seg);
+		fetch_hist_actc_buf(hdev->access_bit_actc_data + pgcount, &addr_seg);
 		pgcount += addr_pg;
 	}
 	read_unlock(&rem_ram_list_lock);
@@ -251,18 +222,22 @@ static void scan_hist(struct hist_tracking_dev *hdev)
 
 static void update_hist_actc_batch(void)
 {
-	struct hist_tracking_dev *hdev, *n;
-	list_for_each_entry_safe(hdev, n, &g_hist_tracking_dev, list) {
-		mutex_lock(&hdev->mutex);
+	struct access_tracking_dev *hdev, *n;
+	list_for_each_entry_safe(hdev, n, &access_dev, list) {
+		if (!hdev->is_hist)
+			continue;
+		down_write(&hdev->buffer_lock);
 		scan_hist(hdev);
-		mutex_unlock(&hdev->mutex);
+		up_write(&hdev->buffer_lock);
 	}
 }
 
 static void hist_tracking_deinit(void)
 {
-	struct hist_tracking_dev *hdev, *n;
-	list_for_each_entry_safe(hdev, n, &g_hist_tracking_dev, list) {
+	struct access_tracking_dev *hdev, *n;
+	list_for_each_entry_safe(hdev, n, &access_dev, list) {
+		if (!hdev->is_hist)
+			continue;
 		tracking_dev_remove(hdev->tracking_dev);
 		actc_buffer_deinit(hdev);
 		device_unregister(&hdev->ldev);
@@ -270,7 +245,7 @@ static void hist_tracking_deinit(void)
 	}
 }
 
-static void hist_tracking_dev_release(struct device *dev)
+void access_tracking_dev_release(struct device *dev)
 {
 	pr_debug("Releasing device %s\n", dev_name(dev));
 }
@@ -279,15 +254,14 @@ static int hist_tracking_init(void)
 {
 	int ret;
 	unsigned int node;
-	struct hist_tracking_dev *hdev;
+	struct access_tracking_dev *hdev;
 
 	if (nr_local_numa < 0)
 		return -EINVAL;
 
-	INIT_LIST_HEAD(&g_hist_tracking_dev);
 	for (node = (unsigned int)nr_local_numa; node < SMAP_MAX_NUMNODES;
 	     ++node) {
-		hdev = kzalloc(sizeof(struct hist_tracking_dev), GFP_KERNEL);
+		hdev = kzalloc(sizeof(struct access_tracking_dev), GFP_KERNEL);
 		if (!hdev) {
 			pr_err("unable to alloc mem for histogram tracking device\n");
 			goto put_dev;
@@ -295,6 +269,7 @@ static int hist_tracking_init(void)
 
 		hdev->node = node;
 		hdev->page_size_mode = PAGE_MODE_2M;
+		hdev->is_hist = true;
 
 		ret = actc_buffer_init(hdev);
 		if (ret) {
@@ -302,9 +277,9 @@ static int hist_tracking_init(void)
 			goto free_hdev;
 		}
 
-		mutex_init(&hdev->mutex);
+		init_rwsem(&hdev->buffer_lock);
 		device_initialize(&hdev->ldev);
-		hdev->ldev.release = hist_tracking_dev_release;
+		hdev->ldev.release = access_tracking_dev_release;
 		ret = dev_set_name(&hdev->ldev, "hist_tracking_dev%d", node);
 		if (ret) {
 			pr_err("unable to set histogram tracking device name, ret: %d\n",
@@ -326,7 +301,7 @@ static int hist_tracking_init(void)
 			goto del_dev;
 		}
 
-		list_add_tail(&hdev->list, &g_hist_tracking_dev);
+		list_add_tail(&hdev->list, &access_dev);
 	}
 
 	return 0;
@@ -344,18 +319,14 @@ put_dev:
 	return -ENODEV;
 }
 
-static int __init hist_module_init(void)
+int hist_module_init(void)
 {
 	int ret;
-	ret = init_acpi_mem();
-	if (ret) {
-		pr_err("parse ACPI table failed: %d\n", ret);
-		return ret;
-	}
+
 	ret = hist_init(SIZE_2M, smap_scene != NORMAL_SCENE);
 	if (ret) {
 		pr_err("init SMAP histogram device failed, ret: %d\n", ret);
-		goto err_hist_init;
+		return ret;
 	}
 
 	ret = hist_tracking_init();
@@ -369,20 +340,5 @@ static int __init hist_module_init(void)
 
 err_tracking_add:
 	hist_deinit();
-err_hist_init:
-	reset_acpi_mem();
 	return ret;
 }
-
-static void __exit hist_module_exit(void)
-{
-	hist_deinit();
-	hist_tracking_deinit();
-	reset_acpi_mem();
-}
-
-MODULE_DESCRIPTION("SMAP hist driver");
-MODULE_AUTHOR("Huawei Tech. Co., Ltd.");
-MODULE_LICENSE("GPL v2");
-module_init(hist_module_init);
-module_exit(hist_module_exit);
