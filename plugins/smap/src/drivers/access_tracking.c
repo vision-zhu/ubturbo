@@ -29,6 +29,7 @@
 #include "access_pid.h"
 #include "accessed_bit.h"
 #include "access_pid.h"
+#include "hist_ops.h"
 #include "access_tracking.h"
 
 #define DEFAULT_PERIOD_MS 50
@@ -46,6 +47,10 @@ int calc_access_len(struct access_tracking_dev *adev);
 unsigned int smap_scene = NORMAL_SCENE;
 module_param(smap_scene, uint, S_IRUGO);
 MODULE_PARM_DESC(smap_scene, "smap use scene: 0 for HCCS, 1 for UB_QEMU");
+
+unsigned int enable_hist = DISABLE_HIST;
+module_param(enable_hist, uint, S_IRUGO);
+MODULE_PARM_DESC(enable_hist, "smap hist disable: 0, smap hist enable: 1");
 
 LIST_HEAD(access_dev);
 u8 access_page_size = PAGE_MODE_2M;
@@ -138,16 +143,17 @@ static void destroy_scan_workqueue(void)
 
 static inline void init_actc_data(struct access_tracking_dev *adev)
 {
-	u8 val = adev->mode == ACCESS_MODE_AND ? 0xff : 0x0;
 	size_t len = adev->page_count * sizeof(actc_t);
 
 	if (adev->access_bit_actc_data)
-		memset(adev->access_bit_actc_data, val, len);
+		memset(adev->access_bit_actc_data, 0, len);
 }
 
 static void access_tracking_enable(struct device *ldev)
 {
 	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
+	if (adev->is_hist)
+		return;
 	down_write(&adev->buffer_lock);
 	init_actc_data(adev);
 	up_write(&adev->buffer_lock);
@@ -157,6 +163,8 @@ static void access_tracking_enable(struct device *ldev)
 static void access_tracking_disable(struct device *ldev)
 {
 	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
+	if (adev->is_hist)
+		return;
 	wait_scan_works(adev);
 }
 
@@ -186,7 +194,6 @@ static int access_tracking_mode_set(struct device *ldev, u8 mode)
 		return -EPERM;
 	}
 
-	adev->mode = mode;
 	init_actc_data(adev);
 	return 0;
 }
@@ -313,18 +320,14 @@ static int actc_buffer_init(struct access_tracking_dev *adev)
 	return 0;
 }
 
-static void access_tracking_dev_release(struct device *dev)
-{
-	pr_debug("Releasing device %s\n", dev_name(dev));
-}
-
 static int access_tracking_add(void)
 {
 	int ret;
 	int devno;
 	struct access_tracking_dev *adev, *n;
+	int access_devices_cnt = enable_hist ? nr_local_numa : SMAP_MAX_NUMNODES;
 
-	for (devno = 0; devno < SMAP_MAX_NUMNODES; devno++) {
+	for (devno = 0; devno < access_devices_cnt; devno++) {
 		adev = kzalloc(sizeof(struct access_tracking_dev), GFP_KERNEL);
 		if (!adev) {
 			pr_err("unable to allocate memory for access tracking device\n");
@@ -333,6 +336,7 @@ static int access_tracking_add(void)
 
 		adev->node = devno;
 		adev->page_size_mode = PAGE_MODE_2M;
+		adev->is_hist = false;
 
 		ret = actc_buffer_init(adev);
 		if (ret) {
@@ -463,6 +467,20 @@ static int remote_ram_init(void)
 	return 0;
 }
 
+static void release_adev(void)
+{
+	struct access_tracking_dev *adev;
+	struct access_tracking_dev *n;
+
+	list_for_each_entry_safe(adev, n, &access_dev, list) {
+		tracking_dev_remove(adev->tracking_dev);
+		device_unregister(&adev->ldev);
+		vfree(adev->access_bit_actc_data);
+		adev->access_bit_actc_data = NULL;
+		kfree(adev);
+	}
+}
+
 static int __init access_tracking_init(void)
 {
 	int ret = 0;
@@ -487,18 +505,19 @@ static int __init access_tracking_init(void)
 		goto err_ioctl;
 	}
 
-	ret = hist_actc_data_init();
-	if (ret) {
-		pr_err("unable to init SMAP histogram ACTC data buffer\n");
-		goto err_tracking_add;
-	}
-
 	ret = access_tracking_add();
 	if (ret) {
 		pr_err("unable to add access tracking device to tracking bus\n");
 		goto err_tracking_add;
 	}
 
+	if (enable_hist) {
+		ret = hist_module_init();
+		if (ret) {
+			pr_err("unable to init hist tracking\n");
+			goto err_tracking_add;
+		}
+	}
 	if (create_scan_workqueue()) {
 		goto err_tracking_add;
 	}
@@ -509,6 +528,7 @@ static int __init access_tracking_init(void)
 	return ret;
 
 err_tracking_add:
+	release_adev();
 	access_ioctl_exit();
 err_ioctl:
 	memory_notifier_exit();
@@ -520,20 +540,14 @@ err_remote_ram:
 
 static void __exit access_tracking_exit(void)
 {
-	struct access_tracking_dev *adev, *n;
 	access_ioctl_exit();
 	destroy_scan_workqueue();
-	list_for_each_entry_safe(adev, n, &access_dev, list) {
-		tracking_dev_remove(adev->tracking_dev);
-		device_unregister(&adev->ldev);
-		vfree(adev->access_bit_actc_data);
-		adev->access_bit_actc_data = NULL;
-		kfree(adev);
-	}
+	if (enable_hist)
+		hist_deinit();
+	release_adev();
 	release_remote_ram();
 	reset_acpi_mem();
 	memory_notifier_exit();
-	hist_actc_data_deinit();
 	pr_info("access tracking exit successfully\n");
 }
 

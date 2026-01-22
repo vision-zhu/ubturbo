@@ -27,7 +27,6 @@ using namespace std;
 
 extern "C" int init_acpi_mem(void);
 extern "C" struct list_head access_dev;
-extern "C" int hist_actc_data_init(void);
 
 class AccessTrackingTest : public ::testing::Test {
 protected:
@@ -69,12 +68,11 @@ TEST_F(AccessTrackingTest, access_tracking_disable)
 TEST_F(AccessTrackingTest, init_actc_data)
 {
     struct access_tracking_dev adev;
-    adev.mode = ACCESS_MODE_AND;
     adev.page_count = 1;
     u16 data = 0;
     adev.access_bit_actc_data = &data;
     drivers_init_actc_data(&adev);
-    EXPECT_EQ(0xffff, adev.access_bit_actc_data[0]);
+    EXPECT_EQ(0, adev.access_bit_actc_data[0]);
 }
 
 extern "C" int get_page_size(struct access_tracking_dev *adev);
@@ -113,7 +111,6 @@ TEST_F(AccessTrackingTest, access_tracking_mode_set)
     adev.access_bit_actc_data = nullptr;
     ret = access_tracking_mode_set(&adev.ldev, ACCESS_MODE_AND);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(ACCESS_MODE_AND, adev.mode);
 }
 
 extern "C" void access_print_acpi_mem(void);
@@ -341,7 +338,6 @@ TEST_F(AccessTrackingTest, access_tracking_init_two)
     MOCKER(access_ioctl_init).stubs().will(returnValue(0));
     MOCKER(access_tracking_add).stubs().will(returnValue(0));
     MOCKER(create_scan_workqueue).stubs().will(returnValue(0));
-    MOCKER(hist_actc_data_init).stubs().will(returnValue(0));
     MOCKER(access_print_acpi_mem).stubs();
     ret = access_tracking_init();
     EXPECT_EQ(0, ret);
@@ -351,7 +347,6 @@ TEST_F(AccessTrackingTest, access_tracking_init_two)
 
 extern "C" void release_remote_ram(void);
 extern "C" void memory_notifier_exit(void);
-extern "C" void hist_actc_data_deinit(void);
 extern "C" void __exit access_tracking_exit(void);
 extern "C" void destroy_scan_workqueue(void);
 TEST_F(AccessTrackingTest, access_tracking_exit)
@@ -365,7 +360,6 @@ TEST_F(AccessTrackingTest, access_tracking_exit)
     MOCKER(release_remote_ram).stubs();
     MOCKER(reset_acpi_mem).stubs();
     MOCKER(memory_notifier_exit).stubs();
-    MOCKER(hist_actc_data_deinit).stubs();
     access_tracking_exit();
     list_del(&adev.list);
 }

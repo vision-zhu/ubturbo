@@ -31,6 +31,9 @@
 #define HOT_WINDOW_RATIO (10)
 static struct smap_hist_dev g_smap_hist_dev;
 
+extern int ub_hist_init(enum platform_type platform);
+extern void ub_hist_exit(void);
+
 static inline u64 align_addr(u64 addr, u32 low_bit_len)
 {
 	return (addr >> low_bit_len) << low_bit_len;

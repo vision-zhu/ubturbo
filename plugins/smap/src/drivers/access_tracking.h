@@ -15,6 +15,7 @@
 #include "access_pid.h"
 #include "drv_common.h"
 #include "bus.h"
+#include "hist_tracking.h"
 
 extern unsigned int smap_scene;
 
@@ -30,6 +31,12 @@ enum smap_scene_args {
 	NR_SCENE_ARGS,
 };
 
+enum hist_status {
+	DISABLE_HIST,
+	ENABLE_HIST,
+	NR_STATUS_ARGS,
+};
+
 #define AB_ACTC_ELEM_SIZE 16
 #define WORKQ_NAME_SIZE 32
 #define WORKQ_NAME_MAX_LEN (WORKQ_NAME_SIZE - 1)
@@ -42,23 +49,6 @@ static inline bool is_access_hugepage(void)
 {
 	return access_page_size == PAGE_MODE_2M;
 }
-
-struct access_tracking_dev {
-	struct list_head list;
-	struct device ldev;
-	s8 node;
-
-	void *tracking_dev;
-	actc_t *access_bit_actc_data;
-	u64 page_count;
-	u8 page_size_mode;
-	u8 mode;
-
-	char workq_name[32];
-	struct workqueue_struct *scanq;
-	struct rw_semaphore buffer_lock;
-	struct completion work_done;
-} __attribute__((aligned(8)));
 
 static inline struct access_tracking_dev *get_access_tracking_dev(int node_id)
 {
