@@ -183,6 +183,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqLowSmallerThanHigh)
     process.scanAttr.actCount[1].freqNum = 3;
     process.separateParam.freqWt = 5;
     process.separateParam.slowThred = 1;
+    process.enableSwap = true;
 
     ActcData actcDataL1[3];
     ActcData actcDataL2[3];
@@ -309,6 +310,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategyall)
     process.separateParam.maxMigrate = 100;
     process.walkPage.nrPage = 2;
     process.numaAttr.numaNodes = 0b00010001; // 0 4
+    process.enableSwap = true;
 
     ActcData actcData1[2] = {};
     ActcData actcData2[4] = {};

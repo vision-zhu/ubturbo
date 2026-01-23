@@ -224,6 +224,7 @@ struct ProcessAttribute {
     int initLocalMemRatio; // 接口设置的内存比例
     int remoteNumaCnt; // 远端numa数量
     bool isLowMem; // 多numa虚机场景，表示目的端内存不够
+    bool enableSwap; // 控制是否开启交换，默认开启
     struct { // 迁移相关参数
         int nid;
         uint64_t memSize; // 迁移内存大小,单位为KB
