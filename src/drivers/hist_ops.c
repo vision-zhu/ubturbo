@@ -708,6 +708,21 @@ static int hist_pginfo_reinit(struct smap_hist_dev *dev, u32 pgsize_new)
 	return 0;
 }
 
+#define REMOTE_NUMA_OVERFLOW_SIZE (1ULL << 40)
+static int is_total_seg_overflow(struct segs_info *info)
+{
+	u32 i = 0;
+	u64 total_size = 0;
+	for (; i < info->cnt; ++i) {
+		total_size += info->segs[i].size;
+	}
+	if (total_size >= REMOTE_NUMA_OVERFLOW_SIZE) {
+		pr_debug("remote numa total memory size overflow with %llu\n", total_size);
+		return 1;
+	}
+	return 0;
+}
+
 static int scan_thread_run(void *data)
 {
 	int ret;
@@ -731,6 +746,10 @@ static int scan_thread_run(void *data)
 		if (!dev->thread_enable || !dev->pgcount) {
 			msleep(1);
 			continue;
+		}
+
+		if (is_total_seg_overflow(&dev->info) == 1) {
+			break;
 		}
 
 		ret = hist_scan_sliding(&dev->info, dev->period, dev->buf,
