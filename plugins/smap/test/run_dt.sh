@@ -197,7 +197,6 @@ replace_string "${code_dir}/src/drivers/hist_tracking.c" "actc_buffer_init" "dri
 replace_string "${code_dir}/src/drivers/hist_tracking.c" "update_actc_mode_sum" "drivers_update_actc_mode_sum"
 replace_string "${code_dir}/src/drivers/hist_tracking.c" "remote_ram_list" "drivers_remote_ram_list"
 replace_string "${code_dir}/src/drivers/hist_tracking.c" "refresh_remote_ram" "drivers_refresh_remote_ram"
-replace_string "${code_dir}/src/drivers/hist_tracking.c" "smap_scene" "hist_smap_scene"
 
 # hist_ops.c
 replace_string "${code_dir}/src/drivers/hist_ops.c" "remote_ram_list" "drivers_remote_ram_list"

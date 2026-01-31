@@ -88,6 +88,16 @@ struct smap_hist_scan_record {
 
 static struct smap_hist_mid *hist_mid;
 
+extern int ub_hist_lock_device(void);
+extern void ub_hist_unlock_device(void);
+extern int ub_hist_query_ba_count(void);
+extern int ub_hist_query_ba_tags(uint64_t *p_tags, int count);
+extern int ub_hist_query_ba_info(uint64_t ba_tag,
+				 struct ub_hist_ba_info *ba_info);
+extern int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_ga);
+extern int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_ga);
+extern int ub_hist_get_statistic_result(struct ub_hist_ba_result *result);
+
 static inline size_t align_down(phys_addr_t addr, size_t alignment)
 {
 	return (addr) & ~((alignment)-1ULL);
@@ -669,6 +679,19 @@ static int do_ba_statistic(struct ub_hist_ba_config *config, uint64_t ba_tag)
 	return 0;
 }
 
+static inline bool addr_is_cc_mem(u64 addr, uint64_t ba_tag)
+{
+	struct ub_hist_ba_info info;
+
+	if (ub_hist_query_ba_info(ba_tag, &info))
+		return true;
+
+	if (info.cc_range.start <= addr && addr < info.cc_range.end)
+		return true;
+
+	return false;
+}
+
 static int smap_hist_scan_one_roi(struct smap_hist_scan_record *record,
 				  struct ub_hist_ba_config *config,
 				  struct hist_roi_node *roi,
@@ -693,6 +716,11 @@ static int smap_hist_scan_one_roi(struct smap_hist_scan_record *record,
 		record->window_end = record->current_addr + window_size;
 		config->regs.reg_ctrl.sts_base_addr = record->current_addr >>
 						      SHIFT_32M;
+		config->regs.reg_ctrl.sts_wr_en =
+			addr_is_cc_mem(record->current_addr,
+				       work_desc->ba_tag) ?
+				false :
+				true;
 		if (do_ba_statistic(config, result->ba_tag) ||
 		    ub_hist_get_statistic_result(result)) {
 			hist_mid->status.flags.error = 1;

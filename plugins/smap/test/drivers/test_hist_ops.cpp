@@ -37,6 +37,7 @@ protected:
 
 extern list_head drivers_remote_ram_list;
 extern "C" struct smap_hist_dev g_smap_hist_dev;
+extern "C" int ub_hist_init(enum platform_type platform);
 
 extern "C" u64 align_addr(u64 addr, u32 low_bit_len);
 TEST_F(HistOpsTest, align_addr)
