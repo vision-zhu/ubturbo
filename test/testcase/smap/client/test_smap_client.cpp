@@ -41,9 +41,10 @@ TEST_F(TestSmapClient, SmapMigrateOutTest)
     struct MigrateOutMsg msg = { 0 };
 
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
 
     MOCKER_CPP(&UBTurboFunctionCaller, uint32_t(*)(const std::string &function, const TurboByteBuffer &params,
         TurboByteBuffer &result))
@@ -72,9 +73,10 @@ TEST_F(TestSmapClient, SmapMigrateOutEncodeRequestFailed)
     struct MigrateOutMsg msg = { 0 };
 
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
 
     MOCKER_CPP(&SmapMigrateOutCodec::EncodeRequest, int(*)(SmapMigrateOutCodec*, TurboByteBuffer&,
         struct MigrateOutMsg*, int))
@@ -91,9 +93,10 @@ TEST_F(TestSmapClient, SmapMigrateOutUBTurboFunctionCallerFailed)
     struct MigrateOutMsg msg = { 0 };
 
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
 
     MOCKER_CPP(&SmapMigrateOutCodec::EncodeRequest, int(*)(SmapMigrateOutCodec*, TurboByteBuffer&,
         struct MigrateOutMsg*, int))
@@ -115,9 +118,10 @@ TEST_F(TestSmapClient, SmapMigrateOutDecodeResponseFailed)
     struct MigrateOutMsg msg = { 0 };
 
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
 
     MOCKER_CPP(&SmapMigrateOutCodec::EncodeRequest, int(*)(SmapMigrateOutCodec*, TurboByteBuffer&,
         struct MigrateOutMsg*, int))
@@ -1027,9 +1031,10 @@ TEST_F(TestSmapClient, SmapMigrateOutSyncTest)
 {
     struct MigrateOutMsg msg = { 0 };
     msg.count = 1;
+    msg.payload[0].count = 1;
     msg.payload[0].pid = 1;
-    msg.payload[0].destNid = 4;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].destNid = 4;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
     uint64_t maxWaitTime = 1000;
 
@@ -1057,9 +1062,10 @@ TEST_F(TestSmapClient, SmapMigrateOutSyncEncodeRequestError)
     int ret;
     struct MigrateOutMsg msg = { 0 };
     msg.count = 1;
+    msg.payload[0].count = 1;
     msg.payload[0].pid = 1;
-    msg.payload[0].destNid = 4;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].destNid = 4;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
     uint64_t maxWaitTime = 1000;
 
@@ -1077,9 +1083,10 @@ TEST_F(TestSmapClient, SmapMigrateOutSyncUBTurboFunctionCallerFailed)
     int ret;
     struct MigrateOutMsg msg = { 0 };
     msg.count = 1;
+    msg.payload[0].count = 1;
     msg.payload[0].pid = 1;
-    msg.payload[0].destNid = 4;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].destNid = 4;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
     uint64_t maxWaitTime = 1000;
 

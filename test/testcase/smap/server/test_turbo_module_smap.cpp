@@ -41,9 +41,10 @@ TEST_F(TestTurboModuleSmap, SmapMigrateOutHandlerTest)
     TurboByteBuffer outputBuffer;
     MigrateOutMsg msg = { 0 };
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
 
     StubSmapPtr();
@@ -63,9 +64,10 @@ TEST_F(TestTurboModuleSmap, SmapMigrateOutHandlerEncodeResponseFailed)
     TurboByteBuffer outputBuffer;
     MigrateOutMsg msg = { 0 };
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
 
     MOCKER_CPP(&SmapMigrateOutCodec::DecodeRequest, int(*)(const TurboByteBuffer &buffer,
@@ -652,9 +654,10 @@ TEST_F(TestTurboModuleSmap, SmapMigrateOutSyncHandlerTest)
     TurboByteBuffer outputBuffer;
     MigrateOutMsg msg = { 0 };
     msg.count = 1;
-    msg.payload[0].destNid = 4;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
     msg.payload[0].pid = 1;
-    msg.payload[0].ratio = 25;
+    msg.payload[0].inner[0].ratio = 25;
     int pidType = 1;
     uint64_t maxWaitTime = 1000;
 
