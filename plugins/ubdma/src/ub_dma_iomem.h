@@ -1,0 +1,13 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
+ * Description: ub-dma memory notifier
+ */
+
+#ifndef _UB_DMA_IOMEM_H
+#define _UB_DMA_IOMEM_H
+
+int iomem_urma_sge_init(void);
+
+void destory_iomem_workqueue(void);
+
+#endif
