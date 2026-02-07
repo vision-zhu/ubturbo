@@ -188,6 +188,8 @@ static int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODE
             return -ENOMEM;
         }
         if (!process->scanAttr.actcData[from]) {
+            free(mlist[from][to].addr);
+            mlist[from][to].addr = NULL;
             return -EINVAL;
         }
         for (uint32_t idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from]; idx++) {
@@ -361,6 +363,8 @@ static int BuildMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][
             return -ENOMEM;
         }
         if (!process->scanAttr.actcData[from]) {
+            free(mlist[from][to].addr);
+            mlist[from][to].addr = NULL;
             return -EINVAL;
         }
         for (int idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from] - numaOffset[from]; idx++) {

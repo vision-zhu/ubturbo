@@ -183,6 +183,12 @@ int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager)
     uint64_t **tmpAddr = malloc(sizeof(*tmpAddr) * mMsg->cnt);
     if (!tmpAddr) {
         SMAP_LOGGER_ERROR("malloc tmp addr failed.");
+        for (int i = 0; i < mMsg->cnt; i++) {
+            if (mMsg->migList[i].addr) {
+                free(mMsg->migList[i].addr);
+                mMsg->migList[i].addr = NULL;
+            }
+        }
         return -ENOMEM;
     }
     for (int i = 0; i < mMsg->cnt; i++) {
