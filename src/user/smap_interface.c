@@ -737,7 +737,7 @@ static int CheckSmapRemoveMsg(struct RemoveMsg *msg, int pidType)
     }
     for (int i = 0; i < msg->count; i++) {
         if (msg->payload[i].count <= 0 || msg->payload[i].count > REMOTE_NUMA_NUM) {
-            SMAP_LOGGER_ERROR("[%d] smap remove payload nid count invalid.", i);
+            SMAP_LOGGER_ERROR("[%d] smap remove payload nid count%d invalid.", i, msg->>payload[i].count);
             return -EINVAL;
         }
         for (int j = 0; j < msg->payload[i].count; j++) {
@@ -771,7 +771,7 @@ static int IoctlClearProcessRemoteNuma(struct RemoveMsg *msg)
         }
 
         uint32_t numaNodes = attr->numaAttr.numaNodes;
-        for (int j = 0; j < msg->payload->count; j++) {
+        for (int j = 0; j < msg->payload[i].count; j++) {
             l2node = msg->payload[i].nid[j];
             ClearNodeBit(&numaNodes, l2node + (LOCAL_NUMA_BITS - nrLocalNuma));
         }
