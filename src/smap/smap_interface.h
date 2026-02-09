@@ -79,6 +79,8 @@ struct MigrateBackMsg {
 
 struct RemovePayload {
     pid_t pid;
+    int count;
+    int nid[REMOTE_NUMA_NUM];
 };
 
 struct RemoveMsg {

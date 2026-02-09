@@ -490,7 +490,7 @@ int ubturbo_smap_remote_numa_migrate(struct MigrateNumaMsg *msg)
     return ret;
 }
 
-int ubturbo_smap_remote_numa_migrate(struct MigrateEscapeMsg *msg)
+int ubturbo_smap_pid_remote_numa_migrate(struct MigrateEscapeMsg *msg)
 {
     TurboByteBuffer send;
     TurboByteBuffer recv;
