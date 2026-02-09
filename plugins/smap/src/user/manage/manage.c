@@ -2012,10 +2012,8 @@ static void ChangePidRemoteMemory(ProcessAttr *attr, int srcNodeIndex, int destN
 
     AddAttrL2(attr, destNodeIndex + nrLocalNuma);
     attr->remoteNumaCnt = GetL2Count(attr->numaAttr.numaNodes);
-    if (GetRunMode() == MEM_POOL_MODE) {
-        attr->migrateParam[attr->remoteNumaCnt].nid = destNodeIndex + nrLocalNuma;
-        attr->migrateParam[attr->remoteNumaCnt].memSize += memSize;
-    }
+    attr->migrateParam[attr->remoteNumaCnt].nid = destNodeIndex + nrLocalNuma;
+    attr->migrateParam[attr->remoteNumaCnt].memSize += memSize;
     SMAP_LOGGER_INFO("========= remoteNumaCnt %d", attr->remoteNumaCnt);
 }
 
