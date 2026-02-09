@@ -274,7 +274,7 @@ static bool GetNumaInfoFromNumaMaps(char *line, int *nidArray, int nidCnt, pid_t
             continue;
         }
         ProcessAttr *attr = GetProcessAttrLocked(pid);
-        if (!attr && InAttrL2(attr, i)) {
+        if (attr && InAttrL2(attr, i)) {
             continue;
         }
         ret = snprintf_s(pattern, sizeof(pattern), sizeof(pattern) - 1, "N%d=", i);
