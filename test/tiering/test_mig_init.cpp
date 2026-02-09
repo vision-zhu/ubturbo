@@ -394,7 +394,7 @@ TEST_F(MigInitTest, walkpage_and_migrate_Success)
         .pid = 1234,
         .src_nid = 4,
         .dest_nid = 5,
-        .ratio = 25,
+        .ratio = 0,
         .mem_size = 0,
         .is_ratio_mode = true,
     };
