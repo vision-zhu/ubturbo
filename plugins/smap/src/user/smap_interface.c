@@ -768,6 +768,7 @@ static int IoctlClearProcessRemoteNuma(struct RemoveMsg *msg)
                 SMAP_LOGGER_ERROR("access ioctl remove pid %d error: %d.", pid, ret);
                 return ret;
             }
+            continue;
         }
 
         uint32_t numaNodes = attr->numaAttr.numaNodes;
