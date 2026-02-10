@@ -106,36 +106,6 @@ void RmrsSmapHelper::Deinit()
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] SmapModule Deinit success.";
 }
 
-RmrsResult RmrsSmapHelper::QueryVMFreqArray(int pidIn, uint16_t *dataIn, uint32_t lengthIn, uint32_t &lengthOut)
-{
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] QueryVMFreqArray start.";
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] QueryVMFreqArray pid = " << pidIn << ".";
-    SmapQueryVmFreqFunc smapQueryVmFreqFunc = SmapModule::GetSmapQueryVmFreq();
-    if (smapQueryVmFreqFunc == nullptr) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Failed to get function symbol.";
-        return RMRS_ERROR;
-    }
-
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Query VM mem freq array.";
-    int ret = smapQueryVmFreqFunc(pidIn, dataIn, lengthIn, lengthOut);
-    if (ret == SMAP_OK) {
-        UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Query success.";
-    } else if (ret < 0) {
-        UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)
-            << "[RmrsSmapHelper] Query freq failed, with error code = " << ret << ".";
-        if (ret == smapPermErrorCode) {
-            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Init failed.";
-        }
-        if (ret == smapParamErrorCode) {
-            UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] Param error.";
-        }
-        return RMRS_ERROR;
-    }
-
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] QueryVMFreqArray end.";
-    return RMRS_OK;
-}
-
 RmrsResult RmrsSmapHelper::SmapMode(int runMode)
 {
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] SetSmapRunMode start.";
