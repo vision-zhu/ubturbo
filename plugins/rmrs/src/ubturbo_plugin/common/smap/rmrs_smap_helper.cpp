@@ -188,7 +188,7 @@ RmrsResult RmrsSmapHelper::GetOriginalHugePages(const std::string &realPath, uin
     return RMRS_OK;
 }
 
-RmrsResult RmrsSmapHelper::SmapRemoveVMPidToRemoteNuma(std::vector<uint16_t> &remoteNumaIdList, 
+RmrsResult RmrsSmapHelper::SmapRemoveVMPidToRemoteNuma(std::vector<uint16_t> &remoteNumaIdList,
                                                        std::vector<pid_t> &vmPids)
 {
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] SmapRemoveVMPidToRemoteNuma start.";

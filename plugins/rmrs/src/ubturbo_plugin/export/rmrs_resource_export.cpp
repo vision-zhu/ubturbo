@@ -390,7 +390,6 @@ mempooling::PidInfo ResourceExport::BuildPidInfoFromNodePages(pid_t pid, bool ha
         metaNumaInfo.numaId = nodeId;
         metaNumaInfo.numaUsedMem = memBytes;
 
-        
         if (localNodeIds.count(nodeId)) {
             pidInfo.totalLocalUsedMem += memBytes;
             metaNumaInfo.isLocalNuma = true;

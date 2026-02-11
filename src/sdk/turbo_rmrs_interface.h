@@ -127,7 +127,7 @@ struct PidInfo {
         for (size_t i = 0; i < metaNumaInfos.size(); ++i) {
             if (i) oss << ", ";
             oss << metaNumaInfos[i].ToString();
-        } 
+        }
         oss << "]";
         oss << "}";
         return oss.str();
