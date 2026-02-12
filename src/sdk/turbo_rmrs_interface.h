@@ -121,8 +121,8 @@ struct PidInfo {
             oss << localNumaIds[i];
         }
         oss << "]";
-        oss << "totalLocalUsedMem:" << totalLocalUsedMem << "BYTE";
-        oss << "totalRemoteUsedMem:" << totalRemoteUsedMem << "BYTE";
+        oss << ",totalLocalUsedMem:" << totalLocalUsedMem << " BYTE";
+        oss << ",totalRemoteUsedMem:" << totalRemoteUsedMem << " BYTE";
         oss << ",metaNumaInfos:[";
         for (size_t i = 0; i < metaNumaInfos.size(); ++i) {
             if (i) oss << ", ";
