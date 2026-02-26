@@ -205,8 +205,12 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrate)
     unsigned int nr_folios = 10;
     struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
     MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(2));
-    failed_num = smap_migrate(folios, nr_folios, to_node, false);
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
     EXPECT_EQ(failed_num, 10);
+
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
+    EXPECT_EQ(failed_num, 10);
+
     vfree(folios);
 }
 
@@ -217,7 +221,7 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrateTwo)
     unsigned int nr_folios = 10;
     struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
     MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(10));
-    failed_num = smap_migrate(folios, nr_folios, to_node, true);
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_BACK);
     EXPECT_EQ(failed_num, 10);
     vfree(folios);
 }

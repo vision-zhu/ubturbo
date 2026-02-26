@@ -43,6 +43,8 @@
 
 #define INVALID_PADDR 0
 
+#define MIGRATE_PAGES_DMA_OFFLOADING 10
+
 #undef pr_fmt
 #define pr_fmt(fmt) "SMAP_migrate: " fmt
 
@@ -116,9 +118,11 @@ static int smap_add_page_for_migration(struct page *page, struct folio **folios,
 		pr_debug("invalid page map count or null migrate all flag\n");
 		return err;
 	}
-	if (!folio_try_get(page_folio(page))) {
-		pr_debug("failed to add folio reference\n");
-		return -EINVAL;
+	if (!PageHuge(page)) {
+		if (!folio_try_get(page_folio(page))) {
+			pr_debug("failed to add folio reference\n");
+			return -EINVAL;
+		}
 	}
 	if (PageHuge(page)) {
 		err = smap_check_huge_page_for_migration(page, pid);
@@ -269,8 +273,39 @@ int migrate_multi_threaded(unsigned int nr_threads, struct folio **folios,
 	return 0;
 }
 
+int isolate_and_migrate_folios(struct folio **folios, unsigned int nr_folios,
+    new_folio_t get_new_folio, free_folio_t put_new_folio,
+    unsigned long private, enum migrate_mode mode, unsigned int *nr_succeeded)
+{
+	int ret = 0;
+	unsigned int i;
+	struct folio *folio;
+	LIST_HEAD(source);
+
+	for (i = 0; i < nr_folios; i++) {
+		folio = folios[i];
+		if (!folio_test_hugetlb(folio)) {
+			VM_BUG_ON_FOLIO(!folio_ref_count(folio), folio);
+		}
+		fp_isolate_folio_to_list(folio, &source);
+		if (!folio_test_hugetlb(folio)) {
+			folio_put(folio);
+		}
+	}
+	if (!list_empty(&source)) {
+		ret = fp_migrate_pages(&source, get_new_folio, put_new_folio,
+			private, mode, MR_HOTNESS, nr_succeeded);
+			if (ret)
+				fp_putback_movable_pages(&source);
+			if (nr_succeeded && *nr_succeeded)
+				count_vm_numa_events(NUMA_PAGE_MIGRATE, *nr_succeeded);
+	}
+
+	return ret;
+}
+
 unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
-			  int to_node, bool is_mig_back)
+			  int to_node, enum smap_migrate_type type)
 {
 	int err = 0;
 	unsigned int nr_succeeded = 0;
@@ -288,14 +323,14 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 		return nr_folios;
 	}
 	start_time = ktime_get();
-	if (is_mig_back) {
+	if (MIGRATE_TYPE_BACK == type) {
 		err = isolate_and_migrate_folios(
 			folios, nr_folios, smap_alloc_new_node_page_mig_back,
 			NULL, to_node, MIGRATE_ASYNC, &nr_succeeded);
 		if (err) {
 			pr_err("failed to migrate back, ret: %d\n", err);
 		}
-	} else {
+	} else if (MIGRATE_TYPE_HOTNESS == type) {
 		err = isolate_and_migrate_folios(folios, nr_folios,
 						 smap_alloc_new_node_page, NULL,
 						 to_node, MIGRATE_ASYNC,
@@ -303,15 +338,23 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 		if (err) {
 			pr_err("failed to migrate, ret: %d\n", err);
 		}
+	} else if (MIGRATE_TYPE_REMOTE == type) {
+		err = isolate_and_migrate_folios(folios, nr_folios,
+						 smap_alloc_new_node_page, NULL,
+						 to_node, MIGRATE_PAGES_DMA_OFFLOADING,
+						 &nr_succeeded);
+		if (err > 0)
+			pr_warn("isolat or migrate remote range err: %d\n", err);
+		else if (err < 0)
+			pr_err("failed to migrate folios, err: %d\n", err);
 	}
 	if (smap_pgsize == HUGE_PAGE) {
 		nr_succeeded >>= _4K_TO_2M;
 	}
 	mig_time = calc_time_us(start_time);
-	if (to_node >= nr_local_numa)
-		pr_debug(
-			"migration time spend: %lldus, nr_folios: %u, nr_succeeded: %d\n",
-			mig_time, nr_folios, nr_succeeded);
+	pr_debug(
+		"migration time spend: %lldus, nr_folios: %u, nr_succeeded: %d\n",
+		mig_time, nr_folios, nr_succeeded);
 	if (err == 0 && nr_succeeded == 0 && smap_pgsize == NORMAL_PAGE) {
 		if (folio_try_get(folios[0])) {
 			shake_page(&folios[0]->page);
@@ -531,7 +574,7 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 	start_time = ktime_get();
 #endif
 	nr_migrate_fail =
-		smap_migrate(migrate_folios, nr_folios, task->src_nid, true);
+		smap_migrate(migrate_folios, nr_folios, task->src_nid, MIGRATE_TYPE_BACK);
 
 #ifdef DEBUG
 	end_time = ktime_get();
@@ -632,7 +675,7 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 		start_time = ktime_get();
 #endif
 		nr_fail = smap_migrate(migrate_folios[i], mig_pages_cnt[i], i,
-				       true);
+				       MIGRATE_TYPE_BACK);
 #ifdef DEBUG
 		end_time = ktime_get();
 		delta_time_ms = ktime_to_ms(ktime_sub(end_time, start_time));
@@ -675,7 +718,7 @@ static unsigned int smu_migrate(struct folio **folios, unsigned int nr_folios,
 			failed_num += mig[i].failed_num;
 		}
 	} else {
-		failed_num = smap_migrate(folios, nr_folios, to_node, false);
+		failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
 	}
 	return failed_num;
 }
@@ -863,8 +906,8 @@ static int smap_pre_migrate_range(struct folio **folios,
 			if (PageHuge(page) && !PageHead(page)) {
 				continue;
 			}
-			if (!folio_try_get(folio)) {
-				pr_debug("unable to add folio reference\n");
+			if (!folio_ref_count(folio)) {
+				pr_debug("folio ret count is 0\n");
 				continue;
 			}
 			nr_hugepage++;
@@ -913,7 +956,7 @@ static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 	}
 	nr_pre_migrate = smap_pre_migrate_range(migrate_folios, &nr_folios,
 						start_pfn, end_pfn);
-	nr_migrate_fail = smap_migrate(migrate_folios, nr_folios, nid, false);
+	nr_migrate_fail = smap_migrate(migrate_folios, nr_folios, nid, MIGRATE_TYPE_REMOTE);
 	if (nr_migrate_fail) {
 		pr_err("migrate pre_migrate cnt: %d, mig failed %d pages in pfn range %#lx-%#lx\n",
 		       nr_pre_migrate, nr_migrate_fail, start_pfn, end_pfn);

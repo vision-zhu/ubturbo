@@ -17,12 +17,19 @@ extern int nr_local_numa;
 extern int isolate_lru_page(struct page *page);
 extern ktime_t calc_time_us(ktime_t start_time);
 
+enum smap_migrate_type {
+	MIGRATE_TYPE_HOTNESS,
+	MIGRATE_TYPE_BACK,
+	MIGRATE_TYPE_REMOTE,
+	NR_MIGRATE_TYPE,
+};
+
 struct folio *smap_alloc_new_node_page(struct folio *folio, unsigned long node);
 struct folio *smap_alloc_new_node_page_mig_back(struct folio *folio,
 						unsigned long node);
 unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg);
 unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
-			  int to_node, bool is_mig_back);
+						  int to_node, enum smap_migrate_type type);
 struct folio *alloc_demote_page(struct folio *folio, unsigned long node);
 
 bool is_folio_in_migrate_back_range(struct folio *folio);
