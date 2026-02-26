@@ -185,6 +185,11 @@ static int __init tracking_init(void)
 		pr_err("invalid module arguments\n");
 		return ret;
 	}
+	ret = smap_process_symbols();
+	if (ret) {
+		pr_err("smap process symbols failed\n");
+		return ret;
+	}
 	ret = init_acpi_mem();
 	if (ret < 0) {
 		pr_err("failed to init ACPI memory, ret: %d\n", ret);

@@ -372,7 +372,7 @@ static void walkpage_and_migrate(struct mig_payload *payloads, int len, int *mig
 			pr_info("pid:%d migrate page count: %llu, from: %d to: %d\n",
 					payloads[i].pid, mig_cnt, payloads[i].src_nid, payloads[i].dest_nid);
 
-			failed_cnt = smap_migrate(pm.mig_info.folios, mig_cnt, payloads[i].dest_nid, false);
+			failed_cnt = smap_migrate(pm.mig_info.folios, mig_cnt, payloads[i].dest_nid, MIGRATE_TYPE_HOTNESS);
 			payloads[i].success_cnt += (mig_cnt - failed_cnt);
 			vfree(pm.mig_info.folios);
 			if (failed_cnt == 0) {
