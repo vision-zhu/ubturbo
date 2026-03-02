@@ -156,9 +156,7 @@ static void ub_dma_issue_pending(struct dma_chan *chan)
             }
         }
     } else {
-        desc->tx_result.result = DMA_TRANS_NOERROR;
         ub_dma_log_info("vchan %p: no pending txd.\n", &vchan->vc);
-        goto complete_dma_pending;
     }
     spin_unlock_irqrestore(&vchan->vc.lock, flags);
     return;
