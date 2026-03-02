@@ -187,6 +187,20 @@ static bool IsRemoteNidValid(int nid)
     return IsNidInNumastat(nid);
 }
 
+static bool IsRemoveRemoteNidValid(int nid)
+{
+    struct ProcessManager *pm = GetProcessManager();
+    if (!pm) {
+        SMAP_LOGGER_ERROR("process manager is null.");
+        return false;
+    }
+    if (nid < pm->nrLocalNuma || nid >= (REMOTE_NUMA_BITS + pm->nrLocalNuma)) {
+        return false;
+    }
+
+    return true;
+}
+
 static bool IsPidArrValid(pid_t *pidArr, int len, bool ignoreUnmanaged)
 {
     int i;
@@ -741,7 +755,7 @@ static int CheckSmapRemoveMsg(struct RemoveMsg *msg, int pidType)
             return -EINVAL;
         }
         for (int j = 0; j < msg->payload[i].count; j++) {
-            if (!IsRemoteNidValid(msg->payload[i].nid[j])) {
+            if (!IsRemoveRemoteNidValid(msg->payload[i].nid[j])) {
                 SMAP_LOGGER_ERROR("[%d] pid:%d remote node%d invalid.",
                     i, msg->payload[i].pid, msg->payload[i].nid[j]);
                 return -EINVAL;
