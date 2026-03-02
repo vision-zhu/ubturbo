@@ -209,6 +209,9 @@ replace_string "${code_dir}/src/user/strategy/migration.c" "InitMigList" "strate
 replace_string "${code_dir}/src/tiering/coherence_maintain.c" "walk->private" "walk->private_data" "true"
 replace_string "${code_dir}/src/tiering/ham_migration.c" "walk->private" "walk->private_data" "true"
 
+replace_string "${code_dir}/src/tiering/smap_migrate_wrapper.h" "private" "private_data" "true"
+replace_string "${code_dir}/src/tiering/smap_migrate_wrapper.c" "private" "private_data" "true"
+
 # test/depends/include/linux/pagewalk.h
 replace_string "${CURRENT_PATH}/depends/include/linux/pagewalk.h" "private;" "private_data;" "true"
 

@@ -8,6 +8,7 @@
 #include <linux/rwsem.h>
 #include <asm/page.h>
 #include <linux/version.h>
+#include <linux/spinlock.h>
 
 struct page {
 	unsigned long flags;
@@ -20,10 +21,11 @@ struct page {
 		struct {
 			unsigned char compound_order;
 		};
-        struct {
-            spinlock_t ptl;
-        };
+		struct {
+			spinlock_t ptl;
+		};
 	};
+	int _refcount;
 };
 
 
