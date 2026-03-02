@@ -20,6 +20,9 @@ static inline unsigned long zone_page_state(struct zone *zone,
 	return 0;
 }
 
+#define count_vm_numa_event(x) do {} while (0)
+#define count_vm_numa_events(x, y) do { (void)(y); } while (0)
+
 #ifdef __cplusplus
 }
 #endif

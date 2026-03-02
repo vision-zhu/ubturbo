@@ -300,28 +300,32 @@ TEST_F(IomemTest, walk_system_ram_remote_range_dt)
 }
 
 extern "C" void free_obmm_dev(void);
-extern "C" void update_obmm_dev(u64 memid, u64 pa, u64 size);
+extern "C" void update_obmm_dev(u64 memid);
 TEST_F(IomemTest, update_obmm_dev_dt)
 {
-    ASSERT_TRUE(list_empty(&obmm_dev.list));
-    update_obmm_dev(0, 0, 0);
+    constexpr int OBMM_DEV1_MEMID = 1;
+    constexpr int OBMM_DEV2_MEMID = 2;
 
-    struct memid_range *tmp = (struct memid_range *)kmalloc(sizeof(*tmp), GFP_KERNEL);
+    ASSERT_TRUE(list_empty(&obmm_dev.list));
+    update_obmm_dev(0);
+    EXPECT_TRUE(list_empty(&obmm_dev.list));
+
+    struct memid_range *tmp = (struct memid_range *)kzalloc(sizeof(*tmp), GFP_KERNEL);
     ASSERT_NE(nullptr, tmp);
 
-    tmp->memid = 1;
-    tmp->start = 0x0;
-    tmp->end = 0x10;
-    tmp->seq = 1;
     list_add(&tmp->node, &obmm_dev.list);
 
-    update_obmm_dev(1, 0x10, 0x100);
+    update_obmm_dev(OBMM_DEV1_MEMID);
     tmp = container_of(obmm_dev.list.next, struct memid_range, node);
-    EXPECT_EQ(0x10, tmp->start);
+    EXPECT_EQ(OBMM_DEV1_MEMID, tmp->memid);
+    EXPECT_EQ(0, tmp->start);
+    EXPECT_EQ(0, tmp->end);
 
-    update_obmm_dev(2, 0x200, 0x300);
+    update_obmm_dev(OBMM_DEV2_MEMID);
     tmp = container_of(obmm_dev.list.next, struct memid_range, node);
-    EXPECT_EQ(0x200, tmp->start);
+    EXPECT_EQ(OBMM_DEV2_MEMID, tmp->memid);
+    EXPECT_EQ(0, tmp->start);
+    EXPECT_EQ(0, tmp->end);
 
     free_obmm_dev();
 }
@@ -335,10 +339,6 @@ TEST_F(IomemTest, is_import_shmdev_dt)
 
     ret = is_import_shmdev("obmm_shmdev1");
     EXPECT_EQ(true, ret);
-
-    MOCKER(kern_path).stubs().will(returnValue(-1));
-    ret = is_import_shmdev("obmm_shmdev1");
-    EXPECT_EQ(false, ret);
 }
 
 extern "C" struct file *filp_open(const char *filename, int flags, umode_t mode);

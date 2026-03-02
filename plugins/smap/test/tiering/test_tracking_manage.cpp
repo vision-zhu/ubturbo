@@ -143,7 +143,7 @@ TEST_F(TrackingManageTest, TestTrackingInit)
 
     GlobalMockObject::verify();
     MOCKER(is_smap_args_valid).stubs().will(returnValue(0));
-    MOCKER(init_acpi_mem).stubs().will(returnValue(-1));
+    MOCKER(smap_process_symbols).stubs().will(returnValue(-1));
     ret = tracking_init();
     EXPECT_EQ(-1, ret);
 }
