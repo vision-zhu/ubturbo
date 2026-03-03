@@ -5,5 +5,5 @@
 
 unsigned long _compound_head(struct page *page)
 {
-	return 0;
+	return (unsigned long)page;
 }

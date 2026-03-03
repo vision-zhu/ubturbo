@@ -12,7 +12,8 @@ enum migrate_reason {
 	MR_CONTIG_RANGE = 6,
 	MR_LONGTERM_PIN = 7,
 	MR_DEMOTION = 8,
-	MR_TYPES = 9
+	MR_HOTNESS = 9,
+	MR_TYPES = 10
 };
 
 enum migrate_mode {

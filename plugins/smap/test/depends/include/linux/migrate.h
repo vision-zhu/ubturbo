@@ -7,6 +7,7 @@
 #include <linux/mempolicy.h>
 #include <linux/hugetlb.h>
 #include <linux/version.h>
+#include <linux/vm_event_item.h>
 
 #ifdef __cplusplus
 extern "C" {

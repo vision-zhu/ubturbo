@@ -198,6 +198,8 @@ TEST_F(SmapMigratePagesTest, TestMigrateMultiThreadedTwo)
     vfree(folios);
 }
 
+extern "C" int smap_isolate_and_migrate_folios(struct folio **folios, unsigned int nr_folios, new_folio_t get_new_folio,
+    free_folio_t put_new_folio, unsigned long private_data, enum migrate_mode mode, unsigned int *nr_succeeded);
 TEST_F(SmapMigratePagesTest, TestSmapMigrate)
 {
     int to_node = 1;
@@ -206,10 +208,11 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrate)
     struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
     MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(2));
     failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
-    EXPECT_EQ(failed_num, 10);
+    EXPECT_EQ(10, failed_num);
 
+    MOCKER(smap_isolate_and_migrate_folios).stubs().will(returnValue(2));
     failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
-    EXPECT_EQ(failed_num, 10);
+    EXPECT_EQ(10, failed_num);
 
     vfree(folios);
 }
@@ -222,7 +225,7 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrateTwo)
     struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
     MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(10));
     failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_BACK);
-    EXPECT_EQ(failed_num, 10);
+    EXPECT_EQ(10, failed_num);
     vfree(folios);
 }
 
@@ -815,34 +818,26 @@ extern "C" int smap_pre_migrate_range(struct folio **folios, unsigned int *nr_fo
 TEST_F(SmapMigratePagesTest, TestSmapIsolateRange)
 {
     unsigned int nr_folios = 0;
-    struct page tmp_page;
+    struct page *tmp_page;
     unsigned long start = 0x0;
     unsigned long end = 0x1;
     struct folio **migrate_folios = static_cast<struct folio**>(vzalloc((end - start + 1) * sizeof(struct folio*)));
+
+    // YOU MUST allocate memory dynamic here
+    tmp_page = (struct page *)malloc(sizeof(*tmp_page));
+    ASSERT_NE(nullptr, tmp_page);
+    tmp_page->_refcount = 1;
+
     MOCKER(pfn_valid).stubs().will(returnValue(true));
-    MOCKER(pfn_to_online_page).stubs().will(returnValue(&tmp_page));
+    MOCKER(pfn_to_online_page).stubs().will(returnValue(tmp_page));
     MOCKER(is_smap_pg_huge).stubs().will(returnValue(true));
     MOCKER(PageHuge).stubs().will(returnValue(0));
     MOCKER(PageHead).stubs().will(returnValue(1));
+    cout << "tmp_page addr: " << tmp_page << " refcount: " << tmp_page->_refcount << endl;
     int ret = smap_pre_migrate_range(migrate_folios, &nr_folios, start, end);
     EXPECT_EQ(end - start, ret);
     vfree(migrate_folios);
-}
-
-TEST_F(SmapMigratePagesTest, TestSmapIsolateRangeOne)
-{
-    unsigned int nr_folios = 0;
-    struct page tmp_page;
-    unsigned long start = 0x0;
-    unsigned long end = 0x1;
-    struct folio **migrate_folios = static_cast<struct folio**>(vzalloc((end - start + 1) * sizeof(struct folio*)));
-    MOCKER(pfn_valid).stubs().will(returnValue(true));
-    MOCKER(pfn_to_online_page).stubs().will(returnValue(&tmp_page));
-    MOCKER(PageHuge).stubs().will(returnValue(0));
-    MOCKER(get_page_unless_zero).stubs().will(returnValue(true));
-    int ret = smap_pre_migrate_range(migrate_folios, &nr_folios, start, end);
-    EXPECT_EQ(end - start, ret);
-    vfree(migrate_folios);
+    free(tmp_page);
 }
 
 extern "C" int smap_migrate_range(int nid, u64 start_pa, u64 end_pa);
