@@ -42,6 +42,7 @@ void TurboPluginDeInit();
 void RmrsReboot();
 }
 
+constexpr long FOUR_KB_TO_BYTES = 4096;
 static const std::string MIGREATE_RECORD_PATH = "/opt/ubturbo/";
 static const std::string MIGREATE_RECORD_FILE = "/opt/ubturbo/migrate_record";
 
@@ -93,6 +94,17 @@ void RmrsReboot()
     return ;
 }
 
+void LoadBasePageType()
+{
+    long pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize <= 0) {
+        UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "Get PAGE_SIZE failed, fallback to 4K page.";
+        RmrsConfig::Instance().SetBasePageSize(FOUR_KB_TO_BYTES);
+    }
+    RmrsConfig::Instance().SetBasePageSize(pageSize);
+    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "Get PAGE_SIZE success, basePageSize=" << pageSize;
+}
+
 uint32_t TurboPluginInit(const uint16_t modCode)
 {
     UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsInit] Start to init rmrs plugin.";
@@ -129,6 +141,8 @@ uint32_t TurboPluginInit(const uint16_t modCode)
     }
 
     RmrsReboot();
+
+    LoadBasePageType();
 
     UBTURBO_LOG_INFO(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsInit] RMRS plugin initialization succeed.";
 

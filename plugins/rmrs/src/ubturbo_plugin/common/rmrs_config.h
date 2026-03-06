@@ -58,6 +58,15 @@ public:
         return RMRS_OK;
     }
 
+    inline long GetBasePageSize(){
+        return basePageSize;
+    }
+
+    inline void SetBasePageSize(long pageSize){
+        
+        basePageSize = pageSize;
+    }
+
 private:
     RmrsConfig() = default;
     void RmrsLoadConfig();
@@ -66,6 +75,7 @@ private:
     uint16_t moduleCode = 0;
     std::string configName = "plugin_rmrs";
     bool rmrsUCacheEnable = false;
+    long basePageSize{};
 };
 } // namespace rmrs
 
