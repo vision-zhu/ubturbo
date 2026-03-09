@@ -58,12 +58,13 @@ public:
         return RMRS_OK;
     }
 
-    inline long GetBasePageSize(){
+    inline long GetBasePageSize()
+    {
         return basePageSize;
     }
 
-    inline void SetBasePageSize(long pageSize){
-        
+    inline void SetBasePageSize(long pageSize)
+    {
         basePageSize = pageSize;
     }
 

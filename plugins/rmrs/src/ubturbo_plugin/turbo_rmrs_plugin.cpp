@@ -100,6 +100,7 @@ void LoadBasePageType()
     if (pageSize <= 0) {
         UBTURBO_LOG_WARN(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "Get PAGE_SIZE failed, fallback to 4K page.";
         RmrsConfig::Instance().SetBasePageSize(FOUR_KB_TO_BYTES);
+        return;
     }
     RmrsConfig::Instance().SetBasePageSize(pageSize);
     UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "Get PAGE_SIZE success, basePageSize=" << pageSize;
