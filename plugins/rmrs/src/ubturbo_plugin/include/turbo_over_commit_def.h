@@ -23,7 +23,6 @@ constexpr int BYTE2KB = 10;
 constexpr int KB2BYTE = 10;
 constexpr int KB2MB = 10;
 constexpr int VIRT_SIZE = 2048;
-constexpr int CTR_SIZE = 4;
 constexpr uint64_t KB22MB = static_cast<uint64_t>(2) << KB2MB;
 constexpr uint64_t B22KB = static_cast<uint64_t>(1) << BYTE2KB;
 

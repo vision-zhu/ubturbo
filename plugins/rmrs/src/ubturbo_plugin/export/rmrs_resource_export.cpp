@@ -32,6 +32,9 @@
 namespace rmrs::exports {
 using namespace rmrs;
 using namespace turbo::log;
+constexpr uint64_t PAGE_64K_BYTES = 64 * 1024;
+constexpr uint16_t SIXTY_FOUR_KB = 64; // 64k标准页
+constexpr uint16_t FOUR_KB = 4; // 4k标准页
 std::string ResourceExport::hostName{};
 std::string ResourceExport::nodeId{};
 std::unordered_map<uint16_t, uint16_t> ResourceExport::cpuSocketMap{};
@@ -385,7 +388,9 @@ mempooling::PidInfo ResourceExport::BuildPidInfoFromNodePages(pid_t pid, bool ha
         if (hasLibvirt) {
             memBytes = (pages * mempooling::over_commit::VIRT_SIZE) << mempooling::over_commit::KB2BYTE;
         } else {
-            memBytes = (pages * mempooling::over_commit::CTR_SIZE) << mempooling::over_commit::KB2BYTE;
+            long basePageSize = RmrsConfig::Instance().GetBasePageSize();
+            int ctrSize = (basePageSize == PAGE_64K_BYTES) ? SIXTY_FOUR_KB : FOUR_KB;
+            memBytes = (pages * ctrSize) << mempooling::over_commit::KB2BYTE;
         }
         metaNumaInfo.numaId = nodeId;
         metaNumaInfo.numaUsedMem = memBytes;
