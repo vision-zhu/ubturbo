@@ -419,7 +419,6 @@ RmrsResult RmrsSmapHelper::MigrateColdDataToRemoteNumaSync(std::vector<uint16_t>
         return RMRS_ERROR;
     }
 
-    UBTURBO_LOG_DEBUG(RMRS_MODULE_NAME, RMRS_MODULE_CODE) << "[RmrsSmapHelper] MigrateSync cold data.";
     int ret = smapMigrateOutSyncFunc(&migrateOutMsg, PID_TYPE_2MB, waitTime);
     if (ret < 0) {
         UBTURBO_LOG_ERROR(RMRS_MODULE_NAME, RMRS_MODULE_CODE)

@@ -52,7 +52,7 @@ public:
     static bool GetMigrateOutMsgByMemSize(MigrateOutMsg &migrateOutMsg, std::vector<pid_t> pidList,
                                           std::vector<uint16_t> remoteNumaIdList, std::vector<uint64_t> memSizeList);
     static bool GetMigrateOutMsgByMemSizeBigVm(MigrateOutMsg &migrateOutMsg, std::vector<pid_t> pidList,
-                                               std::vector<uint16_t> remoteNumaIdList, 
+                                               std::vector<uint16_t> remoteNumaIdList,
                                                std::vector<uint64_t> memSizeList);
     static RmrsResult GetOriginalHugePages(const std::string &filePath, uint64_t &originalHugePages);
 
