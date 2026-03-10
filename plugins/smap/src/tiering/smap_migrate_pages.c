@@ -888,18 +888,12 @@ static int smap_pre_migrate_range(struct folio **folios,
 	for (pfn = start_pfn; pfn < end_pfn; pfn++) {
 		struct folio *folio;
 
-		if (!pfn_valid(pfn)) {
-			continue;
-		}
 		page = pfn_to_online_page(pfn);
 		if (!page) {
 			continue;
 		}
 		folio = page_folio(page);
 		head = &folio->page;
-		if (is_migrate_isolate_page(page)) {
-			continue;
-		}
 		if (is_smap_pg_huge()) {
 			if (PageHuge(page) && !PageHead(page)) {
 				continue;
