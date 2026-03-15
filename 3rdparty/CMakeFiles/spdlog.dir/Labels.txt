@@ -1,0 +1,13 @@
+# Target labels
+ spdlog
+# Source files and their labels
+/root/ubturbo/3rdparty/CMakeFiles/spdlog
+/root/ubturbo/3rdparty/CMakeFiles/spdlog.rule
+/root/ubturbo/3rdparty/CMakeFiles/spdlog-complete.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-build.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-configure.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-download.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-install.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-mkdir.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-patch.rule
+/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-update.rule

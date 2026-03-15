@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/root/ubturbo/3rdparty/CMakeFiles/spdlog"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/CMakeFiles/spdlog.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/CMakeFiles/spdlog-complete.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-build.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-configure.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-download.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-install.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-mkdir.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-patch.rule"
+		},
+		{
+			"file" : "/root/ubturbo/3rdparty/spdlog-prefix/src/spdlog-stamp/spdlog-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"spdlog"
+		],
+		"name" : "spdlog"
+	}
+}

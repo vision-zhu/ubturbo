@@ -1,0 +1,12 @@
+[ 10%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/spdlog.cpp.o[0m
+[ 20%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/stdout_sinks.cpp.o[0m
+[ 30%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/color_sinks.cpp.o[0m
+[ 40%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/file_sinks.cpp.o[0m
+[ 50%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/async.cpp.o[0m
+[ 60%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/cfg.cpp.o[0m
+[ 70%] [32mBuilding CXX object CMakeFiles/spdlog.dir/src/bundled_fmtlib_format.cpp.o[0m
+[ 80%] [32m[1mLinking CXX static library libspdlog.a[0m
+[ 80%] Built target spdlog
+[ 90%] [32mBuilding CXX object example/CMakeFiles/example.dir/example.cpp.o[0m
+[100%] [32m[1mLinking CXX executable example[0m
+[100%] Built target example
