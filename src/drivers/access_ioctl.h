@@ -73,16 +73,20 @@ struct access_pid_freq_msg {
 #define SMAP_ACCESS_READ_PID_FREQ \
 	_IOW(SMAP_ACCESS_MAGIC, 6, struct access_pid_freq_msg)
 
+/*
+ * pid_freq_entry is layout-compatible with user-space PidFreqEntry
+ * {u64 paddr, u16 freq, u8 nid, u8 flags(bit0=is_white_list)}.
+ */
 struct pid_freq_entry {
-	u64 paddr;
-	u16 freq;
-	u8  nid;
-	u8  flags;  /* bit0: is_white_list */
+	u64  paddr;
+	u16  freq;
+	u8   nid;            /* NUMA node id of this page */
+	bool is_white_list;  /* matches ActcData.isWhiteListPage */
 };
 
 struct access_pid_freq_msg_v2 {
 	pid_t pid;
-	u64   total;
+	u64 total;
 	struct pid_freq_entry __user *entries;
 };
 

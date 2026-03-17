@@ -1046,8 +1046,8 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
 {
 	int i;
-	u64 idx;
 	size_t acidx, bm_len;
+	u64 idx = 0;
 	struct access_pid *ap;
 	struct access_tracking_dev *adev;
 	int page_size = is_access_hugepage() ? g_pagesize_huge : PAGE_SIZE;
@@ -1063,7 +1063,6 @@ int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
 		return -EINVAL;
 	}
 
-	idx = 0;
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		int ret;
 		u64 paddr;
@@ -1096,10 +1095,10 @@ int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
 				pr_warn("node%d acidx %zu paddr calc failed\n", i, acidx);
 				continue;
 			}
-			entries[idx].paddr = paddr;
-			entries[idx].freq  = adev->access_bit_actc_data[acidx];
-			entries[idx].nid   = (u8)i;
-			entries[idx].flags = test_bit(acidx, ap->white_list_bm[i]) ? 1 : 0;
+			entries[idx].paddr        = paddr;
+			entries[idx].freq         = adev->access_bit_actc_data[acidx];
+			entries[idx].nid          = (u8)i;
+			entries[idx].is_white_list = test_bit(acidx, ap->white_list_bm[i]);
 			idx++;
 		}
 		up_read(&adev->buffer_lock);
