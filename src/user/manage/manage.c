@@ -216,14 +216,30 @@ static void ResetActcData(ActcData *actcData[], int len)
     }
 }
 
+static void ResetActcDataFlat(ProcessAttr *attr)
+{
+    free(attr->scanAttr.actcBase);
+    attr->scanAttr.actcBase = NULL;
+    for (int i = 0; i < MAX_NODES; i++) {
+        attr->scanAttr.actcData[i] = NULL;
+        attr->scanAttr.actcLen[i] = 0;
+    }
+}
+
+static void ResetActcDataForPid(ProcessAttr *attr)
+{
+    if (attr->scanAttr.actcBase)
+        ResetActcDataFlat(attr);
+    else
+        ResetActcData(attr->scanAttr.actcData, MAX_NODES);
+}
+
 static void FreeProceccesAttr(ProcessAttr *attr)
 {
     if (attr == NULL) {
         return;
     }
-    if (attr->scanAttr.actcData) {
-        ResetActcData(attr->scanAttr.actcData, MAX_NODES);
-    }
+    ResetActcDataForPid(attr);
     free(attr);
 }
 
@@ -252,11 +268,6 @@ void LinkedListRemove(ProcessAttr **remove, ProcessAttr **head)
         FreeProceccesAttr(toRemove);
         *remove = NULL;
     }
-}
-
-static void ResetActcDataForPid(ProcessAttr *attr)
-{
-    ResetActcData(attr->scanAttr.actcData, MAX_NODES);
 }
 
 static int InitPidActcData(ProcessAttr *attr)
@@ -1036,14 +1047,11 @@ static int FillPidDataV2(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
 {
     int ret;
     uint64_t total = 0;
-    uint64_t globalMappingIdx = 0;
     struct AccessPidFreqV2 apf = { 0 };
-    PidFreqEntry *entries = NULL;
 
-    ret = InitPidActcData(attr);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Init pid %d actc data failed.", attr->pid);
-        return ret;
+    if (attr->walkPage.nrPage == 0) {
+        SMAP_LOGGER_ERROR("Get pid %d nr pages failed.", attr->pid);
+        return -EINVAL;
     }
 
     for (int i = 0; i < MAX_NODES; i++)
@@ -1051,61 +1059,82 @@ static int FillPidDataV2(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
     if (total == 0)
         return 0;
 
-    entries = calloc(total, sizeof(PidFreqEntry));
-    if (!entries) {
-        ResetActcDataForPid(attr);
+    /*
+     * Allocate one flat ActcData[total] block.  Its first total*sizeof(PidFreqEntry)
+     * bytes are reused as the ioctl receive buffer (sizeof(PidFreqEntry)==12 <=
+     * sizeof(ActcData)==16), so only one allocation is needed for both steps.
+     */
+    ResetActcDataForPid(attr);
+    ActcData *actcBase = calloc(total, sizeof(ActcData));
+    if (!actcBase)
         return -ENOMEM;
-    }
+    attr->scanAttr.actcBase = actcBase;
 
     apf.pid     = attr->pid;
     apf.total   = total;
-    apf.entries = entries;
+    apf.entries = (PidFreqEntry *)actcBase;
 
     ret = AccessIoctlReadPidFreqV2(&apf);
     if (ret) {
-        free(entries);
         ResetActcDataForPid(attr);
         return ret;
     }
 
-    /* Kernel may have written fewer entries than allocated (e.g. some nodes
-     * had no pages).  apf.total is updated in-place by the ioctl. */
-    for (uint64_t i = 0; i < apf.total; i++) {
-        PidFreqEntry *e = &entries[i];
-        int nid = e->nid;
-        if (nid < 0 || nid >= MAX_NODES)
-            continue;
-        ActcData *actc = attr->scanAttr.actcData[nid];
-        size_t idx = attr->scanAttr.actcLen[nid];
+    uint64_t actual = apf.total;
+    PidFreqEntry *pfe = (PidFreqEntry *)actcBase;
 
-        if (idx >= attr->walkPage.nrPages[nid])
-            continue;
-
-        actc[idx].addr  = e->paddr;
-        actc[idx].freq  = e->freq;
-        actc[idx].prior = (pmb->vmSize && pmb->mapping)
-                          ? (pmb->mapping[globalMappingIdx] & 0xff) : 0;
-        actc[idx].isWhiteListPage = (e->flags & 1) ? true : false;
-
-        ActCount *ac = &attr->scanAttr.actCount[nid];
-        if (e->freq != 0) {
-            ac->freqNum++;
-            ac->freqSum += e->freq;
-        }
-        ac->freqMax = MAX(ac->freqMax, e->freq);
-        ac->freqMin = MIN(ac->freqMin, e->freq);
-        ac->pageNum++;
-        attr->scanAttr.actcLen[nid]++;
-        globalMappingIdx++;
+    /*
+     * Step 1: count pages per nid BEFORE in-place expansion overwrites the
+     * PidFreqEntry layout.
+     */
+    uint64_t cnt[MAX_NODES] = { 0 };
+    for (uint64_t i = 0; i < actual; i++) {
+        int nid = pfe[i].nid;
+        if (nid >= 0 && nid < MAX_NODES)
+            cnt[nid]++;
     }
 
-    for (int nid = 0; nid < MAX_NODES; nid++) {
-        ActCount *ac = &attr->scanAttr.actCount[nid];
+    uint64_t start[MAX_NODES] = { 0 };
+    for (int n = 1; n < MAX_NODES; n++)
+        start[n] = start[n - 1] + cnt[n - 1];
+
+    /*
+     * Step 2: expand PidFreqEntry -> ActcData in-place, back-to-front to avoid
+     * overwriting entries not yet processed.  sizeof(PidFreqEntry)==12 <
+     * sizeof(ActcData)==16, so back-to-front is safe.
+     */
+    for (int64_t i = (int64_t)actual - 1; i >= 0; i--) {
+        PidFreqEntry e = pfe[i];
+        uint8_t prior = (pmb->vmSize && pmb->mapping) ? (pmb->mapping[i] & 0xff) : 0;
+        actcBase[i].addr           = e.paddr;
+        actcBase[i].freq           = e.freq;
+        actcBase[i].prior          = prior;
+        actcBase[i].isWhiteListPage = (e.flags & 1) ? true : false;
+    }
+    for (int n = 0; n < MAX_NODES; n++) {
+        if (cnt[n] > 0)
+            attr->scanAttr.actcData[n] = actcBase + start[n];
+        attr->scanAttr.actcLen[n] = cnt[n];
+    }
+
+    /* Fill actCount stats */
+    for (int n = 0; n < MAX_NODES; n++) {
+        ActCount *ac = &attr->scanAttr.actCount[n];
+        for (uint64_t i = 0; i < cnt[n]; i++) {
+            ActcData *a = &actcBase[start[n] + i];
+            if (a->freq != 0) {
+                ac->freqNum++;
+                ac->freqSum += a->freq;
+            }
+            ac->freqMax = MAX(ac->freqMax, a->freq);
+            ac->freqMin = MIN(ac->freqMin, a->freq);
+            ac->pageNum++;
+        }
         ac->freqZero = (uint32_t)(ac->pageNum - ac->freqNum);
     }
 
-    free(entries);
     attr->scanAttr.addrIsPaddr = true;
+    attr->isLowMem = false;
     return 0;
 }
 

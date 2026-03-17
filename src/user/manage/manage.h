@@ -194,6 +194,7 @@ typedef struct {
     ScanType scanType; // 标识添加进程组件 HAM/普通冷热
     uint64_t actcLen[MAX_NODES];
     ActcData *actcData[MAX_NODES]; // actc数据
+    ActcData *actcBase;            /* non-NULL: flat alloc base for V2 path, freed instead of per-node ptrs */
     ActCount actCount[MAX_NODES]; // 统计数据
     bool addrIsPaddr;  /* true: actcData[nid][i].addr is physical address (V2 path) */
 } ScanAttribute;
