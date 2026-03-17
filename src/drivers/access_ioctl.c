@@ -258,6 +258,74 @@ out_ret:
 	return ret;
 }
 
+static long ioctl_read_pid_freq_v2(void __user *argp)
+{
+	int ret;
+	struct access_pid_freq_msg_v2 msg;
+	struct pid_freq_entry *entries = NULL;
+
+	pr_debug("read pid frequency v2\n");
+	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
+		pr_err("read frequency of access pid is not allowed\n");
+		return -EAGAIN;
+	}
+
+	if (copy_from_user(&msg, argp, sizeof(msg))) {
+		ret = -EFAULT;
+		goto out_ret;
+	}
+
+	if (find_access_pid(msg.pid) == NULL) {
+		pr_err("invalid pid: %d passed to read_pid_freq_v2\n", msg.pid);
+		ret = -EINVAL;
+		goto out_ret;
+	}
+
+	if (msg.total == 0 || msg.total > (u64)MAX_NR_PAGE_PER_NUMA * SMAP_MAX_NUMNODES || !msg.entries) {
+		pr_err("invalid total %llu or null entries\n", msg.total);
+		ret = -EINVAL;
+		goto out_ret;
+	}
+
+	entries = vzalloc(msg.total * sizeof(struct pid_freq_entry));
+	if (!entries) {
+		ret = -ENOMEM;
+		goto out_ret;
+	}
+
+	ret = read_pid_freq_v2(msg.pid, &msg.total, entries);
+	if (ret) {
+		pr_err("failed to read frequency v2 of pid: %d\n", msg.pid);
+		goto out;
+	}
+
+	if (copy_to_user(msg.entries, entries,
+			 msg.total * sizeof(struct pid_freq_entry))) {
+		pr_err("failed to copy freq_v2 entries of pid: %d to user\n",
+		       msg.pid);
+		ret = -EFAULT;
+		goto out;
+	}
+
+	/* Write back actual count */
+	if (copy_to_user((char __user *)argp + offsetof(struct access_pid_freq_msg_v2, total),
+			 &msg.total, sizeof(msg.total))) {
+		ret = -EFAULT;
+	}
+
+out:
+	vfree(entries);
+out_ret:
+	if (ret)
+		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
+					     AP_STATE_FREQ);
+	else
+		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
+					     AP_STATE_FREQ |
+					     AP_STATE_MIG);
+	return ret;
+}
+
 #ifndef BYTES_PER_LONG
 #define BYTES_PER_LONG 8
 #endif
@@ -601,6 +669,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_get_tracking(argp);
 	case SMAP_ACCESS_READ_PID_FREQ:
 		return ioctl_read_pid_freq(argp);
+	case SMAP_ACCESS_READ_PID_FREQ_V2:
+		return ioctl_read_pid_freq_v2(argp);
 	default:
 		rc = -ENOTTY;
 	}

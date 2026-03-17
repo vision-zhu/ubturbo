@@ -73,6 +73,22 @@ struct access_pid_freq_msg {
 #define SMAP_ACCESS_READ_PID_FREQ \
 	_IOW(SMAP_ACCESS_MAGIC, 6, struct access_pid_freq_msg)
 
+struct pid_freq_entry {
+	u64 paddr;
+	u16 freq;
+	u8  nid;
+	u8  flags;  /* bit0: is_white_list */
+};
+
+struct access_pid_freq_msg_v2 {
+	pid_t pid;
+	u64   total;
+	struct pid_freq_entry __user *entries;
+};
+
+#define SMAP_ACCESS_READ_PID_FREQ_V2 \
+	_IOW(SMAP_ACCESS_MAGIC, 7, struct access_pid_freq_msg_v2)
+
 void access_ioctl_exit(void);
 int access_ioctl_init(void);
 

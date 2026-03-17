@@ -119,6 +119,7 @@ void clean_last_ap_data(struct access_pid *ap);
 int access_walk_pagemap(struct access_pid *ap);
 struct access_pid *find_access_pid(pid_t pid);
 int read_pid_freq(pid_t pid, size_t *data_len, u16 **data);
+int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries);
 int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr);
 
 static inline bool access_pid_is_scanning(pid_t pid)

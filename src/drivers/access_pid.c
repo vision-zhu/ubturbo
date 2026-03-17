@@ -1043,6 +1043,71 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 	return 0;
 }
 
+int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
+{
+	int i;
+	u64 idx;
+	size_t acidx, bm_len;
+	struct access_pid *ap;
+	struct access_tracking_dev *adev;
+	int page_size = is_access_hugepage() ? g_pagesize_huge : PAGE_SIZE;
+
+	if (!total || !entries) {
+		pr_err("null pointer passed to read_pid_freq_v2\n");
+		return -EINVAL;
+	}
+
+	ap = find_access_pid(pid);
+	if (!ap) {
+		pr_err("unable to find pid: %d in access pid list\n", pid);
+		return -EINVAL;
+	}
+
+	idx = 0;
+	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
+		int ret;
+		u64 paddr;
+
+		if (ap->page_num[i] == 0 || !ap->paddr_bm[i])
+			continue;
+
+		list_for_each_entry(adev, &access_dev, list) {
+			if (adev->node == i)
+				break;
+		}
+		if (list_entry_is_head(adev, &access_dev, list))
+			continue;
+
+		down_read(&adev->buffer_lock);
+		bm_len = BITS_PER_LONG * ap->bm_len[i];
+		for (acidx = 0; acidx < bm_len && idx < *total; acidx++) {
+			if (!test_bit(acidx, ap->paddr_bm[i]))
+				continue;
+			if (unlikely(acidx >= adev->page_count)) {
+				pr_warn("exceeds total page amount: %llu when lookup acidx: %zu on node: %d\n",
+					adev->page_count, acidx, i);
+				break;
+			}
+			if (i < nr_local_numa)
+				ret = calc_acidx_paddr_acpi(i, acidx, &paddr, page_size);
+			else
+				ret = calc_acidx_paddr_iomem(i, acidx, &paddr, page_size);
+			if (ret) {
+				pr_warn("node%d acidx %zu paddr calc failed\n", i, acidx);
+				continue;
+			}
+			entries[idx].paddr = paddr;
+			entries[idx].freq  = adev->access_bit_actc_data[acidx];
+			entries[idx].nid   = (u8)i;
+			entries[idx].flags = test_bit(acidx, ap->white_list_bm[i]) ? 1 : 0;
+			idx++;
+		}
+		up_read(&adev->buffer_lock);
+	}
+	*total = idx;
+	return 0;
+}
+
 struct absolute_pos {
 	unsigned long last_pos;
 	unsigned long pos;

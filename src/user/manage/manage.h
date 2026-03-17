@@ -195,6 +195,7 @@ typedef struct {
     uint64_t actcLen[MAX_NODES];
     ActcData *actcData[MAX_NODES]; // actc数据
     ActCount actCount[MAX_NODES]; // 统计数据
+    bool addrIsPaddr;  /* true: actcData[nid][i].addr is physical address (V2 path) */
 } ScanAttribute;
 
 typedef struct {
@@ -240,6 +241,7 @@ typedef struct {
 
 struct MigList {
     bool successToUser;
+    bool addrIsPaddr;  /* true: addr[] contains physical addresses, skip kernel conversion */
     uint64_t nr;
     uint64_t failedMigNr;
     uint64_t failedIsolatedNr;

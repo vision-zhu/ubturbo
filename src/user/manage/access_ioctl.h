@@ -64,11 +64,27 @@ struct TrakingInfoPayload {
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
 #define SMAP_ACCESS_READ_PID_FREQ _IOW(SMAP_ACCESS_MAGIC, 6, struct AccessPidFreq)
 
+typedef struct {
+    uint64_t paddr;
+    uint16_t freq;
+    uint8_t  nid;
+    uint8_t  flags;  /* bit0: is_white_list */
+} PidFreqEntry;
+
+struct AccessPidFreqV2 {
+    pid_t    pid;
+    uint64_t total;
+    PidFreqEntry *entries;
+};
+
+#define SMAP_ACCESS_READ_PID_FREQ_V2 _IOW(SMAP_ACCESS_MAGIC, 7, struct AccessPidFreqV2)
+
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(size_t *len);
 int AccessIoctlReadPidFreq(struct AccessPidFreq *apf);
+int AccessIoctlReadPidFreqV2(struct AccessPidFreqV2 *apf);
 int AccessRead(size_t len, char *buf);
 
 #endif /* __ACCESS_IOCTL_H__ */

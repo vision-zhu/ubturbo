@@ -124,6 +124,18 @@ int AccessIoctlReadPidFreq(struct AccessPidFreq *apf)
     return ret;
 }
 
+int AccessIoctlReadPidFreqV2(struct AccessPidFreqV2 *apf)
+{
+    struct ProcessManager *manager = GetProcessManager();
+
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_READ_PID_FREQ_V2, apf);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("access read pid freq v2 error: %d\n", -errno);
+        ret = -errno;
+    }
+    return ret;
+}
+
 int AccessRead(size_t len, char *buf)
 {
     struct ProcessManager *manager = GetProcessManager();

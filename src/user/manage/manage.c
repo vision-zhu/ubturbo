@@ -1032,10 +1032,95 @@ static int ReadPidFreq(struct AccessPidFreq *apf)
     return AccessIoctlReadPidFreq(apf);
 }
 
+static int FillPidDataV2(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
+{
+    int ret;
+    uint64_t total = 0;
+    uint64_t globalMappingIdx = 0;
+    struct AccessPidFreqV2 apf = { 0 };
+    PidFreqEntry *entries = NULL;
+
+    ret = InitPidActcData(attr);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Init pid %d actc data failed.", attr->pid);
+        return ret;
+    }
+
+    for (int i = 0; i < MAX_NODES; i++)
+        total += attr->walkPage.nrPages[i];
+    if (total == 0)
+        return 0;
+
+    entries = calloc(total, sizeof(PidFreqEntry));
+    if (!entries) {
+        ResetActcDataForPid(attr);
+        return -ENOMEM;
+    }
+
+    apf.pid     = attr->pid;
+    apf.total   = total;
+    apf.entries = entries;
+
+    ret = AccessIoctlReadPidFreqV2(&apf);
+    if (ret) {
+        free(entries);
+        ResetActcDataForPid(attr);
+        return ret;
+    }
+
+    /* Kernel may have written fewer entries than allocated (e.g. some nodes
+     * had no pages).  apf.total is updated in-place by the ioctl. */
+    for (uint64_t i = 0; i < apf.total; i++) {
+        PidFreqEntry *e = &entries[i];
+        int nid = e->nid;
+        if (nid < 0 || nid >= MAX_NODES)
+            continue;
+        ActcData *actc = attr->scanAttr.actcData[nid];
+        size_t idx = attr->scanAttr.actcLen[nid];
+
+        if (idx >= attr->walkPage.nrPages[nid])
+            continue;
+
+        actc[idx].addr  = e->paddr;
+        actc[idx].freq  = e->freq;
+        actc[idx].prior = (pmb->vmSize && pmb->mapping)
+                          ? (pmb->mapping[globalMappingIdx] & 0xff) : 0;
+        actc[idx].isWhiteListPage = (e->flags & 1) ? true : false;
+
+        ActCount *ac = &attr->scanAttr.actCount[nid];
+        if (e->freq != 0) {
+            ac->freqNum++;
+            ac->freqSum += e->freq;
+        }
+        ac->freqMax = MAX(ac->freqMax, e->freq);
+        ac->freqMin = MIN(ac->freqMin, e->freq);
+        ac->pageNum++;
+        attr->scanAttr.actcLen[nid]++;
+        globalMappingIdx++;
+    }
+
+    for (int nid = 0; nid < MAX_NODES; nid++) {
+        ActCount *ac = &attr->scanAttr.actCount[nid];
+        ac->freqZero = (uint32_t)(ac->pageNum - ac->freqNum);
+    }
+
+    free(entries);
+    attr->scanAttr.addrIsPaddr = true;
+    return 0;
+}
+
 static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
 {
     int ret;
     struct AccessPidFreq apf = { 0 }; // Make sure apf len and freq is zeroed
+
+    ret = FillPidDataV2(attr, pmb);
+    if (ret != -EINVAL && ret != -ENOTTY) {
+        /* V2 succeeded or failed with a definitive error */
+        return ret;
+    }
+    SMAP_LOGGER_INFO("pid %d: V2 freq ioctl not supported (%d), falling back to V1", attr->pid, ret);
+    attr->scanAttr.addrIsPaddr = false;
 
     ret = InitPidActcData(attr);
     if (ret) {
