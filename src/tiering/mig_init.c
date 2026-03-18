@@ -182,10 +182,6 @@ static int build_migrate_list(struct migrate_msg *msg, struct mig_list **mlist)
 		free_migrate_list(mlist);
 		return ret;
 	}
-	/* If all entries already carry physical addresses, skip index->paddr conversion */
-	if ((*mlist)->addr_is_paddr) {
-		return 0;
-	}
 	ret = convert_migrate_list(msg->cnt, *mlist);
 	if (ret) {
 		pr_err("failed to convert migrate list, ret: %d\n", ret);

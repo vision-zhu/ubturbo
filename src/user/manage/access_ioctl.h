@@ -65,7 +65,7 @@ struct TrakingInfoPayload {
 #define SMAP_ACCESS_READ_PID_FREQ _IOW(SMAP_ACCESS_MAGIC, 6, struct AccessPidFreq)
 
 typedef struct {
-    uint64_t paddr;
+    uint64_t va;
     uint16_t freq;
     uint8_t  nid;
     uint8_t  flags;  /* bit0: is_white_list */

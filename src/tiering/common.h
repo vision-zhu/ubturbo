@@ -43,7 +43,6 @@ enum node_level {
 
 struct mig_list {
 	bool success_to_user;
-	bool addr_is_paddr;  /* true: addr[] already contains physical addresses, skip conversion */
 	u64 nr;
 	u64 failed_mig_nr;
 	u64 failed_pre_migrated_nr;

@@ -1106,7 +1106,7 @@ static int FillPidDataV2(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
     for (int64_t i = (int64_t)actual - 1; i >= 0; i--) {
         PidFreqEntry e = pfe[i];
         uint8_t prior = (pmb->vmSize && pmb->mapping) ? (pmb->mapping[i] & 0xff) : 0;
-        actcBase[i].addr           = e.paddr;
+        actcBase[i].addr           = e.va;
         actcBase[i].freq           = e.freq;
         actcBase[i].prior          = prior;
         actcBase[i].isWhiteListPage = (e.flags & 1) ? true : false;
@@ -1133,7 +1133,6 @@ static int FillPidDataV2(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
         ac->freqZero = (uint32_t)(ac->pageNum - ac->freqNum);
     }
 
-    attr->scanAttr.addrIsPaddr = true;
     attr->isLowMem = false;
     return 0;
 }
@@ -1149,7 +1148,6 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
         return ret;
     }
     SMAP_LOGGER_INFO("pid %d: V2 freq ioctl not supported (%d), falling back to V1", attr->pid, ret);
-    attr->scanAttr.addrIsPaddr = false;
 
     ret = InitPidActcData(attr);
     if (ret) {

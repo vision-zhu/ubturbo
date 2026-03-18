@@ -190,7 +190,6 @@ static int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODE
         if (!process->scanAttr.actcData[from]) {
             return -EINVAL;
         }
-        mlist[from][to].addrIsPaddr = process->scanAttr.addrIsPaddr;
         for (uint32_t idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from]; idx++) {
             mlist[from][to].addr[idx] = process->scanAttr.actcData[from][idx].addr;
         }
@@ -364,7 +363,6 @@ static int BuildMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][
         if (!process->scanAttr.actcData[from]) {
             return -EINVAL;
         }
-        mlist[from][to].addrIsPaddr = process->scanAttr.addrIsPaddr;
         for (int idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from] - numaOffset[from]; idx++) {
             mlist[from][to].addr[idx] = process->scanAttr.actcData[from][idx + numaOffset[from]].addr;
         }
@@ -493,7 +491,6 @@ static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_
     if (!currentMig->addr) {
         return -ENOMEM;
     }
-    currentMig->addrIsPaddr = process->scanAttr.addrIsPaddr;
     uint32_t *buckets = (uint32_t *)calloc(STRATEGY_ACTC_MAX_FREQ, sizeof(uint32_t));
     if (buckets == NULL) {
         free(currentMig->addr);
@@ -768,8 +765,7 @@ static int GroupMigPagesByNode(LevelActcData *levelActcData[NR_LEVEL], uint64_t 
 }
 
 static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray[MAX_NODES], uint64_t nrMig[MAX_NODES],
-                                    uint64_t destFreeList[MAX_NODES], struct MigList mlist[MAX_NODES][MAX_NODES],
-                                    bool addrIsPaddr)
+                                    uint64_t destFreeList[MAX_NODES], struct MigList mlist[MAX_NODES][MAX_NODES])
 {
     int nrLocalNuma = GetNrLocalNuma();
     if (dir != PROMOTE && dir != DEMOTE) {
@@ -802,8 +798,6 @@ static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray
             if (!mlist[from][to].addr) {
                 return -ENOMEM;
             }
-            mlist[from][to].addrIsPaddr = addrIsPaddr;
-
             for (uint64_t i = 0; i < pagesToThisDest; i++) {
                 mlist[from][to].addr[i] = migAddrArray[from][curMigIndex + i];
             }
@@ -826,7 +820,7 @@ static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray
 
 static int BuildDemoteMultiNumaMigLists(uint64_t *migAddrArray[MAX_NODES], uint64_t nrMig[MAX_NODES],
                                         struct MigList mlist[MAX_NODES][MAX_NODES],
-                                        RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM], bool addrIsPaddr)
+                                        RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM])
 {
     int nrLocalNuma = GetNrLocalNuma();
     uint64_t freeHugePages[MAX_NODES] = { 0 };
@@ -838,7 +832,7 @@ static int BuildDemoteMultiNumaMigLists(uint64_t *migAddrArray[MAX_NODES], uint6
         }
     }
 
-    return BuildMigListForDirection(DEMOTE, migAddrArray, nrMig, freeHugePages, mlist, addrIsPaddr);
+    return BuildMigListForDirection(DEMOTE, migAddrArray, nrMig, freeHugePages, mlist);
 }
 
 static void CountMigrationPerNode(uint64_t nrMig[MAX_NODES], LevelActcData *levelActcData[NR_LEVEL], uint64_t swapNum,
@@ -939,7 +933,6 @@ static int PromoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList mlist
             if (!mlist[from][to].addr) {
                 return -ENOMEM;
             }
-            mlist[from][to].addrIsPaddr = process->scanAttr.addrIsPaddr;
             for (int index = 0; index < mlist[from][to].nr && index < process->scanAttr.actcLen[from]; index++) {
                 mlist[from][to].addr[index] = process->scanAttr.actcData[from][index].addr;
             }
@@ -1015,7 +1008,7 @@ static int DemoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList mlist[
         migAddrArray[node][counters[node]++] = l1ActcData[i].addr;
     }
 
-    ret = BuildDemoteMultiNumaMigLists(migAddrArray, nrMig, mlist, remoteMigInfo, process->scanAttr.addrIsPaddr);
+    ret = BuildDemoteMultiNumaMigLists(migAddrArray, nrMig, mlist, remoteMigInfo);
     if (ret) {
         SMAP_LOGGER_ERROR("Failed to build migration lists for demote direction, ret: %d.", ret);
         process->isLowMem = ret == -MULTI_NUMA_VM_OOM ? true : false;
@@ -1037,8 +1030,7 @@ static int BuildSwapMigLists(ProcessAttr *process, struct MigList mlist[MAX_NODE
         }
     }
 
-    int ret = BuildMigListForDirection(PROMOTE, migAddrArray, nrMig, freeHugePages, mlist,
-                                        process->scanAttr.addrIsPaddr);
+    int ret = BuildMigListForDirection(PROMOTE, migAddrArray, nrMig, freeHugePages, mlist);
     if (ret) {
         SMAP_LOGGER_ERROR("Failed to build promote mig lists for pid %d, ret: %d.", process->pid, ret);
         return ret;
@@ -1051,8 +1043,7 @@ static int BuildSwapMigLists(ProcessAttr *process, struct MigList mlist[MAX_NODE
         }
     }
 
-    ret = BuildMigListForDirection(DEMOTE, migAddrArray, nrMig, freeHugePages, mlist,
-                                   process->scanAttr.addrIsPaddr);
+    ret = BuildMigListForDirection(DEMOTE, migAddrArray, nrMig, freeHugePages, mlist);
     if (ret) {
         SMAP_LOGGER_ERROR("Failed to build demote mig lists for pid %d, ret :%d.", process->pid, ret);
     }

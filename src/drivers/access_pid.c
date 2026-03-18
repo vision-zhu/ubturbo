@@ -1065,7 +1065,7 @@ int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
 
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		int ret;
-		u64 paddr;
+		u64 paddr, vaddr;
 
 		if (ap->page_num[i] == 0 || !ap->paddr_bm[i])
 			continue;
@@ -1095,7 +1095,13 @@ int read_pid_freq_v2(pid_t pid, u64 *total, struct pid_freq_entry *entries)
 				pr_warn("node%d acidx %zu paddr calc failed\n", i, acidx);
 				continue;
 			}
-			entries[idx].paddr        = paddr;
+			ret = paddr_to_user_va(pid, paddr, &vaddr);
+			if (ret) {
+				pr_debug("node%d acidx %zu paddr %llx va lookup failed: %d\n",
+					 i, acidx, paddr, ret);
+				continue;
+			}
+			entries[idx].va           = vaddr;
 			entries[idx].freq         = adev->access_bit_actc_data[acidx];
 			entries[idx].nid          = (u8)i;
 			entries[idx].is_white_list = test_bit(acidx, ap->white_list_bm[i]);

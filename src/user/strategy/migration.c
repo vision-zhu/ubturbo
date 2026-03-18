@@ -62,7 +62,6 @@ int AddMigList(struct MigrateMsg *mMsg, struct MigList *mList)
     mMsg->migList[mMsg->cnt].to = mList->to;
     mMsg->migList[mMsg->cnt].pid = mList->pid;
     mMsg->migList[mMsg->cnt].nr = migrateNum;
-    mMsg->migList[mMsg->cnt].addrIsPaddr = mList->addrIsPaddr;
     for (i = 0; i < migrateNum; i++) {
         mMsg->migList[mMsg->cnt].addr[i] = mList->addr[i];
     }

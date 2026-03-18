@@ -75,10 +75,10 @@ struct access_pid_freq_msg {
 
 /*
  * pid_freq_entry is layout-compatible with user-space PidFreqEntry
- * {u64 paddr, u16 freq, u8 nid, u8 flags(bit0=is_white_list)}.
+ * {u64 va, u16 freq, u8 nid, u8 flags(bit0=is_white_list)}.
  */
 struct pid_freq_entry {
-	u64  paddr;
+	u64  va;
 	u16  freq;
 	u8   nid;            /* NUMA node id of this page */
 	bool is_white_list;  /* matches ActcData.isWhiteListPage */

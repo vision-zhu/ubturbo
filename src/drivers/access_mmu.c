@@ -6,6 +6,7 @@
 
 #include <linux/hugetlb.h>
 #include <linux/pagewalk.h>
+#include <linux/rmap.h>
 #include <linux/slab.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
@@ -491,3 +492,71 @@ void walk_pid_pagemap(struct pagemapread *pm)
 	mmput(mm);
 }
 EXPORT_SYMBOL(walk_pid_pagemap);
+
+struct paddr_va_arg {
+	pid_t    pid;
+	u64      vaddr;
+	bool     found;
+};
+
+static bool paddr_va_rmap_one(struct folio *folio, struct vm_area_struct *vma,
+			      unsigned long address, void *arg)
+{
+	struct paddr_va_arg *pva = arg;
+	struct task_struct *owner;
+
+	if (!vma || !vma->vm_mm)
+		return true;
+
+	rcu_read_lock();
+	owner = vma->vm_mm->owner;
+	rcu_read_unlock();
+
+	if (!owner || owner->pid != pva->pid)
+		return true;
+
+	pva->vaddr = address;
+	pva->found = true;
+	return false;
+}
+
+/*
+ * paddr_to_user_va - find the user virtual address that maps a given
+ * physical address in the address space of @pid.
+ *
+ * Returns 0 and writes the VA into @vaddr on success.
+ * Returns -ENOENT if the page is not mapped in that process.
+ * Returns -EINVAL for invalid inputs.
+ */
+int paddr_to_user_va(pid_t pid, u64 paddr, u64 *vaddr)
+{
+	unsigned long pfn;
+	struct page *page;
+	struct paddr_va_arg pva = { .pid = pid, .found = false };
+	struct rmap_walk_control rwc = {
+		.rmap_one = paddr_va_rmap_one,
+		.arg      = &pva,
+	};
+
+	if (!vaddr)
+		return -EINVAL;
+
+	pfn = PHYS_PFN(paddr);
+	if (!pfn_valid(pfn))
+		return -EINVAL;
+
+	page = pfn_to_online_page(pfn);
+	if (!page)
+		return -EINVAL;
+
+	/* compound_head so folio-based rmap walk works for huge pages */
+	page = compound_head(page);
+
+	rmap_walk(page_folio(page), &rwc);
+
+	if (!pva.found)
+		return -ENOENT;
+
+	*vaddr = pva.vaddr;
+	return 0;
+}

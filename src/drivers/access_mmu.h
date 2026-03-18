@@ -14,4 +14,5 @@ extern rwlock_t rem_ram_list_lock;
 
 void walk_pid_pagemap(struct pagemapread *pm);
 struct mm_struct *get_mm_by_pid(pid_t pid);
+int paddr_to_user_va(pid_t pid, u64 paddr, u64 *vaddr);
 #endif /* _SRC_ACCESS_MMU_H */
