@@ -70,8 +70,7 @@ struct access_pid_freq_msg {
 #define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING \
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
-#define SMAP_ACCESS_READ_PID_FREQ \
-	_IOW(SMAP_ACCESS_MAGIC, 6, struct access_pid_freq_msg)
+#define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct user_info)
 
 void access_ioctl_exit(void);
 int access_ioctl_init(void);

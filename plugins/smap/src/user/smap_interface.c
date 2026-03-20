@@ -19,6 +19,9 @@
 #include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <grp.h>
 #include "securec.h"
 
 #include "advanced-strategy/scene.h"
@@ -1022,6 +1025,32 @@ static int Recover(void)
     return ret;
 }
 
+#define UBTURBO_NAME "ubturbo"
+ 	 
+static int CreateProcfs(void)
+{
+ 	// Get ubturbo UID
+ 	struct passwd *pwd = getpwnam(UBTURBO_NAME);
+ 	if (!pwd) {
+ 	    SMAP_LOGGER_ERROR("Unable to get %s uid: %d.", UBTURBO_NAME, -errno);
+ 	    return -ENOENT;
+ 	}
+ 	 
+ 	// Get ubturbo GID
+ 	struct group *grp = getgrnam(UBTURBO_NAME);
+ 	if (!grp) {
+ 	    SMAP_LOGGER_ERROR("Unable to get %s gid: %d.", UBTURBO_NAME, -errno);
+ 	    return -ENOENT;
+ 	}
+ 	 
+ 	struct UserInfo ui = {
+ 	    .uid = pwd->pw_uid,
+ 	    .gid = grp->gr_gid,
+ 	};
+ 	SMAP_LOGGER_INFO("User %s's uid is %d, gid is %d.", UBTURBO_NAME, ui.uid, ui.gid);
+ 	return AccessIoctlCreateProcfs(&ui);
+}
+
 int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
 {
     int ret = 0;
@@ -1056,6 +1085,13 @@ int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
         SMAP_LOGGER_ERROR("Smap init tracking dev failed, ret = %d.", ret);
         goto EXIT_DEV;
     }
+
+     // No need to remove procfs if subsequent steps fail
+ 	ret = CreateProcfs();
+ 	if (ret) {
+ 	    SMAP_LOGGER_ERROR("Smap create procfs failed, ret = %d.", ret);
+ 	    goto EXIT_DEV;
+ 	}
 
     ret = AccessIoctlRemoveAllPid();
     if (ret) {
