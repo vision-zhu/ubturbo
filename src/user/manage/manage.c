@@ -999,9 +999,71 @@ static int InitPidFreq(ProcessAttr *attr, struct AccessPidFreq *apf)
     return 0;
 }
 
+static int ReadPidFreqInner(struct AccessPidFreq *apf, int numaNum, FILE *file)
+{
+ 	for (uint32_t pageNum; pageNum < apf->len[numaNum]; pageNum++) {
+ 	    if (fread(&apf->freq[numaNum][pageNum], sizeof(uint16_t), 1, file) != 1) {
+ 	        SMAP_LOGGER_WARNING("Read freq numa(%d) page(%lu) failed.\n", numaNum, pageNum);
+ 	        return -EINVAL;
+ 	    }
+ 	}
+ 	     
+ 	return 0;
+}
+
+#define FREQ_FILE_PATH_LEN 50
+#define FREQ_FILE_RETRY 20
+#define FREQ_FILE_RETRY_DELAY 10000
+
 static int ReadPidFreq(struct AccessPidFreq *apf)
 {
-    return AccessIoctlReadPidFreq(apf);
+    FILE *file;
+ 	char filePath[FREQ_FILE_PATH_LEN];
+ 	int retryCount = 0;
+ 	 
+ 	int ret = snprintf_s(filePath, sizeof(filePath), sizeof(filePath), "/proc/smap/%d/mem_freq", (int)apf->pid);
+ 	if (ret == -1) {
+ 	    SMAP_LOGGER_ERROR("snprintf freq file path failed.\n");
+ 	    return -EINVAL;
+ 	}
+ 	file = fopen(filePath, "rb");
+ 	if (!file) {
+ 	    SMAP_LOGGER_ERROR("open freq file failed.\n");
+ 	    return -EINVAL;
+ 	}
+ 	 
+ 	while (retryCount < FREQ_FILE_RETRY) {
+ 	    int allSuccess = 0;
+ 	 
+ 	    for (int numaNum = 0; numaNum < MAX_NODES; numaNum++) {
+ 	        if (apf->len[numaNum] == 0) {
+ 	            continue;
+ 	        }
+ 	        ret = ReadPidFreqInner(apf, numaNum, file);
+ 	        if (ret) {
+ 	            allSuccess = -1;
+ 	            break;
+ 	        }
+ 	    }
+ 	 
+ 	    if (!allSuccess) {
+ 	        fclose(file);
+ 	        return 0;
+ 	    }
+ 	 
+ 	    fclose(file);
+ 	    usleep(FREQ_FILE_RETRY_DELAY);
+ 	    file = fopen(filePath, "rb");
+ 	    if (!file) {
+ 	        SMAP_LOGGER_ERROR("open freq file failed.\n");
+ 	        return -EINVAL;
+ 	    }
+ 	    retryCount++;
+ 	}
+ 	 
+ 	SMAP_LOGGER_ERROR("Read freq data from file failed.\n");
+ 	fclose(file);
+ 	return -EINVAL;
 }
 
 static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
