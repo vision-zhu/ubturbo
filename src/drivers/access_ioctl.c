@@ -291,7 +291,6 @@ static size_t calc_bitmap_len(void)
 		buf_len += sizeof(u32);
 		for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
-			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 		}
 		buf_len += sizeof(u32) * ap->info.vm_size;
 	}
@@ -385,24 +384,6 @@ static void write_bitmap_paddrbm(char **buffer, struct access_pid *ap)
 	}
 }
 
-static void write_bitmap_white_list(char **buffer, struct access_pid *ap)
-{
-	int i;
-	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("invalid buffer or access pid passed to write white list\n");
-		return;
-	}
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		size_t length = sizeof(unsigned long) * ap->bm_len[i];
-		if (length == 0 || !ap->white_list_bm[i]) {
-			pr_debug("no need to write pid %d white_list_bm[%d]\n",
-				 ap->pid, i);
-			continue;
-		}
-		memcpy(*buffer, ap->white_list_bm[i], length);
-		*buffer += length;
-	}
-}
 
 static void write_bitmap_mappig(char **buffer, struct access_pid *ap)
 {
@@ -438,7 +419,6 @@ static void write_bitmap_buffer(char **buffer)
 		write_bitmap_bmlen(buffer, ap);
 		write_bitmap_vmsize(buffer, ap);
 		write_bitmap_paddrbm(buffer, ap);
-		write_bitmap_white_list(buffer, ap);
 		write_bitmap_mappig(buffer, ap);
 	}
 	up_read(&ap_data.lock);

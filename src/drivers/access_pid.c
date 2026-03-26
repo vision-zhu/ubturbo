@@ -47,8 +47,6 @@ void destroy_access_pid(struct access_pid *elem)
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		vfree(elem->paddr_bm[i]);
 		elem->paddr_bm[i] = NULL;
-		vfree(elem->white_list_bm[i]);
-		elem->white_list_bm[i] = NULL;
 		elem->bm_len[i] = 0;
 		elem->scan_count[i] = 0;
 		elem->page_num[i] = 0;
@@ -239,7 +237,6 @@ int init_access_pid(struct access_add_pid_payload *payload,
 		ap->page_num[i] = 0;
 		ap->bm_len[i] = 0;
 		ap->paddr_bm[i] = NULL;
-		ap->white_list_bm[i] = NULL;
 	}
 	if (is_access_hugepage()) {
 		if (init_vm_mapping_info(ap->pid, &ap->info)) {
@@ -864,20 +861,6 @@ static inline void free_ap_bm(struct access_pid *ap)
 	}
 }
 
-static void free_ap_white_list_bm(struct access_pid *ap)
-{
-	int i;
-	if (!ap) {
-		return;
-	}
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		vfree(ap->paddr_bm[i]);
-		ap->paddr_bm[i] = NULL;
-		vfree(ap->white_list_bm[i]);
-		ap->white_list_bm[i] = NULL;
-		ap->bm_len[i] = 0;
-	}
-}
 
 static int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
 {
@@ -898,13 +881,6 @@ static int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
 			return -ENOMEM;
 		}
 
-		ap->white_list_bm[i] = vzalloc(ap->bm_len[i] * nr_bytes);
-		if (!ap->white_list_bm[i]) {
-			pr_err("unable to allocate memory for white list bitmap on node %d of pid: %d\n",
-			       i, ap->pid);
-			free_ap_white_list_bm(ap);
-			return -ENOMEM;
-		}
 	}
 
 	return 0;
@@ -931,8 +907,6 @@ void clean_last_ap_data(struct access_pid *ap)
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		vfree(ap->paddr_bm[i]);
 		ap->paddr_bm[i] = NULL;
-		vfree(ap->white_list_bm[i]);
-		ap->white_list_bm[i] = NULL;
 		ap->bm_len[i] = 0;
 		ap->page_num[i] = 0;
 	}
@@ -1043,50 +1017,7 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 	return 0;
 }
 
-struct absolute_pos {
-	unsigned long last_pos;
-	unsigned long pos;
-	long last_index;
-	long index;
-};
-
-static int calc_absolute_pos(unsigned long *paddr_bm, size_t bm_len,
-			     struct absolute_pos *abs_pos)
-{
-	unsigned long tmp_pos = abs_pos->last_pos + 1;
-	long last_index = abs_pos->last_index;
-	size_t nr_bm_bits = BITS_PER_BYTE * sizeof(unsigned long) * bm_len;
-
-	if (!paddr_bm || bm_len == 0) {
-		return -EINVAL;
-	}
-
-	if (unlikely(last_index == abs_pos->index)) {
-		abs_pos->pos = abs_pos->last_pos;
-		return 0;
-	}
-	if (unlikely(last_index > abs_pos->index)) {
-		return -EINVAL;
-	}
-
-	while (tmp_pos < nr_bm_bits) {
-		tmp_pos = find_next_bit(paddr_bm, nr_bm_bits, tmp_pos);
-		if (tmp_pos == nr_bm_bits) {
-			return -ERANGE;
-		}
-		if (++last_index == abs_pos->index) {
-			abs_pos->pos = tmp_pos;
-			return 0;
-		}
-		tmp_pos++;
-	}
-
-	return -ERANGE;
-}
-
 #define INVALID_PADDR 0
-#define INITIAL_POS ULONG_MAX
-#define INITIAL_POS_INDEX (-1)
 
 static int check_parameters_and_state(u64 len, u64 *addr)
 {
@@ -1101,82 +1032,42 @@ static int check_parameters_and_state(u64 len, u64 *addr)
 	return 0;
 }
 
-static void convert_single_address(struct access_pid *ap, int nid,
-				   int page_size, u64 *addr,
-				   struct absolute_pos *abs_pos)
+static void convert_single_address(int nid, int page_size, u64 *addr)
 {
 	int ret;
+	u64 acidx = *addr;
 
-	/* firstly, calculate absolute position by relative position */
-	abs_pos->index = *addr;
-	ret = calc_absolute_pos(ap->paddr_bm[nid], ap->bm_len[nid], abs_pos);
-	if (ret < 0) {
-		pr_err("calculate pid %d %lluth page pos failed\n", ap->pid,
-		       *addr);
-		*addr = INVALID_PADDR;
-		return;
-	}
-
-	abs_pos->last_index = abs_pos->index;
-	abs_pos->last_pos = abs_pos->pos;
-	pr_debug("convert node%d index %ld acidx %lu\n", nid, abs_pos->index,
-		 abs_pos->pos);
-	/* Secondly, calculate physical address by absolute position */
+	/* addr[i] is already the acidx, convert directly to physical address */
 	if (nid < nr_local_numa) {
-		ret = calc_acidx_paddr_acpi(nid, abs_pos->pos, addr, page_size);
+		ret = calc_acidx_paddr_acpi(nid, acidx, addr, page_size);
 	} else {
-		ret = calc_acidx_paddr_iomem(nid, abs_pos->pos, addr,
-					     page_size);
+		ret = calc_acidx_paddr_iomem(nid, acidx, addr, page_size);
 	}
 
 	if (ret) {
-		pr_err("calculate acidx %lx paddr failed\n", abs_pos->index);
+		pr_err("calculate acidx %llx paddr failed\n", acidx);
 		*addr = INVALID_PADDR;
 	}
 }
 
-/* Caller must ensures that addr is in ascending order */
+/* Caller must ensures that addr[] contains acidx values in ascending order */
 int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 {
 	u64 i;
 	int ret;
-	bool found = false;
-	struct access_pid *ap;
-	struct absolute_pos abs_pos = { .last_pos = INITIAL_POS,
-					.pos = INVALID_PADDR,
-					.last_index = INITIAL_POS_INDEX,
-					.index = INITIAL_POS_INDEX };
 	int page_size = is_access_hugepage() ? g_pagesize_huge : PAGE_SIZE;
+
 	ret = check_parameters_and_state(len, addr);
 	if (ret) {
 		return ret;
 	}
 
-	down_read(&ap_data.lock);
-	list_for_each_entry(ap, &ap_data.list, node) {
-		if (ap->pid == pid) {
-			found = true;
-			break;
-		}
-	}
-
-	if (!found) {
-		pr_err("invalid pid: %d passed to convert position to PA\n",
-		       pid);
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ |
-						     AP_STATE_MIG);
-		up_read(&ap_data.lock);
-		return -EINVAL;
-	}
-
 	pr_debug("%llu addresses of pid: %d on node%d has been converted\n",
 		 len, pid, nid);
 	for (i = 0; i < len; i++) {
-		convert_single_address(ap, nid, page_size, &addr[i], &abs_pos);
+		convert_single_address(nid, page_size, &addr[i]);
 	}
 
-	up_read(&ap_data.lock);
 	set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
 					     AP_STATE_FREQ | AP_STATE_MIG);
 	return 0;

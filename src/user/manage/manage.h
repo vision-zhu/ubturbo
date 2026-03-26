@@ -73,6 +73,8 @@
 extern EnvAtomic g_forbiddenNodes[MAX_NODES];
 
 typedef uint16_t actc_t;
+#define ACTC_WHITE_LIST_BIT ((actc_t)(1u << 15))
+#define ACTC_FREQ_MASK      ((actc_t)(~ACTC_WHITE_LIST_BIT))
 
 typedef enum {
     WATERLINE_MODE = 0,
@@ -104,13 +106,6 @@ enum {
     DISABLE_PROCESS_MIGRATE,
     ENABLE_PROCESS_MIGRATE,
 };
-
-typedef struct {
-    uint64_t addr;
-    actc_t freq;
-    uint8_t prior;
-    bool isWhiteListPage;
-} ActcData;
 
 typedef struct {
     uint64_t addr;
@@ -193,7 +188,7 @@ typedef struct {
     uint32_t scanTime;
     ScanType scanType; // 标识添加进程组件 HAM/普通冷热
     uint64_t actcLen[MAX_NODES];
-    ActcData *actcData[MAX_NODES]; // actc数据
+    actc_t *freq[MAX_NODES]; // 频次数据（含bit15白名单标志）
     ActCount actCount[MAX_NODES]; // 统计数据
 } ScanAttribute;
 
@@ -539,12 +534,6 @@ static inline ActCount *GetL1ActCount(ProcessAttr *attr)
     return (nid == NUMA_NO_NODE) ? NULL : &attr->scanAttr.actCount[nid];
 }
 
-static inline ActcData *GetL1ActcData(ProcessAttr *attr)
-{
-    int nid = GetAttrL1(attr);
-    return (nid == NUMA_NO_NODE) ? NULL : attr->scanAttr.actcData[nid];
-}
-
 /* L2 numaNodes helper functions */
 static inline int GetAttrL2(ProcessAttr *attr)
 {
@@ -610,11 +599,6 @@ static inline ActCount *GetL2ActCount(ProcessAttr *attr)
     return (nid == NUMA_NO_NODE) ? NULL : &attr->scanAttr.actCount[nid];
 }
 
-static inline ActcData *GetL2ActcData(ProcessAttr *attr)
-{
-    int nid = GetAttrL2(attr);
-    return (nid == NUMA_NO_NODE) ? NULL : attr->scanAttr.actcData[nid];
-}
 
 static inline bool IsNumaMapLineHuge(char *line)
 {

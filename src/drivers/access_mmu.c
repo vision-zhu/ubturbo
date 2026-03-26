@@ -70,26 +70,21 @@ static int calc_paddr_acidx(u64 paddr, int *nid, u64 *index)
 	return calc_paddr_acidx_iomem(paddr, nid, index, page_size);
 }
 
-static int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
+static int set_non_anon_bm(u64 acidx, u64 paddr, int nid,
+			   struct access_tracking_dev *adev)
 {
 	unsigned long pfn;
 	struct page *p_page = NULL;
 
-	if (nid >= nr_local_numa) {
-		return 0;
-	}
 	pfn = PHYS_PFN(paddr);
-	if (!pfn_valid(pfn)) {
+	if (!pfn_valid(pfn))
 		return -EINVAL;
-	}
 	p_page = pfn_to_online_page(pfn);
-	if (!p_page) {
+	if (!p_page)
 		return -EINVAL;
-	}
 	if (!PageHuge(p_page)) {
-		if (!PageAnon(p_page) || page_mapcount(p_page) > 1) {
-			set_bit(acidx, ap->white_list_bm[nid]);
-		}
+		if (!PageAnon(p_page) || page_mapcount(p_page) > 1)
+			adev->access_bit_actc_data[acidx] |= ACTC_WHITE_LIST_BIT;
 	}
 	return 0;
 }
@@ -98,6 +93,7 @@ static int add_to_bm_page(u64 paddr, struct access_pid *ap)
 {
 	int nid, nid_pos, ret;
 	u64 acidx;
+	struct access_tracking_dev *adev;
 	ret = calc_paddr_acidx(paddr, &nid, &acidx);
 	if (ret)
 		return ret;
@@ -111,9 +107,13 @@ static int add_to_bm_page(u64 paddr, struct access_pid *ap)
 		return -ERANGE;
 	}
 
-	ret = set_non_anon_bm(ap, acidx, paddr, nid);
-	if (ret) {
-		return ret;
+	adev = get_access_tracking_dev(nid);
+	if (!adev || list_entry_is_head(adev, &access_dev, list)) {
+		pr_warn("no access_tracking_dev for nid %d\n", nid);
+	} else {
+		ret = set_non_anon_bm(acidx, paddr, nid, adev);
+		if (ret)
+			return ret;
 	}
 	set_bit(acidx, ap->paddr_bm[nid]);
 	ap->page_num[nid]++;

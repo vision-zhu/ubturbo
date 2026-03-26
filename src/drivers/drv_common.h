@@ -9,4 +9,7 @@
 
 typedef u16 actc_t;
 
+#define ACTC_WHITE_LIST_BIT  ((actc_t)(1u << 15))
+#define ACTC_FREQ_MASK       ((actc_t)(~ACTC_WHITE_LIST_BIT))
+
 #endif /* __TRACKING_COMMON_H__ */

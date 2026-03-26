@@ -1268,10 +1268,10 @@ static int QueryVMFreqFromUser(int pid, uint16_t *data, uint32_t lengthIn, uint3
     }
     *lengthOut = (actcLen > lengthIn) ? lengthIn : actcLen;
     for (int nid = 0; nid < MAX_NODES; nid++) {
-        ActcData *actc = attr->scanAttr.actcData[nid];
+        actc_t *freq = attr->scanAttr.freq[nid];
         actcLen = attr->scanAttr.actcLen[nid];
         for (uint64_t j = 0; j < actcLen && i < lengthIn; i++, j++) {
-            data[i] = actc[j].freq;
+            data[i] = freq[j] & ACTC_FREQ_MASK;
         }
     }
     SMAP_LOGGER_INFO("ubturbo_smap_freq_query success, pid %d lengthIn %llu lengthOut %llu.", pid, lengthIn,

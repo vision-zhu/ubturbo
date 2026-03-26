@@ -57,10 +57,10 @@ static inline int CheckActcDataValid(ProcessAttr *process)
 {
     bool nullFlag = true;
     for (int n = 0; n < MAX_NODES; n++) {
-        nullFlag &= !process->scanAttr.actcData[n];
+        nullFlag &= !process->scanAttr.freq[n];
     }
     if (nullFlag) {
-        SMAP_LOGGER_ERROR("The actcData is null, pid %d stops migrate out.", process->pid);
+        SMAP_LOGGER_ERROR("The freq is null, pid %d stops migrate out.", process->pid);
         return -ENODATA;
     }
     return 0;

@@ -67,7 +67,6 @@ struct access_pid {
 	size_t page_num[SMAP_MAX_NUMNODES];
 	size_t bm_len[SMAP_MAX_NUMNODES];
 	unsigned long *paddr_bm[SMAP_MAX_NUMNODES];
-	unsigned long *white_list_bm[SMAP_MAX_NUMNODES];
 	struct list_head node;
 	struct vm_mapping_info info;
 	ktime_t last_scan_end;
