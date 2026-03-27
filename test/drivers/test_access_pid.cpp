@@ -182,6 +182,7 @@ TEST_F(DriversAccessPidTest, InitVmMappingInfoTwo)
     EXPECT_EQ(0, ret);
 }
 
+extern "C" int create_procfs(struct access_pid *ap);
 TEST_F(DriversAccessPidTest, InitAccessPid)
 {
     int ret;
@@ -195,6 +196,7 @@ TEST_F(DriversAccessPidTest, InitAccessPid)
     struct access_add_pid_payload payload = { 0 };
     MOCKER(kmalloc).stubs().will(returnValue((void *)&ap));
     MOCKER(init_vm_mapping_info).stubs().will(returnValue(0));
+    MOCKER(create_procfs).stubs().will(returnValue(0));
     ret = init_access_pid(&payload, &tmp);
     EXPECT_EQ(0, ret);
 }
@@ -743,17 +745,6 @@ TEST_F(DriversAccessPidTest, AccessWalkPagemapFail)
     ret = access_walk_pagemap(ap);
     EXPECT_EQ(-ENOMEM, ret);
     list_del(&adev.list);
-}
-
-TEST_F(DriversAccessPidTest, ReadPidFreqFailed)
-{
-    int ret = read_pid_freq(0, nullptr, nullptr);
-    EXPECT_EQ(-EINVAL, ret);
-
-    actc_t *freq[SMAP_MAX_NUMNODES] = { 0 };
-    size_t data_len;
-    ret = read_pid_freq(0, &data_len, freq);
-    EXPECT_EQ(-EINVAL, ret);
 }
 
 struct absolute_pos {

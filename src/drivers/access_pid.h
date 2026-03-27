@@ -15,6 +15,7 @@
 #include "drv_common.h"
 
 #define MAX_PATH_LENGTH 64
+#define AP_PROCFS_DIR_LEN 32
 #define SEC_TO_MS 1000
 #define NON_EXIST_PID (-1)
 extern int nr_local_numa;
@@ -72,6 +73,8 @@ struct access_pid {
 	struct vm_mapping_info info;
 	ktime_t last_scan_end;
 	unsigned long last_scan_delay_ms;
+	struct proc_dir_entry *proc_root;
+	struct proc_dir_entry *proc_freq;
 };
 
 typedef struct {
@@ -118,7 +121,6 @@ void change_ap_type(pid_t pid);
 void clean_last_ap_data(struct access_pid *ap);
 int access_walk_pagemap(struct access_pid *ap);
 struct access_pid *find_access_pid(pid_t pid);
-int read_pid_freq(pid_t pid, size_t *data_len, u16 **data);
 int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr);
 
 static inline bool access_pid_is_scanning(pid_t pid)

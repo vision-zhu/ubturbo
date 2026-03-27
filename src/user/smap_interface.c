@@ -1026,29 +1026,29 @@ static int Recover(void)
 }
 
 #define UBTURBO_NAME "ubturbo"
- 	 
+
 static int CreateProcfs(void)
 {
- 	// Get ubturbo UID
- 	struct passwd *pwd = getpwnam(UBTURBO_NAME);
- 	if (!pwd) {
- 	    SMAP_LOGGER_ERROR("Unable to get %s uid: %d.", UBTURBO_NAME, -errno);
- 	    return -ENOENT;
- 	}
- 	 
- 	// Get ubturbo GID
- 	struct group *grp = getgrnam(UBTURBO_NAME);
- 	if (!grp) {
- 	    SMAP_LOGGER_ERROR("Unable to get %s gid: %d.", UBTURBO_NAME, -errno);
- 	    return -ENOENT;
- 	}
- 	 
- 	struct UserInfo ui = {
- 	    .uid = pwd->pw_uid,
- 	    .gid = grp->gr_gid,
- 	};
- 	SMAP_LOGGER_INFO("User %s's uid is %d, gid is %d.", UBTURBO_NAME, ui.uid, ui.gid);
- 	return AccessIoctlCreateProcfs(&ui);
+    // Get ubturbo UID
+    struct passwd *pwd = getpwnam(UBTURBO_NAME);
+    if (!pwd) {
+        SMAP_LOGGER_ERROR("Unable to get %s uid: %d.", UBTURBO_NAME, -errno);
+        return -ENOENT;
+    }
+
+    // Get ubturbo GID
+    struct group *grp = getgrnam(UBTURBO_NAME);
+    if (!grp) {
+        SMAP_LOGGER_ERROR("Unable to get %s gid: %d.", UBTURBO_NAME, -errno);
+        return -ENOENT;
+    }
+
+    struct UserInfo ui = {
+        .uid = pwd->pw_uid,
+        .gid = grp->gr_gid,
+    };
+    SMAP_LOGGER_INFO("User %s's uid is %d, gid is %d.", UBTURBO_NAME, ui.uid, ui.gid);
+    return AccessIoctlCreateProcfs(&ui);
 }
 
 int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
@@ -1086,12 +1086,12 @@ int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
         goto EXIT_DEV;
     }
 
-     // No need to remove procfs if subsequent steps fail
- 	ret = CreateProcfs();
- 	if (ret) {
- 	    SMAP_LOGGER_ERROR("Smap create procfs failed, ret = %d.", ret);
- 	    goto EXIT_DEV;
- 	}
+    // No need to remove procfs if subsequent steps fail
+    ret = CreateProcfs();
+    if (ret) {
+        SMAP_LOGGER_ERROR("Smap create procfs failed, ret = %d.", ret);
+        goto EXIT_DEV;
+    }
 
     ret = AccessIoctlRemoveAllPid();
     if (ret) {

@@ -8,6 +8,7 @@
 #define _SRC_ACCESS_IOCTL_H
 
 #include <linux/types.h>
+#include <linux/proc_fs.h>
 
 #include "check.h"
 
@@ -17,6 +18,8 @@
 #define BASE_MINOR 0
 #define NR_MINOR 1
 #define MAX_SCAN_DURATION_SEC 300
+
+#define SMAP_PROC_ROOT "smap"
 
 typedef enum {
 	NO_SCAN = -1,
@@ -60,6 +63,15 @@ struct access_pid_freq_msg {
 	size_t len[SMAP_MAX_NUMNODES];
 	u16 *freq[SMAP_MAX_NUMNODES];
 };
+
+struct user_info {
+	uid_t uid;
+	gid_t gid;
+};
+
+extern kuid_t procfs_kuid;
+extern kgid_t procfs_kgid;
+extern struct proc_dir_entry *smap_procfs_root;
 
 #define SMAP_ACCESS_MAGIC 0xBB
 #define SMAP_ACCESS_ADD_PID \

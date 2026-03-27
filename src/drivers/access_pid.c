@@ -12,6 +12,7 @@
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/pid.h>
+#include <linux/namei.h>
 
 #include "check.h"
 #include "accessed_bit.h"
@@ -57,6 +58,7 @@ void destroy_access_pid(struct access_pid *elem)
 		vfree(elem->info.mapping);
 		elem->info.mapping = NULL;
 	}
+	proc_remove(elem->proc_root);
 	kfree(elem);
 	return;
 }
@@ -222,9 +224,204 @@ static int init_vm_mapping_info(pid_t pid, struct vm_mapping_info *info)
 	return ret;
 }
 
+static int mem_freq_open(struct inode *inode, struct file *file)
+{
+	file->private_data = pde_data(inode);
+	return 0;
+}
+
+static int mem_freq_release(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static inline size_t calc_process_page_number(struct access_pid *ap)
+{
+	int i;
+	size_t ret_len = 0;
+	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
+		ret_len += ap->page_num[i];
+	}
+	return ret_len;
+}
+
+static void read_pid_freq(struct access_pid *ap, actc_t *freq, size_t freq_len)
+{
+	int i;
+	u32 len_cnt = 0;
+	size_t acidx, bm_len;
+	struct access_tracking_dev *adev;
+
+	pr_debug("start writing pid %d freq\n", ap->pid);
+	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
+		if (ap->page_num[i] == 0 || !ap->paddr_bm[i]) {
+			continue;
+		}
+		list_for_each_entry(adev, &access_dev, list) {
+			if (adev->node == i) {
+				break;
+			}
+		}
+		if (list_entry_is_head(adev, &access_dev, list)) {
+			continue;
+		}
+
+		down_read(&adev->buffer_lock);
+		bm_len = BITS_PER_TYPE(long) * ap->bm_len[i];
+		for (acidx = 0; acidx < bm_len && len_cnt < freq_len; acidx++) {
+			if (!test_bit(acidx, ap->paddr_bm[i])) {
+				continue;
+			}
+			if (unlikely(acidx >= adev->page_count)) {
+				pr_warn("exceeds total page amount: %llu when lookup access index: %zu on access device: %d\n",
+					adev->page_count, acidx, i);
+				break;
+			}
+			pr_debug("node:%d acidx:%zu value:%hu len_cnt:%u\n", i,
+				   acidx, adev->access_bit_actc_data[acidx],
+				   len_cnt);
+			freq[len_cnt++] = adev->access_bit_actc_data[acidx];
+		}
+		up_read(&adev->buffer_lock);
+	}
+}
+
+static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
+			     loff_t *ppos)
+{
+	actc_t *freq;
+	struct access_pid *ap = file->private_data;
+	ssize_t len;
+	size_t total_len;
+
+	pr_debug("enter mem_freq_read\n");
+	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
+		len = -EAGAIN;
+		goto out;
+	}
+
+	total_len = calc_process_page_number(ap) * sizeof(actc_t);
+	freq = kvmalloc(total_len, GFP_KERNEL);
+	if (!freq) {
+		len = -ENOMEM;
+		goto out;
+	}
+
+	len = -EINVAL;
+	if (*ppos % sizeof(actc_t)) {
+		goto out_free;
+	}
+		
+
+	len = 0;
+	if (!cnt || *ppos >= total_len) {
+		goto out_free;
+	}
+
+	if (*ppos + cnt > total_len)
+		len = total_len - *ppos;
+	else
+		len = cnt;
+
+	read_pid_freq(ap, freq, total_len / sizeof(actc_t));
+	if (copy_to_user(buf, freq + (*ppos / sizeof(actc_t)), len)) {
+		len = -EFAULT;
+		goto out_free;
+	}
+	if (*ppos + cnt <= total_len)
+		*ppos += len;
+out_free:
+	kfree(freq);
+out:
+	if (len < 0) {
+		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
+						     AP_STATE_FREQ);
+	} else {
+		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
+						     AP_STATE_FREQ |
+						     AP_STATE_MIG);
+	}
+	return len;
+}
+
+static const struct proc_ops ap_mem_freq_fops = {
+	.proc_open = mem_freq_open,
+	.proc_release = mem_freq_release,
+	.proc_read = mem_freq_read,
+};
+
+static int create_procfs_freq(struct access_pid *ap)
+{
+	struct proc_dir_entry *freq_pde;
+
+	freq_pde = proc_create_data("mem_freq", S_IRUSR | S_IRGRP,
+				 ap->proc_root, &ap_mem_freq_fops, ap);
+	if (!freq_pde) {
+		pr_err("failed to create proc freq dir for %d\n", ap->pid);
+		return -ENOMEM;
+	}
+	proc_set_user(freq_pde, procfs_kuid, procfs_kgid);
+	ap->proc_freq = freq_pde;
+	return 0;
+}
+
+static bool pid_procfs_exists(pid_t pid)
+{
+	int ret;
+	struct path p;
+	char path[AP_PROCFS_DIR_LEN] = { 0 };
+	ret = snprintf(path, sizeof(path), "/proc/%s/%d", SMAP_PROC_ROOT, pid);
+	if (ret == 0)
+		return false;
+
+	ret = kern_path(path, LOOKUP_DIRECTORY, &p);
+	if (ret == 0) {
+		path_put(&p);
+		return true;
+	}
+	return false;
+}
+
+static int create_procfs(struct access_pid *ap)
+{
+	int ret;
+	char dirname[AP_PROCFS_DIR_LEN] = { 0 };
+	struct proc_dir_entry *root_pde;
+	pid_t pid = ap->pid;
+
+	if (!smap_procfs_root)
+		return -EINVAL;
+
+	ret = snprintf(dirname, sizeof(dirname), "%d", pid);
+	if (ret == 0)
+		return -EINVAL;
+
+	root_pde = proc_mkdir(dirname, smap_procfs_root);
+	if (!root_pde) {
+		if (pid_procfs_exists(pid)) {
+			return 0;
+		}
+		pr_err("failed to create proc dir for %d\n", pid);
+		return -ENOMEM;
+	}
+	proc_set_user(root_pde, procfs_kuid, procfs_kgid);
+	pr_info("procfs root for %d created\n", pid);
+	ap->proc_root = root_pde;
+
+	/* create /proc/smap/<pid>/mem_freq */
+	ret = create_procfs_freq(ap);
+	if (ret != 0) {
+		proc_remove(ap->proc_root);
+		ap->proc_root = NULL;
+		return ret;
+	}
+	return 0;
+}
+
 int init_access_pid(struct access_add_pid_payload *payload,
 		    struct access_pid **elem)
 {
+	int ret;
 	struct access_pid *ap = kzalloc(sizeof(*ap), GFP_KERNEL);
 	if (!ap)
 		return -ENOMEM;
@@ -246,6 +443,11 @@ int init_access_pid(struct access_add_pid_payload *payload,
 			kfree(ap);
 			return -EINVAL;
 		}
+	}
+	ret = create_procfs(ap);
+	if (ret) {
+		kfree(ap);
+		return ret;
 	}
 	*elem = ap;
 	return 0;
@@ -988,59 +1190,6 @@ struct access_pid *find_access_pid(pid_t pid)
 	}
 	up_read(&ap_data.lock);
 	return NULL;
-}
-
-int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
-{
-	int i;
-	u32 index;
-	size_t acidx, bm_len;
-	struct access_pid *ap;
-	struct access_tracking_dev *adev;
-
-	if (!data_len || !data) {
-		pr_err("null data pointer passed to pid frequency read\n");
-		return -EINVAL;
-	}
-
-	ap = find_access_pid(pid);
-	if (!ap) {
-		pr_err("unable to find pid: %d in access pid list\n", pid);
-		return -EINVAL;
-	}
-
-	pr_debug("start writing pid %d freq\n", pid);
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		if (ap->page_num[i] == 0 || !ap->paddr_bm[i] || !data[i]) {
-			continue;
-		}
-		list_for_each_entry(adev, &access_dev, list) {
-			if (adev->node == i) {
-				break;
-			}
-		}
-		if (list_entry_is_head(adev, &access_dev, list)) {
-			continue;
-		}
-		down_read(&adev->buffer_lock);
-		bm_len = BITS_PER_LONG * ap->bm_len[i];
-		for (index = acidx = 0; acidx < bm_len && index < data_len[i];
-		     acidx++) {
-			if (!test_bit(acidx, ap->paddr_bm[i])) {
-				continue;
-			}
-			if (unlikely(acidx >= adev->page_count)) {
-				pr_warn("exceeds total page amount: %llu when lookup access index: %zu on access device: %d\n",
-					adev->page_count, acidx, i);
-				break;
-			}
-			data[i][index++] = adev->access_bit_actc_data[acidx];
-			pr_debug("Node%d acidx %zu index %u\n", i, acidx,
-				 index - 1);
-		}
-		up_read(&adev->buffer_lock);
-	}
-	return 0;
 }
 
 struct absolute_pos {
