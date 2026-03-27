@@ -14,7 +14,11 @@
 #include <stdlib.h>
 #include <linux/kdev_t.h>
 #include <linux/uaccess.h>
+#include <linux/stat.h>
+#include <linux/user_namespace.h>
 #include <uapi/asm-generic/fcntl.h>
+
+extern struct user_namespace init_user_ns;
 
 struct file_system_type {
 	const char *name;
@@ -30,7 +34,7 @@ struct super_block {
 };
 
 struct inode {
-    dev_t			i_rdev;
+	dev_t i_rdev;
 	void *i_private; /* fs or device private pointer */
 	struct super_block *i_sb;
 	struct cdev *i_cdev;

@@ -57,8 +57,8 @@ struct TrakingInfoPayload {
 };
 
 struct UserInfo {
- 	uid_t uid;
- 	gid_t gid;
+    uid_t uid;
+    gid_t gid;
 };
 
 #define SMAP_ACCESS_MAGIC 0xBB
