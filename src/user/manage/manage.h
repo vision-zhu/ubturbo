@@ -329,11 +329,7 @@ struct ProcessMemBitmap {
     pid_t pid;
     size_t nrPages[MAX_NODES];
     size_t len[MAX_NODES];
-    unsigned long *data[MAX_NODES];
-    unsigned long *whiteListBm[MAX_NODES];
     uint32_t vmSize;
-    uint32_t *mapping;
-    uint32_t mappingOffset;
 };
 
 typedef struct {
