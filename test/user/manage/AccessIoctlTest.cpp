@@ -22,16 +22,9 @@ public:
     static constexpr int BITMAP_BUF_LEN_PART2 = 6;
 
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
