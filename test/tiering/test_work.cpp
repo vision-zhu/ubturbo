@@ -30,6 +30,14 @@ protected:
 };
  
 extern "C" int start_migrate_back_work(void);
+TEST_F(WorkTest, StartMigrateBackWork_EmptyList)
+{
+    ASSERT_TRUE(list_empty(&migrate_back_task_list));
+    int ret = start_migrate_back_work();
+    EXPECT_EQ(0, ret);
+    EXPECT_TRUE(list_empty(&migrate_back_task_list));
+}
+
 TEST_F(WorkTest, StartMigrateBackWork)
 {
     int ret;

@@ -27,6 +27,13 @@ protected:
 extern "C" int setup_node_data(int nid, u64 start_pfn, u64 end_pfn);
 extern "C" void teardown_node_data(int nid);
 extern "C" bool is_smap_pg_huge(void);
+TEST_F(NumaTest, GetNodeNrFreePages_NullNode)
+{
+    /* nid with no node_data setup returns 0 */
+    unsigned long ret = get_node_nr_free_pages(MAX_NUMNODES - 1);
+    EXPECT_EQ(0UL, ret);
+}
+
 TEST_F(NumaTest, GetNodeNrFreePages)
 {
     int ret;

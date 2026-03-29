@@ -24,7 +24,7 @@ struct folio *smap_alloc_huge_page_node(struct folio *folio, int nid, bool is_mi
 TEST_F(MigrateWrapperTest, HugepageSuccess)
 {
     struct folio *new_folio = NULL;
-    struct folio *old_folio = (struct folio *)kmalloc(sizeof(struct folio), GFP_KERNEL);
+    struct folio *old_folio = (struct folio *)kmalloc(1, GFP_KERNEL);
     ASSERT_NE(nullptr, old_folio);
 
     new_folio = smap_alloc_huge_page_node(old_folio, 0, false);
@@ -35,7 +35,7 @@ TEST_F(MigrateWrapperTest, HugepageSuccess)
 TEST_F(MigrateWrapperTest, HugepageAllocFail)
 {
     struct folio *new_folio = NULL;
-    struct folio *old_folio = (struct folio *)kmalloc(sizeof(struct folio), GFP_KERNEL);
+    struct folio *old_folio = (struct folio *)kmalloc(1, GFP_KERNEL);
     ASSERT_NE(nullptr, old_folio);
 
     MOCKER(get_hugetlb_folio_nodemask).stubs().will(returnValue((struct folio *)nullptr));

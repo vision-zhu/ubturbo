@@ -62,6 +62,32 @@ TEST_F(MigrateBackDebugfsTest, CreateMigrateDebugfs)
     kfree(taskTmp);
 }
 
+extern "C" int smap_migrate_back_debugfs_open(struct inode *inode, struct file *filp);
+TEST_F(MigrateBackDebugfsTest, DebugfsOpen_SetsPrivateData)
+{
+    struct inode inode;
+    struct file filp;
+    struct migrate_back_task task;
+
+    inode.i_private = &task;
+    filp.private_data = nullptr;
+    int ret = smap_migrate_back_debugfs_open(&inode, &filp);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(&task, filp.private_data);
+}
+
+TEST_F(MigrateBackDebugfsTest, DebugfsOpen_NoPrivateData)
+{
+    struct inode inode;
+    struct file filp;
+
+    inode.i_private = nullptr;
+    filp.private_data = nullptr;
+    int ret = smap_migrate_back_debugfs_open(&inode, &filp);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(nullptr, filp.private_data);
+}
+
 TEST_F(MigrateBackDebugfsTest, RemoveMigrateDebugfs)
 {
     struct migrate_back_task *taskTmp = (struct migrate_back_task *)kmalloc(sizeof(*taskTmp), GFP_KERNEL);

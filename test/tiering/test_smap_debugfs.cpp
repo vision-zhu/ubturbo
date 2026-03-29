@@ -25,15 +25,24 @@ protected:
 extern "C" {
 int smap_debugfs_migrate_init(void);
 void smap_debugfs_mod_exit(void);
+bool IS_ERR(const void *ptr);
+long PTR_ERR(const void *ptr);
 };
+
+TEST_F(TestSmapDebugfs, SmapDebugfsMigrateInitSuccess)
+{
+    MOCKER(IS_ERR).stubs().will(returnValue(false));
+    int ret = smap_debugfs_migrate_init();
+    EXPECT_EQ(0, ret);
+    smap_debugfs_mod_exit();
+}
 
 TEST_F(TestSmapDebugfs, SmapDebugfsMigrateInitDirCreateFailed)
 {
-    int ret = 0;
-    int expectRet = 0;
-
-    ret = smap_debugfs_migrate_init();
-    EXPECT_EQ(expectRet, ret);
+    MOCKER(IS_ERR).stubs().will(returnValue(true));
+    MOCKER(PTR_ERR).stubs().will(returnValue(-ENOMEM));
+    int ret = smap_debugfs_migrate_init();
+    EXPECT_EQ(-ENOMEM, ret);
 }
 
 TEST_F(TestSmapDebugfs, SmapDebugfsModExitSuccess)
