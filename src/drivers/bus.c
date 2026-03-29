@@ -111,7 +111,10 @@ void tracking_driver_unregister(struct tracking_driver *tracking_drv)
 
 static void tracking_dev_release(struct device *dev)
 {
+	struct tracking_dev *trk_dev = to_tracking_dev(dev);
+
 	pr_debug("Releasing device %s\n", dev_name(dev));
+	kfree(trk_dev);
 }
 
 static void init_dev(struct tracking_dev *trk_dev, struct device *dev)
@@ -177,6 +180,7 @@ trk_dev_del:
 ida_remove:
 	ida_simple_remove(&tracking_instance_ida, trk_dev->id);
 	put_device(&trk_dev->tdev);
+	return NULL;
 out:
 	kfree(trk_dev);
 	return NULL;
