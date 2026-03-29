@@ -898,20 +898,38 @@ TEST_F(SmapMigratePagesTest, TestCheckSubtaskRange)
 
 extern "C" struct list_head migrate_back_task_list;
 extern "C" bool is_folio_in_migrate_back_range(struct folio *folio);
-TEST_F(SmapMigratePagesTest, TestIsFolioInMigrateBackRange)
+TEST_F(SmapMigratePagesTest, TestIsFolioInMigrateBackRange_DoneTaskSkipped)
 {
     struct folio folio;
     struct migrate_back_task task;
 
     task.status = MB_TASK_DONE;
+    INIT_LIST_HEAD(&task.subtask);
     EXPECT_EQ(true, list_empty(&migrate_back_task_list));
     list_add(&task.task_node, &migrate_back_task_list);
     bool ret = is_folio_in_migrate_back_range(&folio);
     EXPECT_EQ(false, ret);
+    list_del(&task.task_node);
+    INIT_LIST_HEAD(&migrate_back_task_list);
+}
+
+TEST_F(SmapMigratePagesTest, TestIsFolioInMigrateBackRange_WaitingTaskMatched)
+{
+    struct folio folio;
+    struct migrate_back_task task;
+    struct migrate_back_subtask subtask;
 
     task.status = MB_TASK_WAITING;
-    MOCKER(check_subtask_range).stubs().will(returnValue(true));
-    ret = is_folio_in_migrate_back_range(&folio);
+    INIT_LIST_HEAD(&task.subtask);
+    /* pfn=0, so any range containing 0 matches */
+    subtask.pa_start = 0;
+    subtask.pa_end = 0x1000;
+    INIT_LIST_HEAD(&subtask.task_list);
+    list_add(&subtask.task_list, &task.subtask);
+    EXPECT_EQ(true, list_empty(&migrate_back_task_list));
+    list_add(&task.task_node, &migrate_back_task_list);
+    bool ret = is_folio_in_migrate_back_range(&folio);
     EXPECT_EQ(true, ret);
     list_del(&task.task_node);
+    INIT_LIST_HEAD(&migrate_back_task_list);
 }

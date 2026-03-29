@@ -571,16 +571,16 @@ static void IoctlMigrateE2ETestMock(struct migrate_msg *msg, unsigned int pageSi
     struct mig_list *migList = msg->mig_list;
     struct page page = {0};
     MOCKER(copy_from_user).stubs()
-        .with(outBoundP(static_cast<void*>(msg), sizeof(struct migrate_msg*)))
+        .with(outBoundP(static_cast<void*>(msg), sizeof(struct migrate_msg)))
         .will(returnValue(0UL));
     MOCKER(build_migrate_list).stubs()
-        .with(any(), outBoundP(static_cast<struct mig_list**>(&migList), sizeof(struct mig_list**)))
+        .with(any(), outBoundP(static_cast<struct mig_list**>(&migList), sizeof(struct mig_list*)))
         .will(returnValue(0));
     MOCKER(pfn_to_online_page).stubs().will(returnValue(&page));
     MOCKER(IS_ERR).stubs().will(returnValue(false));
     MOCKER(isolate_and_migrate_folios).stubs()
         .with(any(), any(), any(), any(), any(), any(),
-             outBoundP(static_cast<unsigned int*>(&mockSuccessMig4KPageNrEachMigList), sizeof(unsigned int*)))
+             outBoundP(static_cast<unsigned int*>(&mockSuccessMig4KPageNrEachMigList), sizeof(unsigned int)))
         .will(returnValue(0));
     MOCKER(copy_to_user).stubs()
         .will(returnValue(0UL));
@@ -616,6 +616,7 @@ TEST_F(MigInitTest, __IoctlMigrateE2ETest)
     msg.mig_list = migList;
     msg.mul_mig.page_size = TWO_MEGA_SIZE;
     msg.mul_mig.is_mul_thread = false;
+    g_pagesize_huge = TWO_MEGA_SIZE;
 
     // 10 huge page can migrate, 5120 page migrate success
     IoctlMigrateE2ETestMock(&msg, HUGE_PAGE, 5120, 10);
