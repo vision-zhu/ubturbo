@@ -60,7 +60,7 @@ struct num_node {
 
 extern u32 g_pagesize_huge;
 
-struct multi_migrate_struct {
+struct multi_migrate_ctx {
 	ktime_t start_time;
 	ktime_t end_time;
 	unsigned int nr_folios;
@@ -72,7 +72,7 @@ struct multi_migrate_struct {
 	struct folio **folios;
 	struct task_struct *ts;
 };
-static struct multi_migrate_struct mig[MAX_NR_MIGRATE_THREADS];
+static struct multi_migrate_ctx mig[MAX_NR_MIGRATE_THREADS];
 
 static struct migrate_node {
 	int next_nid;
@@ -145,7 +145,7 @@ static int thread_fn(void *data)
 {
 	int ret;
 	unsigned int nr_succeeded = 0;
-	struct multi_migrate_struct *ms = data;
+	struct multi_migrate_ctx *ms = data;
 	ms->start_time = ktime_get();
 	ms->end_time = 0;
 	ktime_t mig_time;
