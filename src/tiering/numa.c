@@ -16,6 +16,10 @@ unsigned long get_node_nr_free_pages(int nid)
 	int i;
 	unsigned long count = 0;
 
+	if (nid < 0 || nid >= nr_node_ids) {
+		pr_err("invalid NUMA node id %d\n", nid);
+		return 0;
+	}
 	pgdat = NODE_DATA(nid);
 	if (!pgdat) {
 		return 0;
