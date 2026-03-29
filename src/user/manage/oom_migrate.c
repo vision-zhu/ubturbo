@@ -27,6 +27,9 @@ static void OomGetPaddr(uint64_t entry, struct MigList *mList, uint64_t *pageCou
         if (IsHugeMode() && !IsHugeAligned(physAddr)) {
             return;
         }
+        if (mList->nr == 0) {
+            return;
+        }
         mList->nr -= 1;
         mList->addr[mList->nr] = physAddr;
         *pageCount = *pageCount - 1;
