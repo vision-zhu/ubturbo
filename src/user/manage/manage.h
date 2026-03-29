@@ -25,8 +25,6 @@
 #define MAX_2M_PROCESSES_CNT 100
 #define MAX_THREADS 10
 #define MAX_RES_LEN 4
-#define PAGE_SHIFT 12
-#define PAGE_SIZE (1UL << PAGE_SHIFT)
 #define DEFAULT_FD (-1)
 
 #define RSS_LINE_PREFIX "Rss:"

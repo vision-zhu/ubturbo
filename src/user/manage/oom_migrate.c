@@ -11,6 +11,7 @@
  */
 
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "smap_user_log.h"
 #include "strategy/migration.h"
@@ -23,7 +24,7 @@ static void OomGetPaddr(uint64_t entry, struct MigList *mList, uint64_t *pageCou
     int ret;
     if (entry & PRESENT) {
         uint64_t physPageNum = entry & PRN_SHIFT;
-        uint64_t physAddr = physPageNum * PAGE_SIZE;
+        uint64_t physAddr = physPageNum * (uint64_t)sysconf(_SC_PAGESIZE);
         if (IsHugeMode() && !IsHugeAligned(physAddr)) {
             return;
         }
@@ -40,7 +41,7 @@ static void OomGetPaddr(uint64_t entry, struct MigList *mList, uint64_t *pageCou
 static int GetPaddrFromMemRange(int pagemapFd, unsigned long start, unsigned long end, struct MigList *mList,
                                 uint64_t *pageCount)
 {
-    int pageSize = PAGE_SIZE;
+    long pageSize = sysconf(_SC_PAGESIZE);
     for (unsigned long vaddr = start; vaddr < end; vaddr += pageSize) {
         off_t offset = (vaddr / pageSize) * PAGEMAP_ENTRY_SIZE;
         if (lseek(pagemapFd, offset, SEEK_SET) == (off_t)-1) {
