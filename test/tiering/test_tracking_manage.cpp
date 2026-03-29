@@ -20,16 +20,9 @@ extern "C" int node_modes[SMAP_MAX_NUMNODES];
 
 class TrackingManageTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

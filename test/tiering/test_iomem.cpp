@@ -31,16 +31,10 @@ extern struct ram_info iomem;
 
 class IomemTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
         struct ram_segment *seg;
         struct ram_segment *tmp;
-        cout << "[Phase TearDown Begin]" << endl;
         if (!list_empty(&iomem.sys_rams)) {
             list_for_each_entry_safe(seg, tmp, &iomem.sys_rams, node) {
                 list_del(&seg->node);
@@ -54,7 +48,6 @@ protected:
             }
         }
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

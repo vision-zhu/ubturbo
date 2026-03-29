@@ -31,16 +31,9 @@ extern "C" int (*fp_migrate_pages)(struct list_head *from, new_page_t get_new_pa
 
 class SmapMigrateWrapperTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

@@ -18,16 +18,12 @@ class HamTasksMgrTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[Phase SetUp Begin]" << endl;
         init_task_list();
-        cout << "[Phase SetUp End]" << endl;
     }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         release_all_tasks();
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

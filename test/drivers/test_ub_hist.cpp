@@ -50,7 +50,6 @@ class DriversUbHistMidTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[Phase SetUp Begin]==============================" << endl;
         MOCKER(ub_hist_ba_init).stubs().will(returnValue(0));
         ub_hist_init(PLATFORM_EVB_TWO_SOCKETS);
         for (int i = 0; i < DEFAULT_NUMA_NODE; i++) {
@@ -62,11 +61,9 @@ protected:
             ub_hist_probe(pdev[i]);
         }
         smap_hist_mid_init();
-        cout << "[Phase SetUp End]" << endl;
     }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         smap_hist_mid_exit();
         for (int i = 0; i < DEFAULT_NUMA_NODE; i++) {
             ub_hist_remove(pdev[i]);
@@ -76,7 +73,6 @@ protected:
             }
         }
         ub_hist_exit();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

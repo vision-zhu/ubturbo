@@ -77,14 +77,8 @@ struct num_node {
 
 class SmapMigratePagesTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         struct acpi_mem_segment *mem;
         struct acpi_mem_segment *ams_tmp;
         list_for_each_entry_safe(mem, ams_tmp, &acpi_mem.mem, segment) {
@@ -93,7 +87,6 @@ protected:
         }
         acpi_mem.len = 0;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

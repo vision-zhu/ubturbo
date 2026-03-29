@@ -17,22 +17,15 @@ using namespace std;
  
 class WorkTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
         struct migrate_back_task *t;
         struct migrate_back_task *tmp;
-        cout << "[Phase TearDown Begin]" << endl;
         list_for_each_entry_safe(t, tmp, &migrate_back_task_list, task_node) {
             list_del(&t->task_node);
             kfree(t);
         }
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
  

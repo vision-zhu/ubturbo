@@ -84,16 +84,12 @@ class DriversCoreTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[Phase SetUp Begin]" << endl;
         GlobalManager::getInstance().init_core();
-        cout << "[Phase SetUp End]" << endl;
     }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalManager::getInstance().exit_core();
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

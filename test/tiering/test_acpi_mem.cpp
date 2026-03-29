@@ -26,22 +26,18 @@ class AcpiMemTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
         InitACPIMemTest();
     }
     void TearDown() override
     {
         struct acpi_mem_segment *mem;
         struct acpi_mem_segment *ams_tmp;
-        cout << "[Phase TearDown Begin]" << endl;
         list_for_each_entry_safe(mem, ams_tmp, &acpi_mem.mem, segment) {
             list_del(&mem->segment);
             kfree(mem);
         }
         acpi_mem.len = 0;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
