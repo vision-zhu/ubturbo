@@ -22,16 +22,9 @@ using namespace std;
 
 class PidIoctlTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
@@ -73,51 +66,66 @@ extern "C" int init_migrate_back_subtask(struct migrate_back_task *task,
     struct migrate_back_inner_payload *p,
     struct migrate_back_subtask **result);
 extern "C" int start_migrate_back_work(void);
-TEST_F(PidIoctlTest, SmapIoctlMigrateBack)
+
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_ZeroCount)
 {
-    int ret;
     struct migrate_back_msg mb_msg = { 1, 0, { { 2, 0 } } };
-    struct migrate_back_task task = {
-        .subtask = LIST_HEAD_INIT(task.subtask)
-    };
-    struct migrate_back_subtask *subtask;
-
-    ret = smap_ioctl_migrate_back(&mb_msg);
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_EQ(0, ret);
+}
 
-    mb_msg.count = 1;
-    MOCKER(init_migrate_back_task).stubs().will(returnValue((struct migrate_back_task*)NULL));
-    ret = smap_ioctl_migrate_back(&mb_msg);
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_TaskAllocFail)
+{
+    struct migrate_back_msg mb_msg = { 1, 1, { { 2, 0 } } };
+    MOCKER(init_migrate_back_task).stubs().will(returnValue((struct migrate_back_task *)NULL));
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_EQ(-ENOMEM, ret);
+}
 
-    GlobalMockObject::verify();
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_DupId)
+{
+    struct migrate_back_msg mb_msg = { 1, 1, { { 2, 0 } } };
+    struct migrate_back_task task = { .subtask = LIST_HEAD_INIT(task.subtask) };
     MOCKER(init_migrate_back_task).stubs().will(returnValue(&task));
     MOCKER(dup_task).stubs().will(returnValue((int)DUP_ID));
     MOCKER(kfree).stubs().will(ignoreReturnValue());
-    ret = smap_ioctl_migrate_back(&mb_msg);
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_EQ(-EINVAL, ret);
+}
 
-    GlobalMockObject::verify();
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_RetryId)
+{
+    struct migrate_back_msg mb_msg = { 1, 1, { { 2, 0 } } };
+    struct migrate_back_task task = { .subtask = LIST_HEAD_INIT(task.subtask) };
     MOCKER(init_migrate_back_task).stubs().will(returnValue(&task));
     MOCKER(dup_task).stubs().will(returnValue((int)RETRY_ID));
     MOCKER(kfree).stubs().will(ignoreReturnValue());
-    ret = smap_ioctl_migrate_back(&mb_msg);
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_EQ(0, ret);
+}
 
-    GlobalMockObject::verify();
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_SubtaskAllocFail)
+{
+    struct migrate_back_msg mb_msg = { 1, 1, { { 2, 0 } } };
+    struct migrate_back_task task = { .subtask = LIST_HEAD_INIT(task.subtask) };
+    ASSERT_TRUE(list_empty(&migrate_back_task_list));
     MOCKER(init_migrate_back_task).stubs().will(returnValue(&task));
     MOCKER(dup_task).stubs().will(returnValue((int)NORMAL_ID));
-    ASSERT_TRUE(list_empty(&migrate_back_task_list));
     MOCKER(init_migrate_back_subtask).stubs().will(returnValue(-EPERM));
     MOCKER(kfree).stubs().will(ignoreReturnValue());
-    ret = smap_ioctl_migrate_back(&mb_msg);
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_TRUE(list_empty(&migrate_back_task_list));
     EXPECT_EQ(-EPERM, ret);
+}
 
-    GlobalMockObject::verify();
+TEST_F(PidIoctlTest, SmapIoctlMigrateBack_StartWorkFail)
+{
+    struct migrate_back_msg mb_msg = { 1, 1, { { 2, 0 } } };
+    struct migrate_back_task task = { .subtask = LIST_HEAD_INIT(task.subtask) };
+    struct migrate_back_subtask *subtask;
+    ASSERT_TRUE(list_empty(&migrate_back_task_list));
     MOCKER(init_migrate_back_task).stubs().will(returnValue(&task));
     MOCKER(dup_task).stubs().will(returnValue((int)NORMAL_ID));
-    ASSERT_TRUE(list_empty(&migrate_back_task_list));
     subtask = (struct migrate_back_subtask *)kmalloc(sizeof(*subtask), GFP_KERNEL);
     ASSERT_NE(nullptr, subtask);
     MOCKER(init_migrate_back_subtask)
@@ -125,18 +133,15 @@ TEST_F(PidIoctlTest, SmapIoctlMigrateBack)
         .with(any(), any(), outBoundP(&subtask, sizeof(subtask)))
         .will(returnValue(0));
     MOCKER(start_migrate_back_work).stubs().will(returnValue(-ENOENT));
-    ret = smap_ioctl_migrate_back(&mb_msg);
+    int ret = smap_ioctl_migrate_back(&mb_msg);
     EXPECT_FALSE(list_empty(&migrate_back_task_list));
     EXPECT_FALSE(list_empty(&task.subtask));
     EXPECT_EQ(1, task.subtask_cnt);
     EXPECT_EQ(-ENOENT, ret);
 
-    // post-test
     list_del(&subtask->task_list);
-    ASSERT_TRUE(list_empty(&task.subtask));
     kfree(subtask);
     list_del(&task.task_node);
-    ASSERT_TRUE(list_empty(&migrate_back_task_list));
 }
 
 extern "C" int smap_open(struct inode *inode, struct file *file);

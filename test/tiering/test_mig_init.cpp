@@ -30,16 +30,9 @@ using namespace std;
 
 class MigInitTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
@@ -65,21 +58,32 @@ TEST_F(MigInitTest, FreeMigrateList)
 }
 
 extern "C" int create_migrate_list(struct migrate_msg *msg, struct mig_list **mlist);
-TEST_F(MigInitTest, CreateMigrateList)
+
+TEST_F(MigInitTest, CreateMigrateList_Success)
 {
     struct mig_list *mlist;
     struct migrate_msg msg;
     msg.cnt = 1;
     msg.mig_list = (struct mig_list *)malloc(sizeof(struct mig_list));
+    ASSERT_NE(nullptr, msg.mig_list);
 
     MOCKER(copy_from_user).stubs().will(returnValue(0UL));
     int ret = create_migrate_list(&msg, &mlist);
     EXPECT_EQ(0, ret);
     free_migrate_list(&mlist);
+    free(msg.mig_list);
+}
 
-    GlobalMockObject::verify();
+TEST_F(MigInitTest, CreateMigrateList_CopyFail)
+{
+    struct mig_list *mlist;
+    struct migrate_msg msg;
+    msg.cnt = 1;
+    msg.mig_list = (struct mig_list *)malloc(sizeof(struct mig_list));
+    ASSERT_NE(nullptr, msg.mig_list);
+
     MOCKER(copy_from_user).stubs().will(returnValue(1UL));
-    ret = create_migrate_list(&msg, &mlist);
+    int ret = create_migrate_list(&msg, &mlist);
     EXPECT_EQ(-EFAULT, ret);
     free(msg.mig_list);
 }
@@ -222,7 +226,7 @@ TEST_F(MigInitTest, convertMigrateListTest)
     struct mig_list mlist;
     mlist.nr = len;
     mlist.addr = addr;
-    // generate random addresses with fixed seed
+    // generate random addresses with a fixed seed for reproducibility
     mt19937_64 gen(1234);
     uniform_int_distribution<u64> dist(0x1000, 0xFFFFF);
     for (int i = 0; i < len; ++i) {
@@ -232,7 +236,7 @@ TEST_F(MigInitTest, convertMigrateListTest)
     int ret = convert_migrate_list(1, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 
-    // check whether addr sorted
+    // verify that addresses are sorted after conversion
     ret = convert_migrate_list(1, &mlist);
     EXPECT_EQ(0, ret);
     for (int i = 1; i < len; ++i) {
