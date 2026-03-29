@@ -277,7 +277,7 @@ TEST_F(DeviceTest, TestSetNrLocalNumaOpenDirFailed)
 TEST_F(DeviceTest, TestSetNrLocalNumaNoNodeDir)
 {
     int ret;
-    DIR *dirp;
+    DIR *dirp = (DIR *)1;
     struct ProcessManager manager = { .nrLocalNuma = 99 };
 
     MOCKER(static_cast<DIR *(*)(const char *)>(opendir)).stubs().will(returnValue(dirp));
@@ -293,7 +293,7 @@ TEST_F(DeviceTest, TestSetNrLocalNumaNoNodeDir)
 TEST_F(DeviceTest, TestSetNrLocalNumaFourNode)
 {
     int ret;
-    DIR *dirp;
+    DIR *dirp = (DIR *)1;
     struct dirent entry1 = { .d_name = { "node0" } };
     struct dirent entry2 = { .d_name = { "node3" } };
     struct ProcessManager manager = { .nrLocalNuma = 99 };
@@ -314,7 +314,7 @@ TEST_F(DeviceTest, TestSetNrLocalNumaFourNode)
 TEST_F(DeviceTest, TestSetNrLocalNumaFourNodeReversed)
 {
     int ret;
-    DIR *dirp;
+    DIR *dirp = (DIR *)1;
     struct dirent entry1 = { .d_name = { "node3" } };
     struct dirent entry2 = { .d_name = { "node0" } };
     struct ProcessManager manager = { .nrLocalNuma = 99 };
@@ -335,7 +335,7 @@ TEST_F(DeviceTest, TestSetNrLocalNumaFourNodeReversed)
 TEST_F(DeviceTest, TestSetNrLocalNumaFiveNode)
 {
     int ret;
-    DIR *dirp;
+    DIR *dirp = (DIR *)1;
     struct dirent entry1 = { .d_name = { "node0" } };
     struct dirent entry2 = { .d_name = { "node1" } };
     struct dirent entry3 = { .d_name = { "node2" } };
@@ -366,7 +366,7 @@ TEST_F(DeviceTest, TestSetNrLocalNumaFiveNode)
 TEST_F(DeviceTest, TestSetNrLocalNumaTwoNode)
 {
     int ret;
-    DIR *dirp;
+    DIR *dirp = (DIR *)1;
     struct dirent entry1 = { .d_name = { "node0" } };
     struct dirent entry2 = { .d_name = { "node1" } };
     struct dirent entry3 = { .d_name = { "node2" } };

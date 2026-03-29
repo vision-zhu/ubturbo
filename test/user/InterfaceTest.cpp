@@ -869,9 +869,13 @@ extern "C" int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payl
 TEST_F(InterfaceTest, TestSmapRemoveWithoutAccessIoctlRemoveFailed)
 {
     struct RemoveMsg msg = {};
+    ProcessManager manager;
+    EnvMutexInit(&manager.lock);
     msg.count = 1;
     msg.payload[0].pid = 1024;
     MOCKER(CheckSmapRemoveMsg).stubs().will(returnValue(0));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetProcessAttrLocked).stubs().will(returnValue((ProcessAttr *)nullptr));
     MOCKER(AccessIoctlRemovePid).stubs().will(returnValue(-ENOMEM));
     EnvAtomicSet(&g_status, 1);
     int ret = ubturbo_smap_remove(&msg, 0);
@@ -881,12 +885,15 @@ TEST_F(InterfaceTest, TestSmapRemoveWithoutAccessIoctlRemoveFailed)
 TEST_F(InterfaceTest, TestSmapRemove)
 {
     int ret;
-    struct RemoveMsg msg;
+    struct RemoveMsg msg = {};
+    ProcessManager manager;
+    EnvMutexInit(&manager.lock);
 
     EnvAtomicSet(&g_status, 1);
     MOCKER(CheckSmapRemoveMsg).stubs().will(returnValue(0));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetProcessAttrLocked).stubs().will(returnValue((ProcessAttr *)nullptr));
     MOCKER(AccessIoctlRemovePid).stubs().will(returnValue(0));
-    MOCKER(RemoveManagedProcess).stubs().will(ignoreReturnValue());
     ret = ubturbo_smap_remove(&msg, 0);
     EXPECT_EQ(0, ret);
 }
