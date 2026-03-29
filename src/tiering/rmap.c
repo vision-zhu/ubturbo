@@ -55,21 +55,27 @@ static bool page_task_one(struct folio *folio, struct vm_area_struct *vma,
 
 	rcu_read_lock();
 	task = vma->vm_mm->owner;
-	rcu_read_unlock();
-	if (!task)
+	if (!task) {
+		rcu_read_unlock();
 		return true;
+	}
+	get_task_struct(task);
+	rcu_read_unlock();
 
 	if (pta->type == PAGE_PID_TYPE) {
 		if (pta->pid == task->pid) {
 			pta->found = true;
+			put_task_struct(task);
 			return false;
 		}
+		put_task_struct(task);
 		return true;
 	}
 
 	pta->found = true;
 	pta->node = cpu_to_node(cpumask_first(&task->cpus_mask));
 	pta->nr_cpus_allowed = task->nr_cpus_allowed;
+	put_task_struct(task);
 
 	return false;
 }
