@@ -134,4 +134,7 @@ enum platform_type {
 	PLATFORM_EVB_TWO_SOCKETS = 3,
 };
 
+int ub_hist_init(enum platform_type platform);
+void ub_hist_exit(void);
+
 #endif
