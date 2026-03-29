@@ -46,7 +46,7 @@ inline bool ubturbo_smap_is_running(void)
     return EnvAtomicRead(&g_status) == RUNNING;
 }
 
-static int IoctlHandler(const void *msg)
+static int DoMigrateBackIoctl(const void *msg)
 {
     int fd = open(SMAP_DEVICE, O_RDWR);
     if (fd < 0) {
@@ -730,7 +730,7 @@ int ubturbo_smap_migrate_back(struct MigrateBackMsg *msg)
         }
     }
     SMAP_LOGGER_INFO("migrateback start.");
-    ret = IoctlHandler(msg);
+    ret = DoMigrateBackIoctl(msg);
     SMAP_LOGGER_INFO("migrateback result: %d.", ret);
     if (ret != 0) {
         // recover forbidden info
