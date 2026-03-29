@@ -28,7 +28,11 @@
 #define MAX_4K_MIGMSG_CNT (MAX_4K_PROCESSES_CNT * MAX_PER_PID_MIG_LIST_COUNT)
 
 #define SMAP_MAX_LOCAL_NUMNODES 4
-#define SMAP_MAX_NUMNODES 22
+/* Use nr_node_ids (kernel runtime value) instead of a hardcoded constant
+ * to avoid passing a node id that is >= nr_node_ids but < SMAP_MAX_NUMNODES
+ * into NODE_DATA(), which would access beyond node_data[].
+ */
+#define SMAP_MAX_NUMNODES nr_node_ids
 
 extern u32 g_pagesize_huge;
 
