@@ -28,6 +28,7 @@
 #define QEMU_SYSTEM_URI "qemu:///system"
 #define LIB_PATH "libvirt.so.0"
 
+static EnvMutex g_virHandlerLock = { .lock = PTHREAD_MUTEX_INITIALIZER };
 void *g_virtHandler = NULL;
 virConnectPtr (*g_virConnectOpen)(const char *name);
 int (*g_virConnectClose)(virConnectPtr conn);
@@ -170,66 +171,81 @@ int OpenVirConn(virConnectPtr *virConn)
 
 void CloseVirHandler(void)
 {
+    EnvMutexLock(&g_virHandlerLock);
     if (g_virtHandler) {
         dlclose(g_virtHandler);
         g_virtHandler = NULL;
         SMAP_LOGGER_DEBUG("CloseVirHandler.");
     }
+    EnvMutexUnlock(&g_virHandlerLock);
 }
 
 int OpenVirHandler(void)
 {
+    EnvMutexLock(&g_virHandlerLock);
     if (g_virtHandler) {
         SMAP_LOGGER_INFO("g_virtHandler already exists.");
+        EnvMutexUnlock(&g_virHandlerLock);
         return 0;
     }
     SMAP_LOGGER_DEBUG("OpenVirHandler.");
+    int ret = 0;
     g_virtHandler = dlopen(LIB_PATH, RTLD_LAZY);
     if (!g_virtHandler) {
         SMAP_LOGGER_ERROR("dlopen libvirt.so error %s.", dlerror());
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virConnectOpen = dlsym(g_virtHandler, "virConnectOpen");
     if (!g_virConnectOpen) {
         SMAP_LOGGER_ERROR("get symbol virConnectOpen error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virConnectClose = dlsym(g_virtHandler, "virConnectClose");
     if (!g_virConnectClose) {
         SMAP_LOGGER_ERROR("get symbol virConnectClose error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virConnectIsAlive = dlsym(g_virtHandler, "virConnectIsAlive");
     if (!g_virConnectIsAlive) {
         SMAP_LOGGER_ERROR("get symbol virConnectIsAlive error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virDomainLookupByID = dlsym(g_virtHandler, "virDomainLookupByID");
     if (!g_virDomainLookupByID) {
         SMAP_LOGGER_ERROR("get symbol virDomainLookupByID error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virDomainGetInfo = dlsym(g_virtHandler, "virDomainGetInfo");
     if (!g_virDomainGetInfo) {
         SMAP_LOGGER_ERROR("get symbol virDomainGetInfo error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virDomainFree = dlsym(g_virtHandler, "virDomainFree");
     if (!g_virDomainFree) {
         SMAP_LOGGER_ERROR("get symbol virDomainFree error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virDomainGetVcpus = dlsym(g_virtHandler, "virDomainGetVcpus");
     if (!g_virDomainGetVcpus) {
         SMAP_LOGGER_ERROR("get symbol virDomainGetVcpus error.");
-        return -ENOENT;
+        ret = -ENOENT;
+        goto out;
     }
     g_virDomainGetXMLDesc = dlsym(g_virtHandler, "virDomainGetXMLDesc");
     if (!g_virDomainGetXMLDesc) {
         SMAP_LOGGER_ERROR("get symbol virDomainGetXMLDesc error.");
-        return -ENOENT;
+        ret = -ENOENT;
     }
-    return 0;
+out:
+    EnvMutexUnlock(&g_virHandlerLock);
+    return ret;
 }
 
 char *GetXMLByDomainId(int domainId)
