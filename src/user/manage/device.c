@@ -11,7 +11,6 @@
  */
 #include <dirent.h>
 #include <fcntl.h>
-#include <dirent.h>
 #include <errno.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
