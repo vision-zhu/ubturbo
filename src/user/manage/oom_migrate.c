@@ -256,7 +256,9 @@ void FindPidMigrateSize(uint64_t size)
         current = current->next;
     }
     SMAP_LOGGER_INFO("mMsg.cnt = %d , pageCount = %llu.", mMsg.cnt, pageCount);
+    EnvMutexUnlock(&manager->lock);
     ret = DoMigration(&mMsg, manager);
+    EnvMutexLock(&manager->lock);
     UpdateMigResult(&mMsg, manager);
     EnvMutexUnlock(&manager->lock);
     free(mMsg.migList);
