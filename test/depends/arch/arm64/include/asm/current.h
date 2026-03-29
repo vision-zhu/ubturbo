@@ -10,11 +10,7 @@ struct task_struct;
 
 static struct task_struct *get_current(void)
 {
-	unsigned long depends_sp_el0;
-
-	asm ("mrs %0, sp_el0" : "=r" (depends_sp_el0));
-
-	return (struct task_struct *)depends_sp_el0;
+	return (struct task_struct *)0;
 }
 
 #define current get_current()

@@ -29,7 +29,6 @@ struct page {
 };
 
 
-#if LINUX_VERSION_CODE == KERNEL_VERSION(6, 6, 0)
 struct folio {
     union {
         struct {
@@ -60,16 +59,6 @@ struct mm_struct {
 	struct rw_semaphore mmap_lock;
 };
 
-#else
-struct mm_struct {
-	struct {
-		struct vm_area_struct *mmap;
-	};
-    spinlock_t page_table_lock;
-	struct rw_semaphore mmap_lock;
-};
-
-#endif
 
 struct vm_area_struct {
 	struct vm_area_struct *vm_prev;

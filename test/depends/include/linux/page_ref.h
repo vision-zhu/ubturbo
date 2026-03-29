@@ -11,7 +11,7 @@ static inline int page_ref_count(const struct page *page)
 
 static inline int folio_ref_count(const struct folio *folio)
 {
-	return page_ref_count(&folio->page);
+	return 0;
 }
 
 static inline int page_count(struct page *page)
