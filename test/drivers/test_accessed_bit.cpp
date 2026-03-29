@@ -45,6 +45,7 @@ struct smap_vma_struct {
 extern "C" unsigned long huge_page_size(struct hstate *h);
 extern "C" int get_numa_range(int nid, u64 *pa_start, u64 *pa_end);
 extern "C" struct mem_info acpi_mem;
+extern "C" u32 g_pagesize_huge;
 ;
 
 class AccessedBitTest : public ::testing::Test {
@@ -318,6 +319,7 @@ TEST_F(AccessedBitTest, hva_to_hpa_hugetlb_three)
     int ret;
     struct kvm kvm = { .mm = NULL };
     pte_t pte = { .pte = 0 };
+    g_pagesize_huge = PAGE_SIZE_2M;
 
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
     MOCKER(huge_pte_offset).stubs().will(returnValue((pte_t *)nullptr));
@@ -338,6 +340,7 @@ TEST_F(AccessedBitTest, hva_to_hpa_hugetlb_success)
     int ret;
     struct kvm kvm = { .mm = NULL };
     pte_t pte = { .pte = 1 };
+    g_pagesize_huge = PAGE_SIZE_2M;
 
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
     MOCKER(huge_pte_offset).stubs().will(returnValue(&pte));
@@ -522,6 +525,7 @@ TEST_F(AccessedBitTest, scanKvmMemslotsTest)
 
 TEST_F(AccessedBitTest, hva_to_hpa_ham)
 {
+    g_pagesize_huge = PAGE_SIZE_2M;
     int ret = hva_to_hpa_ham(nullptr, 0, 0);
     EXPECT_EQ(-EINVAL, ret);
 

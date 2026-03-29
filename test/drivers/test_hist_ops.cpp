@@ -214,29 +214,40 @@ TEST_F(HistOpsTest, align_segments)
     struct addr_seg *seg = (struct addr_seg *)malloc(sizeof(struct addr_seg));
     seg[0].start = 0x1000;
     seg[0].size = 0x1000;
-    MOCKER(count_nr_windows).stubs().will(returnValue(0));
-    MOCKER(align_addr).stubs().will(returnValue((u64)0));
     align_segments(seg, 1, STS_SIZE_2M);
-    EXPECT_EQ(0, seg[0].size);
+    /* With start=0x1000 and size=0x1000, count_nr_windows returns 1 window.
+     * align_segments sets size = SIZE_16G * 1 and start = aligned address. */
+    EXPECT_EQ((u64)SIZE_16G, seg[0].size);
+    EXPECT_EQ(0ULL, seg[0].start);
     free(seg);
 }
 
 extern "C" int merge_segments(struct addr_seg *segs, int cnt);
-TEST_F(HistOpsTest, merge_segments)
+TEST_F(HistOpsTest, merge_segments_continuous)
 {
     int ret;
     int cnt = 2;
     struct addr_seg *seg = (struct addr_seg *)malloc(sizeof(struct addr_seg) * cnt);
-    for (int i = 0; i < cnt; i++) {
-        seg[i].start = i * 0x1000;
-        seg[i].size = 0x1000;
-    }
-    MOCKER(addr_seg_is_continuous_16g).stubs().will(returnValue(true));
+    /* Adjacent segments — seg[1].start == seg_end(seg[0]), so gap = 0 <= SIZE_16G */
+    seg[0].start = 0;
+    seg[0].size = SIZE_16G;
+    seg[1].start = SIZE_16G;
+    seg[1].size = SIZE_16G;
     ret = merge_segments(seg, cnt);
     EXPECT_EQ(1, ret);
+    free(seg);
+}
 
-    GlobalMockObject::verify();
-    MOCKER(addr_seg_is_continuous_16g).stubs().will(returnValue(false));
+TEST_F(HistOpsTest, merge_segments_non_continuous)
+{
+    int ret;
+    int cnt = 2;
+    struct addr_seg *seg = (struct addr_seg *)malloc(sizeof(struct addr_seg) * cnt);
+    /* Gap > SIZE_16G: seg[1].start - seg_end(seg[0]) > SIZE_16G */
+    seg[0].start = 0;
+    seg[0].size = SIZE_16G;
+    seg[1].start = SIZE_16G * 3;
+    seg[1].size = SIZE_16G;
     ret = merge_segments(seg, cnt);
     EXPECT_EQ(2, ret);
     free(seg);

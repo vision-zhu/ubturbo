@@ -375,6 +375,7 @@ TEST_F(AccessIoctlTestKernel, IoctlAddPidThree)
 }
 
 extern "C" long ioctl_remove_pid(void __user *argp);
+extern "C" void access_remove_statistic_pid(int len, struct access_remove_pid_payload *payload);
 TEST_F(AccessIoctlTestKernel, IoctlRemovePid)
 {
     int ret = 0;
@@ -396,16 +397,15 @@ TEST_F(AccessIoctlTestKernel, IoctlRemovePid)
 
 TEST_F(AccessIoctlTestKernel, IoctlRemovePidTwo)
 {
+    struct access_remove_pid_payload payload_data = {.pid = 1};
     struct access_remove_pid_msg msg;
     msg.count = 1;
-    msg.payload[0].pid = 1;
-    MOCKER(copy_from_user)
-        .stubs()
-        .with(outBoundP((void*)&msg, sizeof(msg)))
-        .will(returnValue(0UL));
+    msg.payload = &payload_data;
+    /* Use real copy_from_user (memcpy stub) so ioctl_remove_pid gets valid msg */
     MOCKER(access_remove_pid).stubs();
     MOCKER(access_remove_ham_pid).stubs();
-    int ret = ioctl_remove_pid(NULL);
+    MOCKER(access_remove_statistic_pid).stubs();
+    int ret = ioctl_remove_pid(&msg);
     EXPECT_EQ(0, ret);
 }
 

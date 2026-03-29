@@ -34,6 +34,8 @@ TEST_F(AccessIomemTest, free_remote_ram)
     LIST_HEAD(head);
     struct ram_segment seg1;
     struct ram_segment seg2;
+    list_add(&seg1.node, &head);
+    list_add(&seg2.node, &head);
 
     MOCKER(kfree).expects(exactly(2)).will(ignoreReturnValue());
     drivers_free_remote_ram(&head);
