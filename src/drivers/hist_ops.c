@@ -792,8 +792,9 @@ static int scan_thread_run(void *data)
 static int scan_thread_init(struct smap_hist_dev *dev)
 {
 	dev->kthread = kthread_run(scan_thread_run, NULL, "hist-scan-thread");
-	if (!dev->kthread) {
+	if (IS_ERR(dev->kthread)) {
 		pr_err("failed to create scan threads\n");
+		dev->kthread = NULL;
 		return -ECHILD;
 	}
 
