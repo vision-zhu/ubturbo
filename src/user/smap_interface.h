@@ -33,7 +33,6 @@ extern "C" {
 #define MIN_WAIT_TIME (10 * 1000)
 #define MAX_SCAN_TIME 2000
 #define MIN_SCAN_TIME 50
-#define DEFAULT_L2_NODE (-1)
 #define KB_PER_2MB 2048
 #define MAX_SCAN_DURATION_SEC 300
 #define NON_EXIST_PID (-1)

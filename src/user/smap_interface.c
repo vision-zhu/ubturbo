@@ -16,7 +16,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include "securec.h"
