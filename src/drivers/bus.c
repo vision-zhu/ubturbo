@@ -17,6 +17,7 @@
 
 static DEFINE_IDA(tracking_instance_ida);
 static DEFINE_MUTEX(tracking_bus_lock);
+static int match_always_count;
 static int tracking_bus_probe(struct device *dev);
 static void tracking_bus_remove(struct device *dev);
 static int tracking_bus_match(struct device *dev, struct device_driver *drv);
