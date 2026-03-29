@@ -410,6 +410,7 @@ static int find_node_to_migrate_rr(int nid, int *out_nid)
 static int smap_add_page_for_migrate_back(u64 pa,
 					  struct folio ***migrate_folios,
 					  unsigned int *mig_pages_cnt,
+					  unsigned long max_nr_folios,
 					  int dest_nid, bool migrate_all)
 {
 	int ret;
@@ -467,6 +468,11 @@ static int smap_add_page_for_migrate_back(u64 pa,
 		       nid);
 		return -EINVAL;
 	}
+	if (mig_pages_cnt[nid] >= max_nr_folios) {
+		pr_err("migrate folio list full for node %d (max %lu)\n", nid,
+		       max_nr_folios);
+		return -ENOSPC;
+	}
 	if (!folio_try_get(page_folio(page))) {
 		pr_debug("unable to add folio reference\n");
 		return -EINVAL;
@@ -512,6 +518,12 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 	s64 delta_time_ms;
 #endif
 
+	if (task->pa_end <= task->pa_start) {
+		pr_err("invalid address range: pa_start=0x%llx pa_end=0x%llx\n",
+		       task->pa_start, task->pa_end);
+		task->status = MB_SUBTASK_ERR;
+		return;
+	}
 	if (!check_addr_range_valid(task)) {
 		pr_err("MIGRATE_ISOLATE pages in range\n");
 		task->status = MB_SUBTASK_ERR;
@@ -595,6 +607,7 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 static void process_pages_for_migration(struct migrate_back_subtask *task,
 					struct folio ***migrate_folios,
 					unsigned int *mig_pages_cnt,
+					unsigned long max_nr_folios,
 					unsigned long *nr_pre_migrate_fail,
 					unsigned long *nr_pre_migrate)
 {
@@ -623,6 +636,7 @@ static void process_pages_for_migration(struct migrate_back_subtask *task,
 		}
 		ret = smap_add_page_for_migrate_back(pa, migrate_folios,
 						     mig_pages_cnt,
+						     max_nr_folios,
 						     task->dest_nid,
 						     MPOL_MF_MOVE_ALL);
 		if (ret) {
@@ -640,13 +654,19 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 	unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 0 };
 	struct folio **migrate_folios[SMAP_MAX_LOCAL_NUMNODES] = { NULL };
 	unsigned long nr_pre_migrate_fail;
-	unsigned long max_nr_folios =
-		(task->pa_end - task->pa_start) / PAGE_SIZE;
+	unsigned long max_nr_folios;
 	unsigned long nr_pre_migrate = 0;
 #ifdef DEBUG
 	ktime_t start_time, end_time;
 	s64 delta_time_ms;
 #endif
+	if (task->pa_end <= task->pa_start) {
+		pr_err("invalid address range: pa_start=0x%llx pa_end=0x%llx\n",
+		       task->pa_start, task->pa_end);
+		task->status = MB_SUBTASK_ERR;
+		return;
+	}
+	max_nr_folios = (task->pa_end - task->pa_start) / PAGE_SIZE;
 	for (i = 0; i < SMAP_MAX_LOCAL_NUMNODES; i++) {
 		migrate_folios[i] =
 			vzalloc(max_nr_folios * sizeof(struct folio *));
@@ -662,7 +682,8 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 	refresh_nodes_nr_free();
 	nr_pre_migrate_fail = nr_migrate_fail = 0;
 	process_pages_for_migration(task, migrate_folios, mig_pages_cnt,
-				    &nr_pre_migrate_fail, &nr_pre_migrate);
+				    max_nr_folios, &nr_pre_migrate_fail,
+				    &nr_pre_migrate);
 	for (i = 0; i < SMAP_MAX_LOCAL_NUMNODES; i++) {
 		if (mig_pages_cnt[i] == 0) {
 			vfree(migrate_folios[i]);
