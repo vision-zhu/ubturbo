@@ -552,7 +552,7 @@ static int __init access_tracking_init(void)
 		}
 	}
 	if (create_scan_workqueue()) {
-		goto err_tracking_add;
+		goto err_workqueue;
 	}
 
 	access_print_acpi_mem();
@@ -560,6 +560,9 @@ static int __init access_tracking_init(void)
 	pr_info("access tracking init successfully\n");
 	return ret;
 
+err_workqueue:
+	if (enable_hist)
+		hist_deinit();
 err_tracking_add:
 	release_adev();
 	access_ioctl_exit();
