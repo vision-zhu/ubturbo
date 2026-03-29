@@ -46,7 +46,7 @@
 	"/sys/devices/system/node/node%u/hugepages/hugepages-2048kB/nr_hugepages"
 #define GET_FOLIO_RETRY_TIMES 4
 
-typedef struct folio *get_migration_folio_t(struct ham_page_map *hpm);
+typedef struct folio *get_migration_folio_fn(struct ham_page_map *hpm);
 
 static struct cdev g_ham_cdev;
 static dev_t g_ham_dev;
@@ -440,7 +440,7 @@ static unsigned int queue_qualified_pages(struct ham_migrate_task *mig_task,
 }
 
 static unsigned int construct_page_list(struct list_head *hpm_list,
-	get_migration_folio_t get_migration_folio, struct folio **folios)
+	get_migration_folio_fn get_migration_folio, struct folio **folios)
 {
 	struct ham_page_map *hpm;
 	struct folio *folio;
@@ -476,7 +476,7 @@ static unsigned int construct_page_list(struct list_head *hpm_list,
  */
 static int handle_ham_migration(struct list_head *hpm_list,
 				unsigned int nr_hpm_max,
-				get_migration_folio_t get_migration_folio,
+				get_migration_folio_fn get_migration_folio,
 				new_folio_t get_new_folio,
 				free_folio_t put_new_folio)
 {
