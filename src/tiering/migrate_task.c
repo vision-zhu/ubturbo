@@ -37,6 +37,7 @@ void free_all_migrate_back_task(void)
 			list_del(&s->task_list);
 			kfree(s);
 		}
+		list_del(&t->task_node);
 		kfree(t);
 	}
 	spin_unlock(&migrate_back_task_lock);
