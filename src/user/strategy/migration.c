@@ -34,7 +34,7 @@
 
 int AddMigList(struct MigrateMsg *mMsg, struct MigList *mList)
 {
-    int i;
+    uint64_t i;
     ssize_t j;
     uint64_t oldNum, migrateNum, freePageNum;
     if (!mMsg || !mList) {
