@@ -29,8 +29,8 @@ static struct class *access_class;
 static struct cdev access_cdev;
 static struct device *access_device;
 
-static char *smap_bitmap_buf = NULL;
-static size_t smap_buf_len = 0;
+static char *smap_bitmap_buf;
+static size_t smap_buf_len;
 
 static int check_msg_validity(struct access_add_pid_msg *msg)
 {

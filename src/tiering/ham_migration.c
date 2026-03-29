@@ -56,7 +56,7 @@ static struct device *g_ham_device;
 static struct workqueue_struct *ham_wq;
 static struct delayed_work ham_work;
 
-static bool global_cache_mnt = false;
+static bool global_cache_mnt;
 
 struct folio *ham_alloc_huge_page_node(int nid)
 {
