@@ -42,7 +42,12 @@ int InitThread(struct ProcessManager *manager, uint32_t period, WorkFunc workFun
     ctx->processManager = manager;
     ctx->workFunc = workFunc;
     manager->threadCtx[manager->nrThread] = ctx;
-    pthread_create(&ctx->thread, NULL, ThreadMain, ctx);
+    if (pthread_create(&ctx->thread, NULL, ThreadMain, ctx) != 0) {
+        SMAP_LOGGER_ERROR("Failed to create thread.");
+        free(ctx);
+        manager->threadCtx[manager->nrThread] = NULL;
+        return -EAGAIN;
+    }
     manager->nrThread++;
     return 0;
 }
@@ -57,7 +62,6 @@ int DestroyAllThread(struct ProcessManager *manager)
             pthread_join(ctx->thread, NULL);
             free(ctx);
             manager->threadCtx[i] = NULL;
-            manager->nrThread--;
             SMAP_LOGGER_INFO("Thread%d destroyed.", i);
         }
     }
