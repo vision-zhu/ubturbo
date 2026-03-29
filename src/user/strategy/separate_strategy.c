@@ -37,6 +37,7 @@ static int InitSeparateParam(ProcessAttr *process)
     process->separateParam.slowThred = GetSlowThresholdConfig();
     SMAP_LOGGER_DEBUG("InitSeparateParam done, freqWt: %u, slowThred: %u.", process->separateParam.freqWt,
                       process->separateParam.slowThred);
+    return 0;
 }
 
 static bool ShouldMigrate(ProcessAttr *process)
