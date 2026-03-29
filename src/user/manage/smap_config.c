@@ -25,8 +25,6 @@
 #include "advanced-strategy/scene.h"
 #include "smap_config.h"
 
-#define NORMAL_ERR (-1)
-
 /*
  * Functions to calculate config/payload length
  */
