@@ -33,17 +33,6 @@ static struct class *tracking_class;
 static struct tracking_core_ctrl *trk_core_ctrl;
 static dev_t tracking_chr_devt;
 
-#define NUM 10
-void activate_stack_protect(void)
-{
-	int i;
-	int test_vec[NUM];
-	test_vec[NUM - 1] = NUM;
-	for (i = 0; i < NUM; i++) {
-		pr_info("%d", test_vec[i]);
-	}
-}
-
 static int node_cdev_open(struct inode *inode, struct file *file)
 {
 	struct tracking_node_dev *node_dev =
