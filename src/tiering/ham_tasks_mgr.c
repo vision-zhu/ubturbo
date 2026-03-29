@@ -96,8 +96,10 @@ out:
 
 void put_migrate_task(struct ham_migrate_task *mig_task, unsigned int status)
 {
+	write_lock(&g_tasklock);
 	mig_task->status |= status;
 	mig_task->status &= ~HAM_TASK_OCCUPIED;
+	write_unlock(&g_tasklock);
 }
 
 struct ham_migrate_task *allocate_migrate_task(pid_t pid)
