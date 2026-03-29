@@ -16,16 +16,9 @@ extern struct list_head pid_list;
 
 class DumpInfoTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        std::cout << "[Phase SetUp Begin]" << std::endl;
-        std::cout << "[Phase SetUp End]" << std::endl;
-    }
     void TearDown() override
     {
-        std::cout << "[Phase TearDown Begin]" << std::endl;
-        GlobalMockObject::reset();
-        std::cout << "[Phase TearDown End]" << std::endl;
+        GlobalMockObject::verify();
     }
 };
 
@@ -33,20 +26,30 @@ extern "C" int check_and_create_dir(char *dir);
 extern "C" bool IS_ERR(const void *ptr);
 extern "C" long __must_check PTR_ERR(__force const void *ptr);
 extern "C" int call_usermodehelper(char const*, char**, char**, int);
-TEST_F(DumpInfoTest, check_and_create_dir_dt)
+
+TEST_F(DumpInfoTest, CheckAndCreateDir_DirExists)
 {
     char dir[] = "qwe";
     int ret = check_and_create_dir(dir);
     EXPECT_EQ(ret, 0);
+}
+
+TEST_F(DumpInfoTest, CheckAndCreateDir_CreateSuccess)
+{
+    char dir[] = "qwe";
     MOCKER(IS_ERR).stubs().will(returnValue(false));
     MOCKER(call_usermodehelper).stubs().will(returnValue(0));
-    ret = check_and_create_dir(dir);
+    int ret = check_and_create_dir(dir);
     EXPECT_EQ(ret, 0);
-    GlobalMockObject::reset();
+}
+
+TEST_F(DumpInfoTest, CheckAndCreateDir_CreateFail)
+{
+    char dir[] = "qwe";
     MOCKER(IS_ERR).stubs().will(returnValue(true));
     MOCKER(call_usermodehelper).stubs().will(returnValue(1)).then(returnValue(0));
     MOCKER(PTR_ERR).stubs().will(returnValue(-2));
-    ret = check_and_create_dir(dir);
+    int ret = check_and_create_dir(dir);
     EXPECT_EQ(ret, 1);
     ret = check_and_create_dir(dir);
     EXPECT_EQ(ret, 0);
@@ -78,21 +81,34 @@ TEST_F(DumpInfoTest, rename_file_dt)
     EXPECT_EQ(ret, 1);
 }
 extern "C" int backup_file_if_needed(char *dir, char *name, loff_t max_sz);
-TEST_F(DumpInfoTest, backup_file_if_needed_dt)
+
+TEST_F(DumpInfoTest, BackupFileIfNeeded_NoBackupNeeded)
 {
     char dir[] = "qwe";
     char name[] = "asd";
     loff_t max_sz = 0;
     int ret = backup_file_if_needed(dir, name, max_sz);
     EXPECT_EQ(ret, 0);
+}
+
+TEST_F(DumpInfoTest, BackupFileIfNeeded_CheckFilesizeFail)
+{
+    char dir[] = "qwe";
+    char name[] = "asd";
+    loff_t max_sz = 0;
     MOCKER(check_filesize).stubs().will(returnValue(1)).then(returnValue(0));
-    ret = backup_file_if_needed(dir, name, max_sz);
+    int ret = backup_file_if_needed(dir, name, max_sz);
     EXPECT_EQ(ret, 1);
-    GlobalMockObject::reset();
+}
+
+TEST_F(DumpInfoTest, BackupFileIfNeeded_RenameFail)
+{
+    char dir[] = "qwe";
+    char name[] = "asd";
+    loff_t max_sz = -20;
     MOCKER(IS_ERR).stubs().will(returnValue(false));
     MOCKER(rename_file).stubs().will(returnValue(1));
-    max_sz = -20;
-    ret = backup_file_if_needed(dir, name, max_sz);
+    int ret = backup_file_if_needed(dir, name, max_sz);
     EXPECT_EQ(ret, 1);
 }
 

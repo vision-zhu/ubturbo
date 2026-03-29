@@ -14,6 +14,10 @@ extern "C" pte_t g_tmp_pte;
 
 using namespace std;
 
+/*
+ * These structs mirror the file-private definitions in coherence_maintain.c.
+ * They must be kept in sync manually since the originals are not exported.
+ */
 struct pfn_range {
     unsigned long start_pfn;
     unsigned long end_pfn;
@@ -23,7 +27,7 @@ struct modify_info {
     int pmd_cnt;
     int pte_cnt;
     int pmd_leaf_cnt;
-    int hugetlb_cnt;
+    unsigned int hugetlb_cnt;  /* must match coherence_maintain.c */
     struct pfn_range *hugetlb_ranges;
     bool cacheable;
     int ret;
@@ -31,16 +35,9 @@ struct modify_info {
 
 class CoherenceMaintainTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 

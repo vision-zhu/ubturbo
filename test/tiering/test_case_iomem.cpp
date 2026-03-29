@@ -22,15 +22,11 @@ class IomemTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        std::cout << "[Phase SetUp Begin]" << std::endl;
         INIT_LIST_HEAD(&remote_ram_list);
-        std::cout << "[Phase SetUp End]" << std::endl;
     }
     void TearDown() override
     {
-        std::cout << "[Phase TearDown Begin]" << std::endl;
-        GlobalMockObject::reset();
-        std::cout << "[Phase TearDown End]" << std::endl;
+        GlobalMockObject::verify();
     }
 };
 

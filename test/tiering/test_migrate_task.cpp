@@ -14,27 +14,17 @@ using namespace std;
 
 class MigrateTaskTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
 extern "C" struct migrate_back_task *init_migrate_back_task(unsigned long long task_id);
 TEST_F(MigrateTaskTest, InitMigrateBackTask)
 {
-    struct migrate_back_task *ret = nullptr;
-    ret = (struct migrate_back_task*)kmalloc(sizeof(struct migrate_back_task), GFP_KERNEL);
+    struct migrate_back_task *ret = init_migrate_back_task(10);
     ASSERT_NE(nullptr, ret);
-
-    ret = init_migrate_back_task(10);
     EXPECT_EQ(10, ret->task_id);
     kfree(ret);
 }
@@ -61,6 +51,7 @@ TEST_F(MigrateTaskTest, InitMigrateBackSubtask)
     EXPECT_EQ(0, ret);
     EXPECT_EQ(1, result[0]->src_nid);
 
+    kfree(*result);
     kfree(result);
 }
 

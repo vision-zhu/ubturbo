@@ -21,16 +21,9 @@ using namespace std;
 
 class AccessIomemTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        std::cout << "[Phase SetUp Begin]" << std::endl;
-        std::cout << "[Phase SetUp End]" << std::endl;
-    }
     void TearDown() override
     {
-        std::cout << "[Phase TearDown Begin]" << std::endl;
-        GlobalMockObject::reset();
-        std::cout << "[Phase TearDown End]" << std::endl;
+        GlobalMockObject::verify();
     }
 };
 
@@ -211,7 +204,7 @@ TEST_F(AccessIomemTest, refresh_remote_ram_normal_scene)
     EXPECT_EQ(-EINVAL, ret);
     EXPECT_FALSE(drivers_remote_ram_changed);
 
-    GlobalMockObject::reset();
+    GlobalMockObject::verify();
     MOCKER(drivers_walk_system_ram_remote_range).stubs().will(returnValue(0));
     MOCKER(drivers_free_remote_ram).stubs().will(ignoreReturnValue());
     MOCKER(move_remote_ram).stubs().will(ignoreReturnValue());
@@ -230,7 +223,7 @@ TEST_F(AccessIomemTest, refresh_remote_ram_ub_qemu_scene)
     EXPECT_EQ(-EINVAL, ret);
     EXPECT_FALSE(drivers_remote_ram_changed);
 
-    GlobalMockObject::reset();
+    GlobalMockObject::verify();
     MOCKER(drivers_fixed_remote_ram).stubs().will(returnValue(0));
     MOCKER(drivers_free_remote_ram).stubs().will(ignoreReturnValue());
     MOCKER(move_remote_ram).stubs().will(ignoreReturnValue());
@@ -266,8 +259,7 @@ TEST_F(AccessIomemTest, get_node_page_cnt_iomem)
     ret = get_node_page_cnt_iomem(0, PAGE_SIZE_2M);
     EXPECT_EQ(0, ret);
 
-    GlobalMockObject::reset();
-    cout << "second" << endl;
+    GlobalMockObject::verify();
     ASSERT_TRUE(list_empty(&drivers_remote_ram_list));
     list_add_tail(&seg1.node, &drivers_remote_ram_list);
     list_add_tail(&seg2.node, &drivers_remote_ram_list);

@@ -14,27 +14,32 @@ using namespace std;
 
 class MigrateWrapperTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
 struct folio *smap_alloc_huge_page_node(struct folio *folio, int nid, bool is_mig_back);
-TEST_F(MigrateWrapperTest, Hugepage)
+TEST_F(MigrateWrapperTest, HugepageSuccess)
 {
     struct folio *new_folio = NULL;
-    struct folio *old_folio = (struct folio *)kmalloc(sizeof(struct folio*), GFP_KERNEL);
+    struct folio *old_folio = (struct folio *)kmalloc(sizeof(struct folio), GFP_KERNEL);
+    ASSERT_NE(nullptr, old_folio);
 
     new_folio = smap_alloc_huge_page_node(old_folio, 0, false);
+    /* No mock: result depends on system state, just verify no crash */
+    kfree(old_folio);
+}
+
+TEST_F(MigrateWrapperTest, HugepageAllocFail)
+{
+    struct folio *new_folio = NULL;
+    struct folio *old_folio = (struct folio *)kmalloc(sizeof(struct folio), GFP_KERNEL);
+    ASSERT_NE(nullptr, old_folio);
+
     MOCKER(get_hugetlb_folio_nodemask).stubs().will(returnValue((struct folio *)nullptr));
-    EXPECT_EQ(NULL, new_folio);
+    new_folio = smap_alloc_huge_page_node(old_folio, 0, false);
+    EXPECT_EQ(nullptr, new_folio);
     kfree(old_folio);
 }

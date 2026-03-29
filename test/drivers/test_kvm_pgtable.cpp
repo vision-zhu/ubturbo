@@ -33,16 +33,9 @@ struct kvm_pgtable_walk_data {
 
 class KvmPgTableTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        std::cout << "[Phase SetUp Begin]" << std::endl;
-        std::cout << "[Phase SetUp End]" << std::endl;
-    }
     void TearDown() override
     {
-        std::cout << "[Phase TearDown Begin]" << std::endl;
-        GlobalMockObject::reset();
-        std::cout << "[Phase TearDown End]" << std::endl;
+        GlobalMockObject::verify();
     }
 };
 

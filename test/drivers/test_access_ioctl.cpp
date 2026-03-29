@@ -30,17 +30,10 @@ public:
     static constexpr int BITMAP_BUF_LEN = 10;
 
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         INIT_LIST_HEAD(&ap_data.list);
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 
     long checkIoctlAddPid(struct access_add_pid_msg msg);
@@ -346,7 +339,6 @@ TEST_F(AccessIoctlTestKernel, IoctlAddPidThree)
     EXPECT_EQ(-EINVAL, ret);
 
     GlobalMockObject::verify();
-    GlobalMockObject::reset();
 
     msg.count = 1;
     payload_data = (struct access_add_pid_payload *)vzalloc(sizeof(struct access_add_pid_payload) * msg.count);

@@ -62,16 +62,12 @@ class DriversBusTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[Phase SetUp Begin]" << endl;
         GlobalManager::getInstance().init_bus();
-        cout << "[Phase SetUp End]" << endl;
     }
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalManager::getInstance().exit_bus();
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
@@ -204,5 +200,5 @@ TEST_F(DriversBusTest, TrackingBusInit)
 extern "C" void tracking_bus_exit(void);
 TEST_F(DriversBusTest, TrackingBusExit)
 {
-    tracking_bus_exit;
+    tracking_bus_exit();
 }

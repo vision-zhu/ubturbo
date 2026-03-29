@@ -22,16 +22,9 @@ extern "C" unsigned int drivers_smap_scene;
 
 class MemNotifierTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        std::cout << "[Phase SetUp Begin]" << std::endl;
-        std::cout << "[Phase SetUp End]" << std::endl;
-    }
     void TearDown() override
     {
-        std::cout << "[Phase TearDown Begin]" << std::endl;
-        GlobalMockObject::reset();
-        std::cout << "[Phase TearDown End]" << std::endl;
+        GlobalMockObject::verify();
     }
 };
 
@@ -39,32 +32,45 @@ extern "C" struct page *pfn_to_online_page(unsigned long pfn);
 extern "C" bool pfn_valid(unsigned long pfn);
 extern "C" int refresh_remote_ram(void);
 extern "C" int memory_notifier_cb(struct memory_notify *mnb, unsigned long action);
-TEST_F(MemNotifierTest, memory_notifier_cb)
+
+TEST_F(MemNotifierTest, memory_notifier_cb_UbQemuScene)
 {
     int ret;
-    struct page page;
-    struct memory_notify mnb = {
-        .start_pfn = 0,
-        .nr_pages = 10,
-    };
+    struct memory_notify mnb = { .start_pfn = 0, .nr_pages = 10 };
     drivers_smap_scene = UB_QEMU_SCENE;
     ret = memory_notifier_cb(&mnb, MEM_ONLINE);
     EXPECT_EQ(0, ret);
+}
 
+TEST_F(MemNotifierTest, memory_notifier_cb_PfnInvalid)
+{
+    int ret;
+    struct memory_notify mnb = { .start_pfn = 0, .nr_pages = 10 };
     drivers_smap_scene = NORMAL_SCENE;
     MOCKER(pfn_valid).stubs().will(returnValue(false));
     ret = memory_notifier_cb(&mnb, MEM_ONLINE);
     EXPECT_EQ(-EINVAL, ret);
+}
 
-    GlobalMockObject::reset();
+TEST_F(MemNotifierTest, memory_notifier_cb_PageFound)
+{
+    int ret;
+    struct page page;
+    struct memory_notify mnb = { .start_pfn = 0, .nr_pages = 10 };
+    drivers_smap_scene = NORMAL_SCENE;
     MOCKER(pfn_to_online_page).stubs().will(returnValue(&page));
     MOCKER(page_to_nid).stubs().will(returnValue(0));
     MOCKER(refresh_remote_ram).stubs().will(returnValue(0));
     MOCKER(tracking_core_reinit_actc_buffer).stubs().will(returnValue(0));
     ret = memory_notifier_cb(&mnb, MEM_ONLINE);
     EXPECT_EQ(0, ret);
+}
 
-    GlobalMockObject::reset();
+TEST_F(MemNotifierTest, memory_notifier_cb_PageNotOnline)
+{
+    int ret;
+    struct memory_notify mnb = { .start_pfn = 0, .nr_pages = 10 };
+    drivers_smap_scene = NORMAL_SCENE;
     MOCKER(pfn_to_online_page).stubs().will(returnValue(static_cast<struct page *>(nullptr)));
     ret = memory_notifier_cb(&mnb, MEM_ONLINE);
     EXPECT_EQ(-EINVAL, ret);

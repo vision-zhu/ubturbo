@@ -15,17 +15,10 @@ using namespace std;
 
 class MigrateBackDebugfsTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        cout << "[Phase SetUp Begin]" << endl;
-        cout << "[Phase SetUp End]" << endl;
-    }
 
     void TearDown() override
     {
-        cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
-        cout << "[Phase TearDown End]" << endl;
     }
 };
 
@@ -44,8 +37,8 @@ TEST_F(MigrateBackDebugfsTest, SmapMigrateRead)
     ssize_t ret;
     char *user_buf = "user";
     size_t count = 0;
-    loff_t *ppos;
-    ret = smap_migrate_back_debugfs_read(fileTmp, user_buf, count, ppos);
+    loff_t ppos = 0;
+    ret = smap_migrate_back_debugfs_read(fileTmp, user_buf, count, &ppos);
     EXPECT_EQ(0, ret);
 
     kfree(fileTmp);
