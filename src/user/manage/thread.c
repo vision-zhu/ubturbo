@@ -24,8 +24,8 @@ static void *ThreadMain(void *args)
 
     SMAP_LOGGER_INFO("Thread %lu created.", gettid());
     while (!EnvAtomicRead(&ctx->stop)) {
-        EnvMsleep(ctx->period);
         ctx->workFunc(ctx);
+        EnvMsleep(ctx->period);
     }
     return NULL;
 }
