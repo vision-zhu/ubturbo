@@ -428,10 +428,6 @@ static int smap_add_page_for_migrate_back(u64 pa,
 		return -EIO;
 	}
 
-	if (IS_ERR(page)) {
-		return PTR_ERR(page);
-	}
-
 	if (page_mapcount(page) > 1 && !migrate_all) {
 		return -EACCES;
 	}
