@@ -34,11 +34,11 @@
 #define HAM_4k_to_2M 9
 #define DECIMAL 10
 
-#define TIME_LENTH (msecs_to_jiffies(2000))
+#define TIME_LENGTH (msecs_to_jiffies(2000))
 #define FINISH_LENGTH ((jiffies) + (msecs_to_jiffies(60000)))
 #define MAX_RETRY_TIMES 1000
 #define MIGRATE_INTERVAL_MSEC 10
-#define WAITE_TIME 100
+#define WAIT_TIME_MS 100
 #define MAX_HUGEPAGE_NUM (256 * 512)
 #define MAX_DATA_SIZE 10
 #define MAX_PATH_SIZE 100
@@ -109,7 +109,7 @@ static int config_system_huge_page(unsigned long huge_page_number,
 			return 0;
 		}
 		retry_times++;
-		msleep(WAITE_TIME);
+		msleep(WAIT_TIME_MS);
 	}
 
 	filp_close(file, NULL);
@@ -205,7 +205,7 @@ static void reclaim_task_fn(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
 	release_finished_tasks();
-	queue_delayed_work(ham_wq, dwork, TIME_LENTH);
+	queue_delayed_work(ham_wq, dwork, TIME_LENGTH);
 }
 
 static int init_global_task_list(void)
@@ -217,7 +217,7 @@ static int init_global_task_list(void)
 		return -ENOMEM;
 	}
 	INIT_DELAYED_WORK(&ham_work, reclaim_task_fn);
-	queue_delayed_work(ham_wq, &ham_work, TIME_LENTH);
+	queue_delayed_work(ham_wq, &ham_work, TIME_LENGTH);
 	return 0;
 }
 
