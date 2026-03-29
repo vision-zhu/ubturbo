@@ -56,7 +56,7 @@ static struct device *g_ham_device;
 static struct workqueue_struct *ham_wq;
 static struct delayed_work ham_work;
 
-static bool global_cache_mnt;
+static bool g_global_cache_mnt;
 
 struct folio *ham_alloc_huge_page_node(int nid)
 {
@@ -616,7 +616,7 @@ static int ham_cache_clear(pid_t pid, struct ham_migrate_task *mig_task)
 	unsigned int i;
 	int ret = 0;
 
-	if (global_cache_mnt) {
+	if (g_global_cache_mnt) {
 		return flush_cache_global(HISI_CACHE_MAINT_CLEANINVALID);
 	}
 
@@ -1207,24 +1207,24 @@ static const struct file_operations g_ham_fops = {
 	.unlocked_ioctl = ham_ioctl,
 };
 
-static ssize_t global_cache_mnt_show(struct device *dev,
+static ssize_t g_global_cache_mnt_show(struct device *dev,
 					struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", global_cache_mnt);
+	return sprintf(buf, "%d\n", g_global_cache_mnt);
 }
 
-static ssize_t global_cache_mnt_store(struct device *dev,
+static ssize_t g_global_cache_mnt_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
 {
 	int val;
 	if (kstrtoint(buf, DECIMAL, &val) == 0)
-		global_cache_mnt = val ? true : false;
+		g_global_cache_mnt = val ? true : false;
 	return count;
 }
 
-static DEVICE_ATTR(global_cache_mnt, 0664, global_cache_mnt_show,
-			global_cache_mnt_store);
+static DEVICE_ATTR(g_global_cache_mnt, 0664, g_global_cache_mnt_show,
+			g_global_cache_mnt_store);
 
 int ham_init(void)
 {
@@ -1259,7 +1259,7 @@ int ham_init(void)
 		goto dev_create_err;
 	}
 
-	ret = device_create_file(g_ham_device, &dev_attr_global_cache_mnt);
+	ret = device_create_file(g_ham_device, &dev_attr_g_global_cache_mnt);
 	if (ret)
 		goto dev_attr_err;
 
@@ -1271,7 +1271,7 @@ int ham_init(void)
 	return 0;
 
 init_task_err:
-	device_remove_file(g_ham_device, &dev_attr_global_cache_mnt);
+	device_remove_file(g_ham_device, &dev_attr_g_global_cache_mnt);
 dev_attr_err:
 	device_destroy(g_ham_class, g_ham_dev);
 dev_create_err:
@@ -1289,7 +1289,7 @@ void ham_exit(void)
 	cancel_delayed_work_sync(&ham_work);
 	flush_workqueue(ham_wq);
 	destroy_workqueue(ham_wq);
-	device_remove_file(g_ham_device, &dev_attr_global_cache_mnt);
+	device_remove_file(g_ham_device, &dev_attr_g_global_cache_mnt);
 	device_destroy(g_ham_class, g_ham_dev);
 	class_destroy(g_ham_class);
 	cdev_del(&g_ham_cdev);
