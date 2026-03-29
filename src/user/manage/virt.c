@@ -61,6 +61,8 @@ static int ExtractIdFromCmdline(char *cmdline, int len, int *id)
     }
     while (!strstr(tmp, DOMAIN_KEYWORD)) {
         tmp = strchr(tmp, '\0');
+        if (!tmp || tmp >= cmdline + len)
+            return -ENODATA;
         tmp++;
     }
     tmp = strstr(tmp, DOMAIN_KEYWORD);
