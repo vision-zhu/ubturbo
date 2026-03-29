@@ -42,16 +42,16 @@ uint32_t g_pageSizeNormal;
 uint32_t g_pageSizeHuge;
 
 EnvAtomic g_forbiddenNodes[MAX_NODES];
-RunMode g_runMode;
+static EnvAtomic g_runMode;
 
 RunMode GetRunMode(void)
 {
-    return g_runMode;
+    return (RunMode)EnvAtomicRead(&g_runMode);
 }
 
 void SetRunMode(RunMode runMode)
 {
-    g_runMode = runMode;
+    EnvAtomicSet(&g_runMode, (int)runMode);
 }
 
 PidType GetPidType(struct ProcessManager *manager)
@@ -132,7 +132,7 @@ int ProcessManagerInit(uint32_t pageType)
     EnvMutexInit(&g_processManager.lock);
     EnvMutexInit(&g_processManager.threadLock);
     InitSceneInfo(&g_processManager.sceneInfo);
-    g_runMode = WATERLINE_MODE;
+    EnvAtomicSet(&g_runMode, (int)WATERLINE_MODE);
     return 0;
 }
 
@@ -1661,7 +1661,7 @@ static void CalcMigrateNrPagesPerPIDMuiltNuma(void)
     // 根据账本信息，计算每个PID各本地numa可支配的内存；
     CalNrPagesLocalTotal();
 
-    if (g_runMode == MEM_POOL_MODE) {
+    if (GetRunMode() == MEM_POOL_MODE) {
         return;
     }
     EnvMutexLock(&numaInfo->lock);
