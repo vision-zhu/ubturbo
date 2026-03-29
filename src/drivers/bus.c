@@ -15,7 +15,6 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "tracking_bus: " fmt
 
-static int match_always_count;
 static DEFINE_IDA(tracking_instance_ida);
 static DEFINE_MUTEX(tracking_bus_lock);
 static int tracking_bus_probe(struct device *dev);
