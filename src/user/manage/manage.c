@@ -725,7 +725,7 @@ static void SetLocalByNumaMaps(char *line, uint32_t *nodeBitmap, bool hugeFlag)
      * It's possible that there are multiple Nx= in one line,
      * so it's necessary to traverse all node
      */
-    for (i = 0; i < nrLocalNuma; i++) {
+    for (i = 0; i < nrLocalNuma && i < LOCAL_NUMA_NUM; i++) {
         if (hugeFlag && !IsNumaMapLineHuge(line)) {
             continue;
         }
