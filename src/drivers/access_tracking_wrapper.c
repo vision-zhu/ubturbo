@@ -113,6 +113,9 @@ pte_t *smap__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 	spinlock_t *ptl;
 	pmd_t pmdval;
 	pte_t *pte;
+	int retries = 0;
+	const int max_retries = 100;
+
 	while (true) {
 		pte = smap__pte_offset_map(pmd, addr, &pmdval);
 		if (unlikely(!pte))
@@ -124,6 +127,12 @@ pte_t *smap__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 			return pte;
 		}
 		pte_unmap_unlock(pte, ptl);
+		if (++retries >= max_retries) {
+			pr_warn_ratelimited("smap: pmd changed too many times, skip addr %lx\n",
+					    addr);
+			return NULL;
+		}
+		cond_resched();
 	}
 }
 
