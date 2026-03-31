@@ -997,10 +997,17 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 			continue;
 		}
 		down_read(&adev->buffer_lock);
-		bm_len = BITS_PER_LONG * ap->bm_len[i];
-		for (index = acidx = 0; acidx < bm_len && index < data_len[i];
-		     acidx++) {
+		bm_len = ap->bm_len[i];
+		for (index = acidx = 0;
+		     acidx < bm_len * BITS_PER_LONG && index < data_len[i];) {
+			/* skip zero words quickly */
+			size_t w = acidx / BITS_PER_LONG;
+			if (ap->paddr_bm[i][w] == 0) {
+				acidx = (w + 1) * BITS_PER_LONG;
+				continue;
+			}
 			if (!test_bit(acidx, ap->paddr_bm[i])) {
+				acidx++;
 				continue;
 			}
 			if (unlikely(acidx >= adev->page_count)) {
@@ -1011,6 +1018,7 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 			data[i][index++] = adev->access_bit_actc_data[acidx];
 			pr_debug("Node%d acidx %zu index %u\n", i, acidx,
 				 index - 1);
+			acidx++;
 		}
 		up_read(&adev->buffer_lock);
 	}
