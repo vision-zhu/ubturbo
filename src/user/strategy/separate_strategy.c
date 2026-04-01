@@ -392,25 +392,11 @@ static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_
     if (!currentMig->addr) {
         return -ENOMEM;
     }
-    uint32_t *buckets = (uint32_t *)calloc(STRATEGY_ACTC_MAX_FREQ, sizeof(uint32_t));
-    if (buckets == NULL) {
-        free(currentMig->addr);
-        currentMig->addr = NULL;
-        return -ENOMEM;
-    }
-    for (uint64_t i = offset; i < n; ++i) {
-        if (freq[i] & ACTC_WHITE_LIST_BIT) {
-            continue;
-        }
-        int f = freq[i] & ACTC_FREQ_MASK;
-        f = MIN(f, STRATEGY_ACTC_MAX_FREQ - 1);
-        buckets[f]++;
-    }
+    uint32_t *buckets = process->scanAttr.actCount[from].buckets;
     int thresholdFreq;
     uint32_t takeAtThreshold;
     FindThreshold(mode, nrMig, buckets, &thresholdFreq, &takeAtThreshold);
     CollectPages(mode, offset, n, freq, currentMig, nrMig, thresholdFreq, takeAtThreshold);
-    free(buckets);
     return 0;
 }
 

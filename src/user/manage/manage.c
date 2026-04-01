@@ -371,6 +371,8 @@ static inline void ClearActcInfo(ProcessAttr *attr, int nid)
     (void)memset_s(&attr->scanAttr.actCount[nid], sizeof(ActCount), 0, sizeof(ActCount));
 }
 
+#define STRATEGY_ACTC_MAX_FREQ 256
+
 static void FillFreqForNid(ProcessAttr *attr, int nid, struct AccessPidFreq *apf)
 {
     uint64_t actcLen = apf->len[nid];
@@ -387,13 +389,18 @@ static void FillFreqForNid(ProcessAttr *attr, int nid, struct AccessPidFreq *apf
     attr->scanAttr.actcLen[nid] = actcLen;
 
     for (uint64_t i = 0; i < actcLen; i++) {
-        actc_t f = attr->scanAttr.freq[nid][i] & ACTC_FREQ_MASK;
+        actc_t val = attr->scanAttr.freq[nid][i];
+        actc_t f = val & ACTC_FREQ_MASK;
         if (f != 0) {
             nrFreq++;
             freqSum += f;
         }
         freqMax = MAX(freqMax, f);
         freqMin = MIN(freqMin, f);
+        if (!(val & ACTC_WHITE_LIST_BIT)) {
+            int idx = MIN(f, STRATEGY_ACTC_MAX_FREQ - 1);
+            attr->scanAttr.actCount[nid].buckets[idx]++;
+        }
     }
     attr->scanAttr.actCount[nid].freqMax = freqMax;
     attr->scanAttr.actCount[nid].freqMin = freqMin;

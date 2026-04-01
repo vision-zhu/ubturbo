@@ -121,6 +121,7 @@ typedef struct {
     uint64_t freqNum;
     uint64_t pageNum;
     uint64_t freqSum;
+    uint32_t buckets[256];
 } ActCount;
 
 typedef struct {
