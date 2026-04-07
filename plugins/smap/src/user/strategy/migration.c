@@ -271,6 +271,7 @@ static int PerformMigrationPreparation(struct ProcessManager *manager)
 {
     int ret = 0;
     int isRamChanged = 0;
+    bool found = false;
     ProcessAttr *current = manager->processes;
 
     ret = GetRamIsChange(manager, &isRamChanged);
@@ -281,9 +282,17 @@ static int PerformMigrationPreparation(struct ProcessManager *manager)
     if (isRamChanged) {
         return -EBUSY;
     }
-    if (!current) {
+    while (current) {
+        if (current->scanType == NORMAL_SCAN) {
+            found = true;
+            break;
+        }
+        current = current->next;
+    }
+    if (!found) {
         return -EINVAL;
     }
+
     ret = CleanStrategyAttribute(manager);
     if (ret) {
         SMAP_LOGGER_ERROR("Clean StrategyAttribute failed! ret: %d.", ret);
