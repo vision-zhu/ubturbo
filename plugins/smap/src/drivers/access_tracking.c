@@ -421,7 +421,7 @@ static void handle_statistic_scan(struct access_pid *ap, ktime_t start_time,
 	}
 
 	if (*scan_delay_ms < ((scan_time / MS_TO_US) + delay_buffer_ms)) {
-		pr_err("pid[%d] scan cost %lums exceeded expected scan time:%lums\n", ap->pid,
+		pr_warn("pid[%d] scan cost %lums exceeded expected scan time:%lums\n", ap->pid,
 			   (unsigned long)((scan_time / MS_TO_US) + delay_buffer_ms), *scan_delay_ms);
 		*scan_delay_ms = 0;
 	} else {

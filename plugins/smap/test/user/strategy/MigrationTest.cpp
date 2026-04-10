@@ -332,6 +332,7 @@ TEST_F(MigrationTest, TestPerformMigrationPreparationOK)
     ctx->processManager = (ProcessManager *)malloc(sizeof(ProcessManager));
     ctx->processManager->processes = (ProcessAttr *)malloc(sizeof(ProcessAttr));
     ctx->processManager->processes->next = NULL;
+    ctx->processManager->processes->scanType = NORMAL_SCAN;
 
     MOCKER(GetRamIsChange).stubs().will(returnValue(0));
     MOCKER(BuildAllPidData).stubs().will(returnValue(0));
@@ -364,6 +365,7 @@ TEST_F(MigrationTest, TestPerformMigrationPreparationBuildError)
     ProcessAttr process;
     struct ProcessManager manager = { .processes = &process };
 
+    process.scanType = NORMAL_SCAN;
     MOCKER(GetRamIsChange).stubs().with(any(), outBoundP(&change, sizeof(change))).will(returnValue(0));
     MOCKER(CleanStrategyAttribute).stubs().will(returnValue(0));
     MOCKER(BuildAllPidData).stubs().will(returnValue(-ENOMEM));
