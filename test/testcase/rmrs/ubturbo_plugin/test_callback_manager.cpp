@@ -301,13 +301,11 @@ RmrsResult MockCollectPidNumaInfoSuccess(const std::vector<pid_t> &pids, std::ve
     pid_t pid = 1234;
     int localUsedMem = 10;
     int remoteUsedMem = 5;
-    int remoteNumaId = 4;
     mempooling::PidInfo info;
     info.pid = pid;
-    info.localUsedMem = localUsedMem;
-    info.remoteUsedMem = remoteUsedMem;
+    info.totalLocalUsedMem = localUsedMem;
+    info.totalRemoteUsedMem = remoteUsedMem;
     info.localNumaIds = {1};
-    info.remoteNumaId = remoteNumaId;
     pidInfos.emplace_back(info);
     return RMRS_OK;
 }

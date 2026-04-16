@@ -206,11 +206,7 @@ TEST_F(TestRmrsResourceExport, BuildPidInfoFromNodePagesSucceed)
 
     // 验证基础字段
     EXPECT_EQ(pidInfo.pid, testPid);
-    EXPECT_EQ(pidInfo.remoteNumaId, sizeResult);
-    EXPECT_EQ(pidInfo.socketId, 0);
-
-    // 验证本地 NUMA ID 顺序（按使用量降序）
-    ASSERT_EQ(pidInfo.localNumaIds.size(), sizeResult);
+    EXPECT_EQ(pidInfo.localNumaIds.size(), sizeResult);
     EXPECT_EQ(pidInfo.localNumaIds[0], 0); // 20页 > 10页，node 0 排在前面
     EXPECT_EQ(pidInfo.localNumaIds[1], 1);
 }
@@ -236,13 +232,11 @@ TEST_F(TestRmrsResourceExport, IsValidLocalNumaNodeTest)
 {
     uint64_t localUsedMem = 10;
     uint64_t remoteUsedMem = 5;
-    uint64_t remoteNumaId = 4;
     mempooling::PidInfo info;
     info.pid = -1;
-    info.localUsedMem = localUsedMem;
-    info.remoteUsedMem = remoteUsedMem;
+    info.totalLocalUsedMem = localUsedMem;
+    info.totalRemoteUsedMem = remoteUsedMem;
     info.localNumaIds = {1};
-    info.remoteNumaId = remoteNumaId;
 
     std::vector<mempooling::PidInfo> vec = {info};
     std::set<uint16_t> res = ResourceExport::GetLocalNodeIds();
