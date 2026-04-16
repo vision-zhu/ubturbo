@@ -76,45 +76,22 @@ out:
     return ret;
 }
 
-static int is_trouble_numa_in_list(u16 numa_id)
+int is_trouble_numa(u16 numa_id)
 {
     struct numa_node *node;
     unsigned long irq_flags;
+    int found = 0;
 
     read_lock_irqsave(&g_manager.lock, irq_flags);
-
     list_for_each_entry(node, &g_manager.head, list) {
         if (node->numa_id == numa_id) {
-            read_unlock_irqrestore(&g_manager.lock, irq_flags);
-            return 1;
+            found = 1;
+            break;
         }
     }
-
-    read_unlock_irqrestore(&g_manager.lock, irq_flags);
-    return 0;
-}
-
-static int is_trouble_numa_list_empty(void)
-{
-    unsigned long irq_flags;
-    int ret = 0;
-
-    read_lock_irqsave(&g_manager.lock, irq_flags);
-    if (list_empty(&g_manager.head)) {
-        ret = 1;
-    }
     read_unlock_irqrestore(&g_manager.lock, irq_flags);
 
-    return ret;
-}
-
-int is_trouble_numa(u16 numa_id)
-{
-    if (is_trouble_numa_list_empty()) {
-        return 0;
-    }
-
-    return is_trouble_numa_in_list(numa_id);
+    return found;
 }
 
 static int deal_trouble_numa_info_inner(struct numa_entry *info)

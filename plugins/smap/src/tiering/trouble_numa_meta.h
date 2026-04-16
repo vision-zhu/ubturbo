@@ -3,8 +3,8 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  */
 
-#ifndef _TROUBLR_NUMA_META_H
-#define _TROUBLR_NUMA_META_H
+#ifndef _TROUBLE_NUMA_META_H
+#define _TROUBLE_NUMA_META_H
 
 /* MAX_NUMA_NUM: 最大NUMA节点数量
  * 注意：该值需与 plugins/smap/src/user/smap_interface.h 及 src/smap/smap_interface.h 保持一致 */
@@ -37,4 +37,4 @@ int is_trouble_numa(u16 numa_id);
 
 int deal_trouble_numa_info(struct numa_status_list *numa_info);
 
-#endif
+#endif /* _TROUBLE_NUMA_META_H */

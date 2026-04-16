@@ -197,16 +197,16 @@ static int __init tracking_init(void)
 		pr_err("smap process symbols failed\n");
 		return ret;
 	}
+	init_trouble_numa_manager();
 	ret = hisi_ubus_register_link_down_notifier();
 	if (ret) {
 		pr_err("failed to register vendor record notifier, ret: %d\n", ret);
-		return ret;
+		goto out_cleanup_numa_manager;
 	}
-	init_trouble_numa_manager();
 	ret = init_acpi_mem();
 	if (ret < 0) {
 		pr_err("failed to init ACPI memory, ret: %d\n", ret);
-		return ret;
+		goto out_unregister_notifier;
 	}
 	(void)refresh_remote_ram();
 	if (smap_scene != UB_QEMU_SCENE_ADVANCED) {
@@ -260,6 +260,10 @@ out_workqueue:
 out_smap_node_sysfs:
 	release_remote_ram();
 	reset_acpi_mem();
+out_unregister_notifier:
+	hisi_ubus_unregister_link_down_notifier();
+out_cleanup_numa_manager:
+	cleanup_trouble_numa_manager();
 	return ret;
 }
 

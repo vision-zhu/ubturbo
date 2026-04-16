@@ -21,21 +21,8 @@ struct hisi_armp_vendor_info {
 #define HISI_VENDOR_MAGIC_NUM		0xCC08CC08CC08CC08
 #define HISI_VENDOR_CRITICAL_ERR	BIT(0)
 
-static guid_t hisi_ubus_sec_guid = 
+static guid_t hisi_ubus_sec_guid =
     GUID_INIT(0xE19E3D16, 0xBC11, 0x11E4, 0x9C, 0xAA, 0xC2, 0x05, 0x1D, 0x5D, 0x46, 0xB0);
-
-static inline int check_port_bits(uint32_t port_bits)
-{
-    int i;
-
-    for (i = 0; i < 32; i++) {
-        if (!(port_bits & (1 << i))) {
-            return 1;
-        }
-    }
-
-    return 0;
-}
 
 static int ghes_hisi_critical_hw_error(struct cper_sec_proc_arm *err)
 {
