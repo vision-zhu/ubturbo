@@ -479,13 +479,11 @@ static int __ioctl_check_pagesize(void __user *argp)
 	return pageType == smap_pgsize ? 0 : -EINVAL;
 }
 
-#define NUMA_ID_CNT_MAX 64
-
 static int __ioctl_send_numa_msg_to_kernel(void __user *argp)
 {
 	int ret = 0;
 	struct numa_status_list msg;
-	u16 numa_ids[NUMA_ID_CNT_MAX];
+	u16 numa_ids[MAX_NUMA_NUM];
 	int i;
 
 	if (copy_from_user(&msg, (void __user *)argp, sizeof(struct numa_status_list))) {
@@ -493,8 +491,9 @@ static int __ioctl_send_numa_msg_to_kernel(void __user *argp)
 		return -EFAULT;
 	}
 
-	if (msg.cnt == 0) {
-		pr_err("invalid NUMA status list header\n");
+	if (msg.cnt == 0 || msg.cnt > MAX_NUMA_NUM) {
+		pr_err("invalid NUMA status list cnt: %u (valid range: 1-%d)\n",
+		       msg.cnt, MAX_NUMA_NUM);
 		return -EINVAL;
 	}
 
@@ -505,7 +504,7 @@ static int __ioctl_send_numa_msg_to_kernel(void __user *argp)
 	if (ret) {
 		pr_err("failed to deal trouble NUMA info, ret: %d\n", ret);
 	}
-	int count = trouble_numa_list_get_all(numa_ids, NUMA_ID_CNT_MAX);
+	int count = trouble_numa_list_get_all(numa_ids, MAX_NUMA_NUM);
 	for (i = 0; i < count; i++) {
 		pr_info("Get all trouble NUMA ID: %u", numa_ids[i]);
 	}

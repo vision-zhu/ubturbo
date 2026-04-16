@@ -2213,18 +2213,19 @@ int ubturbo_smap_remote_numa_freq_query(uint16_t *numa, uint64_t *freq, uint16_t
 
 int ubturbo_notify_numa_list_status(NumaStatusList *msg)
 {
-    if (msg->cnt == 0) {
-        SMAP_LOGGER_ERROR("ubturbo_notify_numa_list_status cnt is 0.");
+    if (!msg) {
+        SMAP_LOGGER_ERROR("ubturbo_notify_numa_list_status msg is NULL.");
         return -EINVAL;
     }
-    if (!msg->entries) {
-        SMAP_LOGGER_ERROR("ubturbo_notify_numa_list_status entry is NULL.");
+    if (msg->cnt == 0 || msg->cnt > MAX_NUMA_NUM) {
+        SMAP_LOGGER_ERROR("ubturbo_notify_numa_list_status invalid cnt: %u.", msg->cnt);
         return -EINVAL;
     }
 
     int fd = open(TIERING_PATH, O_RDWR);
     if (fd < 0) {
-        printf("cannot find access dev under /dev.\n");
+        SMAP_LOGGER_ERROR("cannot open device %s.", TIERING_PATH);
+        return -ENOENT;
     }
 
     int ret = ioctl(fd, SMAP_SEND_NUMA_MSG_TO_KERNEL, msg);

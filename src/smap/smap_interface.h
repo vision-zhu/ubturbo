@@ -19,6 +19,8 @@
 extern "C" {
 #endif
 
+/* MAX_NUMA_NUM: 最大NUMA节点数量
+ * 注意：该值需与 trouble_numa_meta.h 及 plugins/smap/src/user/smap_interface.h 保持一致 */
 #define MAX_NUMA_NUM 18
 #define MAX_NR_MIGRATE_ESCAPE 300
 #define REMOTE_NUMA_NUM 18

@@ -6,6 +6,8 @@
 #ifndef _TROUBLR_NUMA_META_H
 #define _TROUBLR_NUMA_META_H
 
+/* MAX_NUMA_NUM: 最大NUMA节点数量
+ * 注意：该值需与 plugins/smap/src/user/smap_interface.h 及 src/smap/smap_interface.h 保持一致 */
 #define MAX_NUMA_NUM 18
 
 enum numa_list_flags {
