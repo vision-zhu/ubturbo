@@ -3220,3 +3220,144 @@ TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatchTwo)
     ret = IsPidArrRemoteNumaMatch(&msg);
     EXPECT_EQ(-ENXIO, ret);
 }
+
+extern "C" uint32_t GetMigratePeriodConfig(void);
+extern "C" bool GetFileConfSwitchConfig(void);
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigSwitchOn)
+{
+    int ret;
+    struct ProcessManager pm;
+    uint32_t configPeriod = 500;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetMigratePeriodConfig).stubs().will(returnValue(configPeriod));
+    MOCKER(InitThread).expects(once()).with(eq(&pm), eq(configPeriod), any()).will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+    GlobalMockObject::verify();
+}
+
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigSwitchOff)
+{
+    int ret;
+    struct ProcessManager pm;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(InitThread).expects(once()).with(eq(&pm), eq((uint32_t)SCAN_MIGRATE_PERIOD), any()).will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+    GlobalMockObject::verify();
+}
+
+extern "C" uint32_t GetScanPeriodConfig(void);
+extern "C" int ProcessAddManage(ProcessParam *param, uint32_t *nodeBitmap);
+TEST_F(InterfaceTest, TestAddProcessesToGlobalManagerWithConfigSwitchOn)
+{
+    struct ProcessManager pm;
+    EnvMutexInit(&pm.lock);
+    pm.processes = nullptr;
+    pm.nr[PROCESS_TYPE] = 0;
+    pm.nr[VM_TYPE] = 0;
+    pm.tracking.pageSize = PAGESIZE_4K;
+
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
+    msg.payload[0].inner[0].ratio = 25;
+
+    uint32_t configScanPeriod = 150;
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&pm));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetScanPeriodConfig).stubs().will(returnValue(configScanPeriod));
+    MOCKER(ProcessAddManage).expects(once()).will(returnValue(0));
+
+    bool hasInvalidPid = false;
+    int ret = AddProcessesToGlobalManager(&msg, 0, nullptr, &hasInvalidPid);
+    EXPECT_EQ(0, ret);
+    GlobalMockObject::verify();
+}
+
+TEST_F(InterfaceTest, TestAddProcessesToGlobalManagerWithConfigSwitchOff)
+{
+    struct ProcessManager pm;
+    EnvMutexInit(&pm.lock);
+    pm.processes = nullptr;
+    pm.nr[PROCESS_TYPE] = 0;
+    pm.nr[VM_TYPE] = 0;
+    pm.tracking.pageSize = PAGESIZE_4K;
+
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].destNid = 4;
+    msg.payload[0].inner[0].ratio = 25;
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&pm));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(ProcessAddManage).expects(once()).will(returnValue(0));
+
+    bool hasInvalidPid = false;
+    int ret = AddProcessesToGlobalManager(&msg, 0, nullptr, &hasInvalidPid);
+    EXPECT_EQ(0, ret);
+    GlobalMockObject::verify();
+}
+
+extern "C" int CheckAddProcessTrackingMsg(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType);
+extern "C" int AddProcessTracking(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType);
+extern "C" ProcessAttr *GetProcessAttrLocked(pid_t pid);
+TEST_F(InterfaceTest, TestSmapProcessTrackingAddWithConfigSwitchOn)
+{
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = nullptr;
+    g_processManager.nr[VM_TYPE] = 0;
+
+    pid_t pidArr[] = { 1234 };
+    uint32_t scanTime[] = { 100 };
+    uint32_t duration[] = { 1 };
+    uint32_t configScanPeriod = 200;
+
+    EnvAtomicSet(&g_status, 1);
+    MOCKER(IsPidTypeValid).stubs().will(returnValue(true));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetScanPeriodConfig).stubs().will(returnValue(configScanPeriod));
+    MOCKER(CheckAddProcessTrackingMsg).stubs().will(returnValue(0));
+    MOCKER(AddProcessTracking).stubs().will(returnValue(0));
+    MOCKER(GetProcessAttrLocked).stubs().will(returnValue((ProcessAttr *)nullptr));
+    MOCKER(ProcessAddManage).expects(once()).will(returnValue(0));
+
+    int ret = ubturbo_smap_process_tracking_add(pidArr, scanTime, duration, 1, 1);
+    EXPECT_EQ(0, ret);
+    EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
+    GlobalMockObject::verify();
+}
+
+TEST_F(InterfaceTest, TestSmapProcessTrackingAddWithConfigSwitchOff)
+{
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = nullptr;
+    g_processManager.nr[VM_TYPE] = 0;
+
+    pid_t pidArr[] = { 1234 };
+    uint32_t scanTime[] = { 100 };
+    uint32_t duration[] = { 1 };
+
+    EnvAtomicSet(&g_status, 1);
+    MOCKER(IsPidTypeValid).stubs().will(returnValue(true));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(CheckAddProcessTrackingMsg).stubs().will(returnValue(0));
+    MOCKER(AddProcessTracking).stubs().will(returnValue(0));
+    MOCKER(GetProcessAttrLocked).stubs().will(returnValue((ProcessAttr *)nullptr));
+    MOCKER(ProcessAddManage).expects(once()).will(returnValue(0));
+
+    int ret = ubturbo_smap_process_tracking_add(pidArr, scanTime, duration, 1, 1);
+    EXPECT_EQ(0, ret);
+    EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
+    GlobalMockObject::verify();
+    EnvAtomicSet(&g_status, 0);
+}

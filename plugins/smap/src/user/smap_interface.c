@@ -33,6 +33,7 @@
 #include "manage/virt.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
+#include "strategy/period_config.h"
 
 #include "smap_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
@@ -252,8 +253,14 @@ static int InitVirAPI(void)
 static int InitAllThreads(struct ProcessManager *manager)
 {
     int ret;
+    uint32_t migratePeriod = SCAN_MIGRATE_PERIOD;
     EnvMutexLock(&manager->threadLock);
-    ret = InitThread(manager, SCAN_MIGRATE_PERIOD, ScanMigrateWork);
+    // 优先从配置文件读取迁移周期
+    if (GetFileConfSwitchConfig()) {
+        migratePeriod = GetMigratePeriodConfig();
+        SMAP_LOGGER_INFO("Init thread with migrate period from config: %u.", migratePeriod);
+    }
+    ret = InitThread(manager, migratePeriod, ScanMigrateWork);
     if (ret) {
         SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
         DestroyAllThread(manager);
@@ -544,11 +551,17 @@ static int AddProcessesToGlobalManager(struct MigrateOutMsg *msg, int pidType,
 {
     int ret = 0;
     uint32_t *nodeBitmapTmp;
+    uint32_t scanPeriod = SCAN_TIME_4K;
+    // 优先从配置文件读取扫描周期
+    if (GetFileConfSwitchConfig()) {
+        scanPeriod = GetScanPeriodConfig();
+        SMAP_LOGGER_INFO("Use scan period from config: %u for new pid.", scanPeriod);
+    }
     for (int i = 0; i < msg->count; ++i) {
         nodeBitmapTmp = nodeBitmap ? &nodeBitmap[i] : NULL;
         ProcessParam param = { 0 };
         param.pid = msg->payload[i].pid;
-        param.scanTime = pidType == VM_TYPE ? SCAN_TIME_2M : SCAN_TIME_4K;
+        param.scanTime = scanPeriod;
         param.scanType = NORMAL_SCAN;
         param.count = msg->payload[i].count;
 
@@ -1445,6 +1458,7 @@ int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_
 {
     int ret = 0;
     struct ProcessManager *manager = GetProcessManager();
+    uint32_t scanPeriod = 0;
     SMAP_LOGGER_INFO("Receive ubturbo_smap_process_tracking_add msg, len:%d, scanType:%d.", len, scanType);
     if (EnvAtomicRead(&g_status) != RUNNING) {
         SMAP_LOGGER_ERROR("Smap isn't running, add process tracking failed.");
@@ -1453,6 +1467,11 @@ int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_
     if (!IsPidTypeValid(PAGETYPE_HUGE) && scanType != STATISTIC_SCAN) {
         SMAP_LOGGER_ERROR("Smap Add Process Tracking pid type invalid, expected %d.", PAGETYPE_HUGE);
         return -EINVAL;
+    }
+    // 优先从配置文件读取扫描周期
+    if (GetFileConfSwitchConfig()) {
+        scanPeriod = GetScanPeriodConfig();
+        SMAP_LOGGER_INFO("Use scan period from config: %u for tracking add.", scanPeriod);
     }
     EnvMutexLock(&manager->lock);
     ret = CheckAddProcessTrackingMsg(pidArr, scanTime, duration, len, scanType);
@@ -1482,7 +1501,8 @@ int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_
             param.numaParam[0].ratio = 0;
             param.numaParam[0].nid = DEFAULT_L2_NODE;
         }
-        param.scanTime = scanTime[i];
+        // 配置开关开启时优先使用配置文件的扫描周期
+        param.scanTime = (scanPeriod > 0) ? scanPeriod : scanTime[i];
         param.duration = duration[i];
         param.scanType = scanType;
         param.numaParam[0].migrateMode = MIG_RATIO_MODE;
