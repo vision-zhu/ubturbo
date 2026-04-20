@@ -16,6 +16,7 @@
 #include "manage/device.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
+#include "strategy/period_config.h"
 #include "securec.h"
 #include "smap_user_log.h"
 #include "smap_env.h"
@@ -3219,4 +3220,99 @@ TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatchTwo)
     MOCKER(GetProcessAttrLocked).stubs().will(returnValue(&process));
     ret = IsPidArrRemoteNumaMatch(&msg);
     EXPECT_EQ(-ENXIO, ret);
+}
+
+// Test InitAllThreads with config file enabled
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigEnabled)
+{
+    int ret;
+    struct ProcessManager pm;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(PeriodConfigRead).stubs().will(returnValue(0));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetMigratePeriodConfig).stubs().will(returnValue(1500));
+    MOCKER(InitThread).stubs().will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+}
+
+// Test InitAllThreads with config file disabled
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigDisabled)
+{
+    int ret;
+    struct ProcessManager pm;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(PeriodConfigRead).stubs().will(returnValue(0));
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(InitThread).stubs().will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+}
+
+// Test ProcessAddTrackingManage with config file enabled
+TEST_F(InterfaceTest, TestProcessAddTrackingManageConfigEnabled)
+{
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetScanPeriodConfig).stubs().will(returnValue(150));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(SetProcessLocalNuma).stubs().will(returnValue(0));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    int ret = ProcessAddTrackingManage(&msg, VM_TYPE, nullptr);
+    EXPECT_EQ(0, ret);
+}
+
+// Test ProcessAddTrackingManage with config file disabled
+TEST_F(InterfaceTest, TestProcessAddTrackingManageConfigDisabled)
+{
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(SetProcessLocalNuma).stubs().will(returnValue(0));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    int ret = ProcessAddTrackingManage(&msg, VM_TYPE, nullptr);
+    EXPECT_EQ(0, ret);
+}
+
+// Test AddProcessesToGlobalManager with config file enabled
+TEST_F(InterfaceTest, TestAddProcessesToGlobalManagerConfigEnabled)
+{
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+    bool hasInvalidPid = false;
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetScanPeriodConfig).stubs().will(returnValue(150));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(ProcessAddManage).stubs().will(returnValue(0));
+
+    int ret = AddProcessesToGlobalManager(&msg, VM_TYPE, nullptr, &hasInvalidPid);
+    EXPECT_EQ(0, ret);
+}
+
+// Test AddProcessesToGlobalManager with config file disabled
+TEST_F(InterfaceTest, TestAddProcessesToGlobalManagerConfigDisabled)
+{
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+    bool hasInvalidPid = false;
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(ProcessAddManage).stubs().will(returnValue(0));
+
+    int ret = AddProcessesToGlobalManager(&msg, VM_TYPE, nullptr, &hasInvalidPid);
+    EXPECT_EQ(0, ret);
 }

@@ -33,6 +33,7 @@
 #include "manage/virt.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
+#include "strategy/period_config.h"
 
 #include "smap_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
@@ -252,8 +253,11 @@ static int InitVirAPI(void)
 static int InitAllThreads(struct ProcessManager *manager)
 {
     int ret;
+    uint32_t migratePeriod;
     EnvMutexLock(&manager->threadLock);
-    ret = InitThread(manager, SCAN_MIGRATE_PERIOD, ScanMigrateWork);
+    PeriodConfigRead(PERIOD_CONFIG_PATH);
+    migratePeriod = GetFileConfSwitchConfig() ? GetMigratePeriodConfig() : SCAN_MIGRATE_PERIOD;
+    ret = InitThread(manager, migratePeriod, ScanMigrateWork);
     if (ret) {
         SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
         DestroyAllThread(manager);
@@ -500,15 +504,17 @@ static int CheckMigrateOutMsg(struct MigrateOutMsg *msg, int pidType)
 static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap)
 {
     int ret = 0;
+    uint32_t scanPeriod;
     if (!msg) {
         SMAP_LOGGER_ERROR("Smap mig out msg is null.");
         return -EINVAL;
     }
     struct AccessAddPidPayload payload[MAX_NR_MIGOUT] = { 0 };
+    scanPeriod = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : LIGHT_STABLE_SCAN_CYCLE;
     for (int i = 0; i < msg->count; ++i) {
         payload[i].type = NORMAL_SCAN;
         payload[i].pid = msg->payload[i].pid;
-        payload[i].scanTime = LIGHT_STABLE_SCAN_CYCLE;
+        payload[i].scanTime = scanPeriod;
         if (!PidIsValid(msg->payload[i].pid)) {
             SMAP_LOGGER_WARNING("pid %d doesn't exist.", msg->payload[i].pid);
             payload[i].pid = NON_EXIST_PID;
@@ -544,11 +550,14 @@ static int AddProcessesToGlobalManager(struct MigrateOutMsg *msg, int pidType,
 {
     int ret = 0;
     uint32_t *nodeBitmapTmp;
+    uint32_t scanPeriod;
+    scanPeriod = GetFileConfSwitchConfig() ? GetScanPeriodConfig() :
+                 (pidType == VM_TYPE ? SCAN_TIME_2M : SCAN_TIME_4K);
     for (int i = 0; i < msg->count; ++i) {
         nodeBitmapTmp = nodeBitmap ? &nodeBitmap[i] : NULL;
         ProcessParam param = { 0 };
         param.pid = msg->payload[i].pid;
-        param.scanTime = pidType == VM_TYPE ? SCAN_TIME_2M : SCAN_TIME_4K;
+        param.scanTime = scanPeriod;
         param.scanType = NORMAL_SCAN;
         param.count = msg->payload[i].count;
 
