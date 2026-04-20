@@ -16,6 +16,7 @@
 #include "manage/device.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
+#include "strategy/period_config.h"
 #include "securec.h"
 #include "smap_user_log.h"
 #include "smap_env.h"
@@ -3219,4 +3220,73 @@ TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatchTwo)
     MOCKER(GetProcessAttrLocked).stubs().will(returnValue(&process));
     ret = IsPidArrRemoteNumaMatch(&msg);
     EXPECT_EQ(-ENXIO, ret);
+}
+
+// Test: InitAllThreads uses config migrate period when file switch enabled
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigEnabled)
+{
+    int ret;
+    struct ProcessManager pm;
+    uint32_t configMigratePeriod = 1500;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetMigratePeriodConfig).stubs().will(returnValue(configMigratePeriod));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(InitThread).expects(once()).with(eq(&pm), eq(configMigratePeriod), any()).will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+}
+
+// Test: InitAllThreads uses default migrate period when file switch disabled
+TEST_F(InterfaceTest, TestInitAllThreadsWithConfigDisabled)
+{
+    int ret;
+    struct ProcessManager pm;
+    uint32_t defaultMigratePeriod = 2000; // LIGHT_STABLE_MIGRATE_CYCLE
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(InitThread).expects(once()).with(eq(&pm), eq(defaultMigratePeriod), any()).will(returnValue(0));
+    ret = InitAllThreads(&pm);
+    EXPECT_EQ(0, ret);
+}
+
+// Test: ProcessAddTrackingManage uses config scan period when file switch enabled
+TEST_F(InterfaceTest, TestProcessAddTrackingManageWithConfigEnabled)
+{
+    int ret;
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+    uint32_t configScanPeriod = 100;
+    struct ProcessManager pm = { .nrLocalNuma = 2 };
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(true));
+    MOCKER(GetScanPeriodConfig).stubs().will(returnValue(configScanPeriod));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(SetProcessLocalNuma).stubs().will(returnValue(0));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&pm));
+    MOCKER(AccessIoctlAddPid).expects(once()).will(returnValue(0));
+    ret = ProcessAddTrackingManage(&msg, PROCESS_TYPE, nullptr);
+    EXPECT_EQ(0, ret);
+}
+
+// Test: ProcessAddTrackingManage uses default scan period when file switch disabled
+TEST_F(InterfaceTest, TestProcessAddTrackingManageWithConfigDisabled)
+{
+    int ret;
+    struct MigrateOutMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1234;
+    msg.payload[0].count = 0;
+    struct ProcessManager pm = { .nrLocalNuma = 2 };
+
+    MOCKER(GetFileConfSwitchConfig).stubs().will(returnValue(false));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(SetProcessLocalNuma).stubs().will(returnValue(0));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&pm));
+    MOCKER(AccessIoctlAddPid).expects(once()).will(returnValue(0));
+    ret = ProcessAddTrackingManage(&msg, PROCESS_TYPE, nullptr);
+    EXPECT_EQ(0, ret);
 }
