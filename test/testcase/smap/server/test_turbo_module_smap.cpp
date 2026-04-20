@@ -899,6 +899,10 @@ TEST_F(TestTurboModuleSmap, ReturnEINVALWhenAnySymbolMissing)
             .will(returnValue((void *)0x5678));
     }
 
+    MOCKER((int (*)(void*))(dlclose))
+        .stubs()
+        .will(returnValue(0));
+
     int ret = OpenSmapHandler();
     EXPECT_EQ(ret, -EINVAL);
 }

@@ -34,26 +34,26 @@ const std::string FILE_NAME = "/dev/shm/ubturbo_page_type.dat";
 
 constexpr const char *LIB_SMAP_PATH = "/usr/lib64/libsmap.so";
 
-static void *g_smapHandler = nullptr;
-static SmapMigrateOutFunc g_smapMigrateOut = nullptr;
-static SmapMigrateBackFunc g_smapMigrateBack = nullptr;
-static SmapRemoveFunc g_smapRemove = nullptr;
-static SmapEnableNodeFunc g_smapEnableNode = nullptr;
-static SmapInitFunc g_smapInit = nullptr;
-static SmapStopFunc g_smapStop = nullptr;
-static SmapUrgentMigrateOutFunc g_smapUrgentMigrateOut = nullptr;
-static SetSmapRemoteNumaInfoFunc g_setSmapRemoteNumaInfo = nullptr;
-static SmapQueryFreqFunc g_smapQueryVmFreq = nullptr;
-static SetSmapRunModeFunc g_setSmapRunMode = nullptr;
-static SmapIsRunningFunc g_smapIsRunning = nullptr;
-static SmapMigrateOutSyncFunc g_smapMigrateOutSync = nullptr;
-static SmapAddProcessTrackingFunc g_smapAddProcessTracking = nullptr;
-static SmapRemoveProcessTrackingFunc g_smapRemoveProcessTracking = nullptr;
-static SmapEnableProcessMigrateFunc g_smapEnableProcessMigrate = nullptr;
-static SmapMigrateRemoteNumaFunc g_smapMigrateRemoteNuma = nullptr;
-static SmapMigratePidRemoteNumaFunc g_smapMigratePidRemoteNuma = nullptr;
-static SmapQueryProcessConfigFunc g_smapQueryProcessConfig = nullptr;
-static SmapQueryRemoteNumaFreqFunc g_smapQueryRemoteNumaFreq = nullptr;
+ void *g_smapHandler = nullptr;
+ SmapMigrateOutFunc g_smapMigrateOut = nullptr;
+ SmapMigrateBackFunc g_smapMigrateBack = nullptr;
+ SmapRemoveFunc g_smapRemove = nullptr;
+ SmapEnableNodeFunc g_smapEnableNode = nullptr;
+ SmapInitFunc g_smapInit = nullptr;
+ SmapStopFunc g_smapStop = nullptr;
+ SmapUrgentMigrateOutFunc g_smapUrgentMigrateOut = nullptr;
+ SetSmapRemoteNumaInfoFunc g_setSmapRemoteNumaInfo = nullptr;
+ SmapQueryFreqFunc g_smapQueryVmFreq = nullptr;
+ SetSmapRunModeFunc g_setSmapRunMode = nullptr;
+ SmapIsRunningFunc g_smapIsRunning = nullptr;
+ SmapMigrateOutSyncFunc g_smapMigrateOutSync = nullptr;
+ SmapAddProcessTrackingFunc g_smapAddProcessTracking = nullptr;
+ SmapRemoveProcessTrackingFunc g_smapRemoveProcessTracking = nullptr;
+ SmapEnableProcessMigrateFunc g_smapEnableProcessMigrate = nullptr;
+ SmapMigrateRemoteNumaFunc g_smapMigrateRemoteNuma = nullptr;
+ SmapMigratePidRemoteNumaFunc g_smapMigratePidRemoteNuma = nullptr;
+ SmapQueryProcessConfigFunc g_smapQueryProcessConfig = nullptr;
+ SmapQueryRemoteNumaFreqFunc g_smapQueryRemoteNumaFreq = nullptr;
 
 RetCode SmapMigrateOutHandler(const TurboByteBuffer &inputBuffer, TurboByteBuffer &outputBuffer)
 {
@@ -636,6 +636,8 @@ int OpenSmapHandler()
            !g_smapMigratePidRemoteNuma || !g_smapQueryProcessConfig || !g_smapQueryRemoteNumaFreq;
     if (flag) {
         UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Smap] Smap function not found";
+        dlclose(g_smapHandler);
+        g_smapHandler = nullptr;
         return -EINVAL;
     }
     return 0;
