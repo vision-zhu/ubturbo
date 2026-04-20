@@ -326,7 +326,7 @@ int hist_module_init(void)
 {
 	int ret;
 
-	ret = hist_init(SIZE_2M, smap_scene != NORMAL_SCENE);
+	ret = hist_init(SIZE_2M);
 	if (ret) {
 		pr_err("init SMAP histogram device failed, ret: %d\n", ret);
 		return ret;
