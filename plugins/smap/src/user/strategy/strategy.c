@@ -57,7 +57,6 @@ uint64_t GetNrFreePagesByNode(int nid)
         break;
     }
     nr >>= KB_TO_PAGE_SHIFT;
-    nr -= (nr > NR_RESERVED_PAGES ? NR_RESERVED_PAGES : nr);
 
     ret = fclose(file);
     if (ret) {
