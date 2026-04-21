@@ -19,11 +19,20 @@
 #include <linux/wait.h>
 #include <linux/minmax.h>
 #include <linux/uaccess.h>
-
 #include "ub_hist.h"
 
-#define UDIE_PHY_ADDR_STS_REGS_N7_OFFSET 0x4000
-#define DEVICE_MEM_LEN 0x11000
+#define REG_BASE_ADDR_N6_0 0x33030a0000
+#define REG_BASE_ADDR_N6_1 0x330a0a0000
+#define REG_BASE_ADDR_N6_2 0x73030a0000
+#define REG_BASE_ADDR_N6_3 0x730a0a0000
+#define REG_BASE_ADDR_N7_0 0x2d21320000
+#define REG_BASE_ADDR_N7_1 0x2d21360000
+#define REG_BASE_ADDR_N7_2 0x3d21320000
+#define REG_BASE_ADDR_N7_3 0x3d21360000
+#define UDIE_PHY_ADDR_STS_REGS_N6_OFFSET 0x4000
+#define UDIE_PHY_ADDR_STS_REGS_N7_OFFSET 0x1000
+#define DEVICE_MEM_LEN_N6 0x8000
+#define DEVICE_MEM_LEN_N7 0x11000
 
 struct ub_hist_ba_device {
 	struct device *dev;
@@ -35,8 +44,10 @@ struct ub_hist_ba_device {
 static LIST_HEAD(ub_hist_ba_list);
 static DEFINE_SPINLOCK(ub_hist_ba_list_lock);
 static DEFINE_MUTEX(dev_sta_mutex);
+static ub_hist_smap_type g_ub_hist_smap_type;
 
-static struct ub_hist_ba_device *ub_hist_find_dev_by_tag(uint64_t ba_tag)
+	static struct ub_hist_ba_device *
+	ub_hist_find_dev_by_tag(uint64_t ba_tag)
 {
 	unsigned long flags;
 	struct ub_hist_ba_device *ba_dev;
@@ -48,7 +59,7 @@ static struct ub_hist_ba_device *ub_hist_find_dev_by_tag(uint64_t ba_tag)
 			return ba_dev;
 		}
 	}
-	pr_err("failed to find BA device by BA tag %#llx\n", ba_tag);
+	pr_err("failed to find BA device by BA tag\n");
 	ba_dev = NULL;
 	spin_unlock_irqrestore(&ub_hist_ba_list_lock, flags);
 	return ba_dev;
@@ -78,8 +89,8 @@ int ub_hist_offset_init(struct ub_hist_ba_device *ba_dev, u32 reg_offset,
 	u32 val = ub_hist_read_reg(ba_dev, reg_offset);
 	if (val != reg_init) {
 		dev_err(ba_dev->dev,
-			"hist_ba[%#llx] ctrl reg mismatch(%#x:%#x)\n",
-			ba_dev->info.ba_tag, val, reg_init);
+			"hist ba ctrl reg mismatch(read_value(%#x):expect_value(%#x))\n",
+			val, reg_init);
 		return -EBUSY;
 	}
 	pr_info("[ub_hist]reg_offset:%#x, reg_init:%#x\n", reg_offset,
@@ -118,8 +129,7 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 
 	smap_cfg00.val = ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET);
 	if (!smap_cfg00.ram_init_done) {
-		dev_err(ba_dev->dev, "hist_ba[%#llx] init state error\n",
-			ba_dev->info.ba_tag);
+		dev_err(ba_dev->dev, "hist ba init state error\n");
 		return -EBUSY;
 	}
 
@@ -131,10 +141,26 @@ static int ub_hist_ba_init(struct ub_hist_ba_device *ba_dev)
 	return 0;
 }
 
+static inline u32 ub_hist_get_smap_sts_value_reg_addr(void)
+{
+	return (g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7) ?
+		       UDIE_PHY_ADDR_STS_REGS_N7_OFFSET :
+		       UDIE_PHY_ADDR_STS_REGS_N6_OFFSET;
+}
+
+static inline u32 ub_hist_get_ba_sts_value_count(void)
+{
+	return (g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7) ?
+		       BA_STS_VALUE_N7_COUNT :
+		       BA_STS_VALUE_N6_COUNT;
+}
+
 int ub_hist_rd_clr_sts(struct ub_hist_ba_device *ba_dev, u32 *buf, size_t len)
 {
 	int i;
 	union hi_upa_smap_cfg_smap_cfg00 smap_cfg00;
+	u32 smap_sts_value_reg_addr = ub_hist_get_smap_sts_value_reg_addr();
+	u32 ba_sts_value_count = ub_hist_get_ba_sts_value_count();
 
 	smap_cfg00.val = ub_hist_read_reg(ba_dev, BA_CTRL_REG_OFFSET);
 	if (smap_cfg00.sts_enable) {
@@ -142,16 +168,15 @@ int ub_hist_rd_clr_sts(struct ub_hist_ba_device *ba_dev, u32 *buf, size_t len)
 		return -EBUSY;
 	}
 	if (buf) {
-		for (i = 0; i < BA_STS_WORD_COUNT; i++) {
-			buf[i] = ub_hist_read_reg(
-				ba_dev, UDIE_PHY_ADDR_STS_REGS_N7_OFFSET +
-						i * sizeof(u32));
+		for (i = 0; i < BA_STS_WORD_COUNT(ba_sts_value_count); i++) {
+			buf[i] = ub_hist_read_reg(ba_dev,
+						  smap_sts_value_reg_addr +
+							  i * sizeof(u32));
 		}
 	} else {
-		for (i = 0; i < BA_STS_WORD_COUNT; i++) {
-			ub_hist_read_reg(ba_dev,
-					 UDIE_PHY_ADDR_STS_REGS_N7_OFFSET +
-						 i * sizeof(u32));
+		for (i = 0; i < BA_STS_WORD_COUNT(ba_sts_value_count); i++) {
+			ub_hist_read_reg(ba_dev, smap_sts_value_reg_addr +
+							 i * sizeof(u32));
 		}
 	}
 	return 0;
@@ -169,6 +194,7 @@ int ub_hist_query_ba_count(void)
 	spin_unlock(&ub_hist_ba_list_lock);
 	return ba_count;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_count);
 
 int ub_hist_query_ba_tags(uint64_t *p_tags, int count)
 {
@@ -192,6 +218,7 @@ int ub_hist_query_ba_tags(uint64_t *p_tags, int count)
 	spin_unlock(&ub_hist_ba_list_lock);
 	return ret;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_tags);
 
 int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info)
 {
@@ -210,6 +237,7 @@ int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_query_ba_info);
 
 int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 {
@@ -228,6 +256,7 @@ int ub_hist_set_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_set_state);
 
 int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 {
@@ -246,11 +275,13 @@ int ub_hist_get_state(struct ub_hist_ba_config *config, uint64_t ba_tag)
 
 	return 0;
 }
+EXPORT_SYMBOL(ub_hist_get_state);
 
 int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 {
 	int ret;
 	struct ub_hist_ba_device *ba_dev;
+	u32 ba_sts_value_count = ub_hist_get_ba_sts_value_count();
 
 	if (!result) {
 		pr_err("invalid buffer passed to get histogram statistics result\n");
@@ -262,15 +293,20 @@ int ub_hist_get_statistic_result(struct ub_hist_ba_result *result)
 		return -ENODEV;
 
 	ret = ub_hist_rd_clr_sts(ba_dev, (u32 *)result->buffer,
-				 BA_STS_WORD_COUNT);
+				 BA_STS_WORD_COUNT(ba_sts_value_count));
 	return ret;
 }
+EXPORT_SYMBOL(ub_hist_get_statistic_result);
 
 static int ub_hist_get_ba_resource(struct platform_device *pdev,
 				   struct ub_hist_ba_device *ba_dev)
 {
 	int ret;
 	uint64_t value;
+	uint64_t device_mem_len =
+		(g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7) ?
+			DEVICE_MEM_LEN_N7 :
+			DEVICE_MEM_LEN_N6;
 
 	if (!ACPI_COMPANION(&pdev->dev)) {
 		pr_err("ACPI companion not found\n");
@@ -279,53 +315,48 @@ static int ub_hist_get_ba_resource(struct platform_device *pdev,
 
 	ret = device_property_read_u64(&pdev->dev, "ba_reg_base_addr", &value);
 	if (ret) {
-		pr_err("failed to read register base address: %d\n", ret);
+		pr_err("failed to read register base address, ret: %d\n", ret);
 		return ret;
 	}
 
 	ba_dev->info.ba_tag = value;
-	ba_dev->base_addr = ioremap(value, DEVICE_MEM_LEN);
+	ba_dev->base_addr = ioremap(value, device_mem_len);
 	if (!ba_dev->base_addr) {
-		pr_err("failed to remap register base address: %#llx\n", value);
+		pr_err("failed to remap register base address\n");
 		return -ENOMEM;
 	}
-	pr_debug("register base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "cc_mem_base_addr", &value);
 	if (ret) {
-		pr_err("failed to read CC memory base address: %d\n", ret);
+		pr_err("failed to read CC memory base address, ret: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.cc_range.start = value;
-	pr_debug("CC memory base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "cc_mem_size", &value);
 	if (ret) {
-		pr_err("failed to read CC memory size: %d\n", ret);
+		pr_err("failed to read CC memory size, ret: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.cc_range.end = ba_dev->info.cc_range.start + value;
-	pr_debug("CC memory size: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "nc_mem_base_addr", &value);
 	if (ret) {
-		pr_err("failed to read NC memory base address: %d\n", ret);
+		pr_err("failed to read NC memory base address, ret: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.nc_range.start = value;
-	pr_debug("NC memory base address: %#llx\n", value);
 
 	ret = device_property_read_u64(&pdev->dev, "nc_mem_size", &value);
 	if (ret) {
-		pr_err("failed to read NC memory size: %d\n", ret);
+		pr_err("failed to read NC memory size, ret: %d\n", ret);
 		iounmap(ba_dev->base_addr);
 		return ret;
 	}
 	ba_dev->info.nc_range.end = ba_dev->info.nc_range.start + value;
-	pr_debug("NC memory size: %#llx\n", value);
 
 	return 0;
 }
@@ -406,16 +437,55 @@ static struct platform_driver ub_hist_platform_driver = {
         },
 };
 
-int ub_hist_init(void)
+static inline bool ub_hist_check_addr_in_n7_bas(u64 ba_tag)
+{
+	return (ba_tag == REG_BASE_ADDR_N7_0) ||
+	       (ba_tag == REG_BASE_ADDR_N7_1) ||
+	       (ba_tag == REG_BASE_ADDR_N7_2) || (ba_tag == REG_BASE_ADDR_N7_3);
+}
+
+static inline bool ub_hist_check_addr_in_n6_bas(u64 ba_tag)
+{
+	return (ba_tag == REG_BASE_ADDR_N6_0) ||
+	       (ba_tag == REG_BASE_ADDR_N6_1) ||
+	       (ba_tag == REG_BASE_ADDR_N6_2) || (ba_tag == REG_BASE_ADDR_N6_3);
+}
+
+static bool ub_hist_verify_hw_type(void)
+{
+	struct ub_hist_ba_device *ba_dev;
+	u64 ba_tag;
+	bool ret = true;
+
+	spin_lock(&ub_hist_ba_list_lock);
+	list_for_each_entry(ba_dev, &ub_hist_ba_list, list) {
+		ba_tag = ba_dev->info.ba_tag;
+		ret = (g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7) ?
+			      ub_hist_check_addr_in_n7_bas(ba_tag) :
+			      ub_hist_check_addr_in_n6_bas(ba_tag);
+		if (!ret)
+			break;
+	}
+	spin_unlock(&ub_hist_ba_list_lock);
+	return ret;
+}
+
+int ub_hist_init(ub_hist_smap_type hw_type)
 {
 	int ret;
 
+	g_ub_hist_smap_type = hw_type;
 	ret = platform_driver_register(&ub_hist_platform_driver);
 	if (ret) {
 		pr_err("failed to register platform driver, ret: %d\n", ret);
 		return ret;
 	}
 
+	if (!ub_hist_verify_hw_type()) {
+		pr_err("parameter hist_type doesn't match the hardware type\n");
+		ub_hist_exit();
+		return -EINVAL;
+	}
 	pr_debug("UB histogram init successfully\n");
 	return ret;
 }

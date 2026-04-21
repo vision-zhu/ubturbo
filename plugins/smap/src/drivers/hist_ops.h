@@ -29,6 +29,7 @@
 #define STS_PER_WORD (2)
 #define HIST_STS_VALUE_NUM (HIST_STS_VALUE_WORD_NUM * STS_PER_WORD)
 #define HIST_THREAD_PERIOD (512)
+#define HIST_SCAN_DURATION_PER_WIN (64)
 #define PAGE_SIZE_64K_DIV_4K 16
 
 #define THREAD_SLEEP (50)
@@ -61,6 +62,7 @@ struct smap_hist_dev {
 	struct segs_info info;
 	struct ub_hist_ba_info *ba_info;
 	u32 freq_register_cnt;
+	u32 scan_wins_num_per_ba;
 	u32 ba_cnt;
 	u32 period;
 	u16 *buf;
@@ -70,6 +72,7 @@ struct smap_hist_dev {
 	u8 abort_flag;
 	flush_actc flush_actc;
 	union smap_hist_status status;
+	ub_hist_smap_type hw_type;
 };
 
 struct hist_ops {
@@ -78,7 +81,7 @@ struct hist_ops {
 };
 
 struct smap_hist_dev *get_hist_dev(void);
-int hist_init(u32 pgsize);
+int hist_init(u32 pgsize, ub_hist_smap_type hw_type);
 void hist_deinit(void);
 void fetch_hist_actc_buf(u16 *dst_buf, struct addr_seg *seg);
 void hist_update_pgsize(u32 pgsize);

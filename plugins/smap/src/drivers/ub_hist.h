@@ -13,8 +13,12 @@
 
 #define BA_STS_VALUE_SIZE 2
 #define BA_STS_VALUE_COUNT 32768
-#define BA_STS_TOTAL_LEHGTH (BA_STS_VALUE_COUNT * BA_STS_VALUE_SIZE)
-#define BA_STS_WORD_COUNT (BA_STS_TOTAL_LEHGTH / sizeof(u32))
+#define BA_STS_VALUE_N7_COUNT 32768
+#define BA_STS_VALUE_N6_COUNT 8192
+#define BA_STS_TOTAL_LEHGTH(ba_sts_value_count) \
+	((ba_sts_value_count) * BA_STS_VALUE_SIZE)
+#define BA_STS_WORD_COUNT(ba_sts_value_count) \
+	(BA_STS_TOTAL_LEHGTH(ba_sts_value_count) / sizeof(u32))
 
 #define KB (1ULL << 10)
 #define MB (1ULL << 20)
@@ -66,10 +70,13 @@ struct ub_hist_ba_tags {
 	uint64_t ba_tags[0];
 };
 
-int ub_hist_init(void);
+typedef enum {
+	UB_HIST_SMAP_TYPE_N6 = 0,
+	UB_HIST_SMAP_TYPE_N7
+} ub_hist_smap_type;
+
+int ub_hist_init(ub_hist_smap_type hw_type);
 void ub_hist_exit(void);
-int ub_hist_lock_device(void);
-void ub_hist_unlock_device(void);
 int ub_hist_query_ba_count(void);
 int ub_hist_query_ba_tags(uint64_t *p_tags, int count);
 int ub_hist_query_ba_info(uint64_t ba_tag, struct ub_hist_ba_info *ba_info);
