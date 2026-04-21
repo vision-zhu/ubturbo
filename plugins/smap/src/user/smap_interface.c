@@ -515,14 +515,10 @@ static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint
             continue;
         }
         // assign values for local numa nodes
-        if (!nodeBitmap) {
-            ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
-                return ret;
-            }
-        } else {
-            payload[i].numaNodes = nodeBitmap[i];
+        ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
+            return ret;
         }
         // assign values for remote numa nodes
         for (int j = 0; j < msg->payload[i].count; ++j) {
