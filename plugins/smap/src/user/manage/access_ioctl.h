@@ -47,13 +47,13 @@ struct AccessRemovePidMsg {
 struct AccessPidFreq {
     pid_t pid;
     size_t len[MAX_NODES];
-    uint16_t *freq[MAX_NODES];
+    actc_t *freq[MAX_NODES];
 };
 
 struct TrakingInfoPayload {
     pid_t pid;
     uint32_t length;
-    uint16_t *data;
+    actc_t *data;
 };
 
 struct UserInfo {
