@@ -428,4 +428,63 @@ TEST_F(TestTurboIpcHandler, PThreadFailedWhenHandleFunctionFailed)
     ipcHandler->EndListen();
 }
 
+// Issue #7: 测试嵌套注册场景不会发生死锁
+uint32_t NestedRegIpcServiceFunc(const TurboByteBuffer &inputBuffer, TurboByteBuffer &outputBuffer)
+{
+    // 回调函数内部尝试注册新服务（嵌套注册）
+    uint32_t ret = UBTurboRegIpcService("nestedFunction", TestFunc);
+    outputBuffer.data = new uint8_t[1];
+    outputBuffer.data[0] = static_cast<uint8_t>(ret);
+    outputBuffer.len = 1;
+    return 0;
+}
+
+TEST_F(TestTurboIpcHandler, NestedRegIpcServiceNoDeadlock)
+{
+    // 注册一个会在回调中再次注册服务的函数
+    UBTurboRegIpcService("outerFunction", NestedRegIpcServiceFunc);
+    ipcHandler->StartListen();
+    params.data = new uint8_t[5];
+    params.len = 5;
+    params.data[0] = 'h';
+    params.data[1] = 'e';
+    params.data[2] = 'l';
+    params.data[3] = 'l';
+    params.data[4] = 'o';
+    // 调用 outerFunction，其内部会尝试注册 nestedFunction
+    // 预期：应该返回非0错误码（因为重复注册），但不应该死锁
+    UBTurboFunctionCaller("outerFunction", params, result);
+    ipcHandler->EndListen();
+}
+
+// Issue #7: 测试嵌套解除注册场景不会发生死锁
+uint32_t NestedUnRegIpcServiceFunc(const TurboByteBuffer &inputBuffer, TurboByteBuffer &outputBuffer)
+{
+    // 回调函数内部尝试解除注册服务（嵌套解除注册）
+    uint32_t ret = UBTurboUnRegIpcService("toUnregFunction");
+    outputBuffer.data = new uint8_t[1];
+    outputBuffer.data[0] = static_cast<uint8_t>(ret);
+    outputBuffer.len = 1;
+    return 0;
+}
+
+TEST_F(TestTurboIpcHandler, NestedUnRegIpcServiceNoDeadlock)
+{
+    // 注册两个服务
+    UBTurboRegIpcService("outerUnregFunction", NestedUnRegIpcServiceFunc);
+    UBTurboRegIpcService("toUnregFunction", TestFunc);
+    ipcHandler->StartListen();
+    params.data = new uint8_t[5];
+    params.len = 5;
+    params.data[0] = 'h';
+    params.data[1] = 'e';
+    params.data[2] = 'l';
+    params.data[3] = 'l';
+    params.data[4] = 'o';
+    // 调用 outerUnregFunction，其内部会尝试解除注册 toUnregFunction
+    // 预期：应该成功返回0，但不应该死锁
+    UBTurboFunctionCaller("outerUnregFunction", params, result);
+    ipcHandler->EndListen();
+}
+
 }

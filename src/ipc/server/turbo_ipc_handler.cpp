@@ -283,23 +283,31 @@ static RetCode RecvMessage(int fd, TurboByteBuffer &params)
 
 RetCode IpcHandler::HandleFunction(const std::string &functionName, const TurboByteBuffer &messageBuffer, int fd)
 {
-    gLock.lock_shared();
-    auto it = funcTable.find(functionName);
-    UBTURBO_LOG_DEBUG(MODULE_NAME, MODULE_CODE) << "[Ipc][Server] Fit function " << functionName << ".";
+    IpcHandlerFunc handlerFunc = nullptr;
+    bool funcFound = false;
+    {
+        std::shared_lock<std::shared_mutex> lock(gLock);
+        auto it = funcTable.find(functionName);
+        UBTURBO_LOG_DEBUG(MODULE_NAME, MODULE_CODE) << "[Ipc][Server] Fit function " << functionName << ".";
+        if (it != funcTable.end()) {
+            handlerFunc = it->second;
+            funcFound = true;
+        }
+    }
+
     TurboByteBuffer inputBuffer;
     inputBuffer.data = messageBuffer.data + functionName.length() + 1;
     inputBuffer.len = messageBuffer.len - functionName.length() - 1;
     TurboByteBuffer outputBuffer;
     RetCode retCode = IPC_OK;
-    if (it != funcTable.end()) {
-        if (it->second(inputBuffer, outputBuffer) != 0) {
+    if (funcFound) {
+        if (handlerFunc(inputBuffer, outputBuffer) != 0) {
             retCode = IPC_FUNC_ERROR;
         }
     } else {
         UBTURBO_LOG_ERROR(MODULE_NAME, MODULE_CODE) << "[Ipc][Server] Unknown function " << functionName << ".";
         retCode = IPC_NO_FUNC;
     }
-    gLock.unlock_shared();
 
     if (retCode == IPC_NO_FUNC || retCode == IPC_FUNC_ERROR) {
         outputBuffer.len = 0;
