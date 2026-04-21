@@ -629,15 +629,11 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
         return -ENOMEM;
     }
 
-    if (!nodeBitmap) {
-        ret = SetProcessLocalNuma(param->pid, &attr->numaAttr.numaNodes, type == VM_TYPE);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", param->pid, ret);
-            free(attr);
-            return ret;
-        }
-    } else {
-        attr->numaAttr.numaNodes = *nodeBitmap;
+    ret = SetProcessLocalNuma(param->pid, &attr->numaAttr.numaNodes, type == VM_TYPE);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", param->pid, ret);
+        free(attr);
+        return ret;
     }
 
     if (param->scanType == NORMAL_SCAN) {
@@ -768,11 +764,15 @@ int SetProcessLocalNuma(pid_t pid, uint32_t *nodeBitmap, bool hugeFlag)
         SMAP_LOGGER_WARNING("Set pid %d local numa by cpu failed: %d.", pid, ret1);
     }
     SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by cpu: %#x.", pid, *nodeBitmap);
-    ret2 = SetLocalNumaByNumaMaps(pid, nodeBitmap, hugeFlag);
-    if (ret2) {
-        SMAP_LOGGER_WARNING("Set pid %d local numa by numa maps failed: %d.", pid, ret2);
+    if (hugeFlag) {
+        ret2 = SetLocalNumaByNumaMaps(pid, nodeBitmap, hugeFlag);
+        if (ret2) {
+            SMAP_LOGGER_WARNING("Set pid %d local numa by numa maps failed: %d.", pid, ret2);
+        }
+        SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by numa maps: %#x.", pid, *nodeBitmap);
+    } else {
+        return ret1;
     }
-    SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by numa maps: %#x.", pid, *nodeBitmap);
 
     return ret1 & ret2;
 }
