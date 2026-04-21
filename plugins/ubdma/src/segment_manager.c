@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
- * Description: ub-dma manager
+ * Description: ub-dma segment manager
  */
 
 #include <linux/kernel.h>
