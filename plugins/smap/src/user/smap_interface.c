@@ -500,7 +500,7 @@ static int CheckMigrateOutMsg(struct MigrateOutMsg *msg, int pidType)
     return 0;
 }
 
-static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap)
+static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType)
 {
     int ret = 0;
     if (!msg) {
@@ -518,14 +518,10 @@ static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint
             continue;
         }
         // assign values for local numa nodes
-        if (!nodeBitmap) {
-            ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
-                return ret;
-            }
-        } else {
-            payload[i].numaNodes = nodeBitmap[i];
+        ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
+            return ret;
         }
         // assign values for remote numa nodes
         for (int j = 0; j < msg->payload[i].count; ++j) {
@@ -638,7 +634,7 @@ int ubturbo_smap_migrate_out(struct MigrateOutMsg *msg, int pidType)
     }
 
     // send ioctl to add pid to access pid list
-    ret = ProcessAddTrackingManage(msg, pidType, nodeBitmap);
+    ret = ProcessAddTrackingManage(msg, pidType);
     if (ret) {
         SMAP_LOGGER_ERROR("Add process tracking failed: %d.", ret);
         EnvMutexUnlock(&manager->lock);

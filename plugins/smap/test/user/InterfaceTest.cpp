@@ -676,7 +676,7 @@ extern "C" int IoctlHandler(const void *msg, int pidType, const unsigned long *i
 extern "C" int AddProcessNumaBitMap(struct MigrateOutMsg *msg, uint32_t *nodeBitmap, int pidType);
 extern "C" int AddProcessesToGlobalManager(struct MigrateOutMsg *msg, int pidType,
                                            uint32_t *nodeBitmap, bool *hasInvalidPid);
-extern "C" int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap);
+extern "C" int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType);
 TEST_F(InterfaceTest, TestSmapMigrateOut)
 {
     int ret;
@@ -3029,7 +3029,7 @@ TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormal)
 
 TEST_F(InterfaceTest, TestProcessAddTrackingManageNullMsg)
 {
-    int ret = ProcessAddTrackingManage(nullptr, VM_TYPE, nullptr);
+    int ret = ProcessAddTrackingManage(nullptr, VM_TYPE);
     EXPECT_EQ(-EINVAL, ret);
 }
 
