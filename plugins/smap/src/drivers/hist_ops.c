@@ -230,8 +230,8 @@ static inline bool is_intersect(struct addr_seg *seg1, struct addr_seg *seg2,
 	return true;
 }
 
-static void calc_4k_scan_hot_wins(struct segs_info *info, u16 *buf,
-				  struct segs_info *win_info)
+static void calc_4k_scan_hot_wins(struct segs_info *info, actc_t *buf,
+			      struct segs_info *win_info)
 {
 	u32 seg_pages = 0, win_cnt = 0;
 	unsigned int i;
@@ -241,12 +241,12 @@ static void calc_4k_scan_hot_wins(struct segs_info *info, u16 *buf,
 		u64 ba_tag;
 		calc_ba_tag(start, &ba_tag);
 		while (start < seg_end(&info->segs[i])) {
-			u16 max_val = 0, nr = shift / SIZE_2M;
+			u32 max_val = 0, nr = shift / SIZE_2M;
 			u32 offset = (start - info->segs[i].start) >>
 				     HIST_ADDR_SHIFT_2M;
-			u16 *buf_ptr = &buf[seg_pages + offset];
+			actc_t *buf_ptr = &buf[seg_pages + offset];
 			while (nr--) {
-				max_val = max_t(u16, max_val, *buf_ptr++);
+				max_val = max_t(actc_t, max_val, *buf_ptr++);
 			}
 			if (win_cnt >= win_info->cnt) {
 				pr_err("out-of-bounds when calc wins.[nr_wins:%u]\n",
@@ -388,7 +388,7 @@ static int filter_4k_scan_hot_wins(struct segs_info *win_info,
 }
 
 static int generate_aligned_4k_scan_wins_info(struct segs_info *win_info,
-					      struct segs_info *info, u16 *buf)
+					  struct segs_info *info, actc_t *buf)
 {
 	struct addr_seg *wins_4k;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
@@ -430,14 +430,14 @@ static int generate_aligned_4k_scan_wins_info(struct segs_info *win_info,
 }
 
 static void copy_actc_to_buf(struct segs_info *info, struct addr_seg *seg,
-			     u16 *dst_buf, u16 *freq, u32 buf_len,
+			     actc_t *dst_buf, u16 *freq, u32 buf_len,
 			     enum ub_hist_sts_size sts_size)
 {
 	u32 shift = (sts_size == STS_SIZE_2M) ? HIST_ADDR_SHIFT_2M :
 						HIST_ADDR_SHIFT_4K;
 	u64 inter_start, inter_end, inter_pages, j;
 	u64 seg_offset, hist_offset, seg_pages = 0;
-	u16 *dst;
+	actc_t *dst;
 	unsigned int i;
 	for (i = 0; i < info->cnt; i++) {
 		if (is_intersect(&info->segs[i], seg, &inter_start,
@@ -465,7 +465,7 @@ static void clear_actc_buf(void)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	if (dev->buf)
-		memset(dev->buf, 0, dev->pgcount * sizeof(u16));
+		memset(dev->buf, 0, dev->pgcount * sizeof(actc_t));
 }
 
 static bool addr_is_cc_mem(u64 addr)
@@ -578,7 +578,7 @@ static int get_hist_results(uint64_t ba_tag,
 
 static int smap_hist_read_paral(struct segs_info *win_info,
 				struct segs_info *rmem_info,
-				enum ub_hist_sts_size sts_size, u16 *buf,
+				enum ub_hist_sts_size sts_size, actc_t *buf,
 				u32 scan_time, u32 buf_len)
 {
 	int ret = 0, i, ba_cnt;
@@ -658,7 +658,7 @@ static u32 get_2m_scan_wins_per_ba(struct segs_info *win_info)
 }
 
 static int generate_aligned_wins_info(struct segs_info *win_info,
-				      struct segs_info *info, u16 *buf,
+				      struct segs_info *info, actc_t *buf,
 				      enum ub_hist_sts_size sts_size)
 {
 	int ret = 0;
@@ -670,7 +670,7 @@ static int generate_aligned_wins_info(struct segs_info *win_info,
 }
 
 static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
-				u16 *buf, u32 buf_len,
+				actc_t *buf, u32 buf_len,
 				enum ub_hist_sts_size sts_size)
 {
 	int ret;
@@ -705,7 +705,7 @@ static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
 }
 
 static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
-			     u16 *buf, u32 buf_len, u32 pgsize)
+			     actc_t *buf, u32 buf_len, u32 pgsize)
 {
 	int ret;
 	/*
@@ -751,7 +751,7 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	return 0;
 }
 
-static void add_to_actc_data(u16 *dst, u16 *src, int len)
+static void add_to_actc_data(actc_t *dst, actc_t *src, int len)
 {
 	int i, sum;
 	int j;
@@ -765,17 +765,17 @@ static void add_to_actc_data(u16 *dst, u16 *src, int len)
 				freq += src[(PAGE_SIZE_64K_DIV_4K * i) + j];
 			}
 			sum = dst[i] + freq;
-			dst[i] = (sum < U16_MAX) ? (u16)sum : U16_MAX;
+			dst[i] = (sum < U16_MAX) ? (actc_t)sum : U16_MAX;
 		}
 	} else {
 		for (i = 0; i < len; i++) {
 			sum = dst[i] + src[i];
-			dst[i] = (sum < U16_MAX) ? (u16)sum : U16_MAX;
+			dst[i] = (sum < U16_MAX) ? (actc_t)sum : U16_MAX;
 		}
 	}
 }
 
-void fetch_hist_actc_buf(u16 *dst_buf, struct addr_seg *seg)
+void fetch_hist_actc_buf(actc_t *dst_buf, struct addr_seg *seg)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	struct segs_info *info = &dev->info;
@@ -928,7 +928,7 @@ static int hist_buffer_init(struct smap_hist_dev *dev)
 		dev->buf = NULL;
 		return 0;
 	}
-	dev->buf = vzalloc(dev->pgcount * sizeof(u16));
+	dev->buf = vzalloc(dev->pgcount * sizeof(actc_t));
 	if (!dev->buf) {
 		pr_err("unable to allocate memory for ACTC buffer\n");
 		return -ENOMEM;

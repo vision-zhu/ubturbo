@@ -1231,17 +1231,27 @@ static int QueryVMFreqFromKernel(int pid, uint16_t *data, uint32_t lengthIn, uin
 {
     int ret;
     struct ProcessManager *manager = GetProcessManager();
+    actc_t *tmpData = malloc(sizeof(actc_t) * lengthIn);
+    if (tmpData == NULL) {
+        SMAP_LOGGER_ERROR("QueryVMFreqFromKernel malloc tmpData failed.\n");
+        return -ENOMEM;
+    }
     struct TrakingInfoPayload payload = {
         .pid = pid,
         .length = lengthIn,
-        .data = data,
+        .data = tmpData,
     };
     ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_TRACKING, &payload);
     if (ret < 0) {
         SMAP_LOGGER_ERROR("access ioctl remove get tracking info error: %s\n", strerror(errno));
+        free(tmpData);
         return -EBADF;
     }
     *lengthOut = payload.length;
+    for (uint32_t i = 0; i < payload.length; i++) {
+        data[i] = tmpData[i];
+    }
+    free(tmpData);
     return ret;
 }
 
