@@ -72,10 +72,24 @@ static int acpi_table_build_mem(struct acpi_subtable_header *header)
 			if (tmp->start < mem->start)
 				break;
 		}
-		if (list_entry_is_head(tmp, &acpi_mem.mem, segment))
+		if (list_entry_is_head(tmp, &acpi_mem.mem, segment)) {
+			tmp = list_first_entry(&acpi_mem.mem, struct acpi_mem_segment, segment);
+			if (mem->end >= (tmp->start >> 1) && mem->node == tmp->node) {
+				pr_info("merge region %llx-%llx & %llx-%llx\n",
+					tmp->start, tmp->end, mem->start, mem->end);
+				tmp->start = mem->start;
+				return 0;
+			}
 			list_add(&mem->segment, &acpi_mem.mem);
-		else
+		} else {
+			if (tmp->end >= (mem->start >> 1) && mem->node == tmp->node) {
+				pr_info("merge region %llx-%llx & %llx-%llx\n",
+					tmp->start, tmp->end, mem->start, mem->end);
+				tmp->end = mem->end;
+				return 0;
+			}
 			list_add(&mem->segment, &tmp->segment);
+		}
 	}
 	acpi_mem.len++;
 
