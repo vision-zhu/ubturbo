@@ -11,6 +11,7 @@
 #include <linux/proc_fs.h>
 
 #include "check.h"
+#include "drv_common.h"
 
 #define ACCESS_DEV "smap_access_dev"
 #define ACCESS_CLASS "smap_access_class"
@@ -55,13 +56,13 @@ struct access_remove_pid_msg {
 struct tracking_info_payload {
 	pid_t pid;
 	u32 length;
-	u16 *data;
+	actc_t *data;
 };
 
 struct access_pid_freq_msg {
 	pid_t pid;
 	size_t len[SMAP_MAX_NUMNODES];
-	u16 *freq[SMAP_MAX_NUMNODES];
+	actc_t *freq[SMAP_MAX_NUMNODES];
 };
 
 struct user_info {

@@ -46,7 +46,7 @@ extern struct list_head access_dev;
 
 static inline void reset_actc_data(struct access_tracking_dev *hdev)
 {
-	size_t len = hdev->page_count * sizeof(u16);
+	size_t len = hdev->page_count * sizeof(actc_t);
 
 	if (hdev->access_bit_actc_data)
 		memset(hdev->access_bit_actc_data, 0, len);
@@ -125,7 +125,7 @@ static int actc_buffer_reinit(struct access_tracking_dev *hdev)
 	}
 	actc_buffer_deinit(hdev);
 	if (page_count) {
-		hdev->access_bit_actc_data = vzalloc(page_count * sizeof(u16));
+		hdev->access_bit_actc_data = vzalloc(page_count * sizeof(actc_t));
 		if (!hdev->access_bit_actc_data) {
 			return -ENOMEM;
 		}
@@ -186,7 +186,7 @@ static int actc_buffer_init(struct access_tracking_dev *hdev)
 		hdev->node);
 	if (!hdev->page_count)
 		return 0;
-	hdev->access_bit_actc_data = vzalloc(hdev->page_count * sizeof(u16));
+	hdev->access_bit_actc_data = vzalloc(hdev->page_count * sizeof(actc_t));
 	if (!hdev->access_bit_actc_data) {
 		pr_err("unable to alloc mem for histogram tracking ACTC buffer\n");
 		hdev->page_count = 0;

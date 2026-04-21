@@ -13,6 +13,8 @@
 #include <linux/hrtimer.h>
 #include <linux/spinlock.h>
 
+#include "drv_common.h"
+
 extern struct list_head remote_ram_list;
 extern rwlock_t rem_ram_list_lock;
 
@@ -27,7 +29,7 @@ struct access_tracking_dev {
 	s8 node;
 
 	void *tracking_dev;
-	u16 *access_bit_actc_data;
+	actc_t *access_bit_actc_data;
 	u64 page_count;
 	u8 page_size_mode;
 	bool enable_on;

@@ -13,6 +13,7 @@
 #include <linux/hrtimer.h>
 #include <linux/spinlock.h>
 #include "ub_hist.h"
+#include "drv_common.h"
 
 #define HIST_ADDR_SHIFT_4K (12)
 #define HIST_ADDR_SHIFT_2M (21)
@@ -65,7 +66,7 @@ struct smap_hist_dev {
 	u32 scan_wins_num_per_ba;
 	u32 ba_cnt;
 	u32 period;
-	u16 *buf;
+	actc_t *buf;
 	u32 pgcount;
 	u32 pgsize;
 	u8 thread_enable;
@@ -76,14 +77,14 @@ struct smap_hist_dev {
 };
 
 struct hist_ops {
-	void (*read)(u16 *dst_buf, struct addr_seg *seg);
+	void (*read)(actc_t *dst_buf, struct addr_seg *seg);
 	void (*update_pgsize)(u32 pgsize);
 };
 
 struct smap_hist_dev *get_hist_dev(void);
 int hist_init(u32 pgsize);
 void hist_deinit(void);
-void fetch_hist_actc_buf(u16 *dst_buf, struct addr_seg *seg);
+void fetch_hist_actc_buf(actc_t *dst_buf, struct addr_seg *seg);
 void hist_update_pgsize(u32 pgsize);
 void hist_set_iomem(void);
 void hist_thread_pause(void);

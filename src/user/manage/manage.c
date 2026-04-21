@@ -989,7 +989,7 @@ static int InitPidFreq(ProcessAttr *attr, struct AccessPidFreq *apf)
             continue;
         }
         /* Use calloc to ensure freq[i] is zeroed */
-        apf->freq[i] = calloc(apf->len[i], sizeof(uint16_t));
+        apf->freq[i] = calloc(apf->len[i], sizeof(actc_t));
         if (!apf->freq[i]) {
             SMAP_LOGGER_ERROR("Alloc pid %d data memory failed\n", apf->pid);
             FreePidFreq(apf);
