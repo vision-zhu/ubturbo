@@ -617,6 +617,15 @@ static int init_access_statistic_pid_4k(struct access_add_pid_payload *payload)
 
 	pr_info("init statistic access tracking, pid: %d, local page number: %llu, remote page number: %llu\n",
 		tmp->pid, tmp->page_num[L1], tmp->page_num[L2]);
+
+	/* Suggest minimum scan_time for 4K scenario: scan_time = total_size(G) * 50 ms */
+	{
+		u64 total_pages = tmp->page_num[L1] + tmp->page_num[L2];
+		u64 total_size_gb = total_pages * PAGE_SIZE / (1024 * 1024 * 1024);
+		u32 suggested_scan_time = total_size_gb * 50;
+		pr_info("STATISTIC_SCAN for 4K scenario: suggested minimum scan_time = %u ms (total_size = %llu GB)\n",
+			suggested_scan_time, total_size_gb);
+	}
 	return 0;
 }
 
