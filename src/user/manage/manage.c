@@ -108,7 +108,7 @@ int ProcessManagerInit(uint32_t pageType)
     if (ret != 0) {
         SMAP_LOGGER_ERROR("Generat period config file failed, ret is %d.", ret);
     }
-
+    PeriodConfigRead(PERIOD_CONFIG_PATH);
     int size = sysconf(_SC_PAGESIZE);
     if (size != PAGESIZE_4K && size != PAGESIZE_64K) {
         SMAP_LOGGER_ERROR("Get pagesize failed.");
