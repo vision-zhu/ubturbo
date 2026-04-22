@@ -94,7 +94,7 @@ static int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
 	return 0;
 }
 
-static int add_to_bm_page(u64 paddr, struct access_pid *ap)
+int add_to_bm_page(u64 paddr, struct access_pid *ap)
 {
 	int nid, nid_pos, ret;
 	u64 acidx;
@@ -173,7 +173,7 @@ static void set_pa_prior(struct access_pid *ap, u64 vaddr, u64 pa_idx, int nid)
 	ap->info.mapping[va_idx] = map;
 }
 
-static int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap)
+int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap)
 {
 	int nid, nid_pos, ret;
 	u64 acidx;

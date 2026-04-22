@@ -942,6 +942,31 @@ void clean_last_ap_data(struct access_pid *ap)
 	}
 }
 
+int access_init_ap_bm(struct access_pid *ap)
+{
+	int ret;
+	struct access_tracking_dev *adev;
+	u64 nodes_page_count[SMAP_MAX_NUMNODES] = { 0 };
+	if (!ap) {
+		return -EINVAL;
+	}
+	list_for_each_entry(adev, &access_dev, list) {
+		down_read(&adev->buffer_lock);
+		nodes_page_count[adev->node] = adev->page_count;
+		up_read(&adev->buffer_lock);
+	}
+	clean_last_ap_data(ap);
+	ret = init_ap_bm(SMAP_MAX_NUMNODES, nodes_page_count, ap);
+	if (ret) {
+		pr_err("unable to init access bitmap for pid: %d\n", ap->pid);
+		return ret;
+	}
+	ret = init_vm_mapping(&ap->info);
+	if (ret)
+		return ret;
+	return 0;
+}
+
 int access_walk_pagemap(struct access_pid *ap)
 {
 	int ret;

@@ -433,52 +433,51 @@ static void handle_statistic_scan(struct access_pid *ap, ktime_t start_time,
 
 static void work_func(struct work_struct *work)
 {
-	int ret = 0;
-	int page_size;
-	struct access_tracking_dev *adev = get_first_access_dev();
-	struct access_pid *ap;
-	struct delayed_work *scan_work;
-	ktime_t start_time, end_time;
-	s64 scan_time;
+    int ret = 0;
+    int page_size;
+    bool last_scan;
+    struct access_tracking_dev *adev = get_first_access_dev();
+    struct access_pid *ap;
+    struct delayed_work *scan_work;
+    ktime_t start_time, end_time;
+    s64 scan_time;
 
-	unsigned long scan_delay_ms;
-	start_time = ktime_get();
-	scan_work = to_delay_work(work);
-	ap = delay_work_to_ap(scan_work);
-	adev_buffer_down_read();
-	page_size = get_page_size(adev);
-	if (page_size == g_pagesize_huge) {
-		ret = scan_accessed_bit_forward_vm(ap->pid, page_size,
-						   ap->type);
-	} else {
-		ret = scan_accessed_bit_forward_mm(ap->pid, page_size,
-						   ap->type);
-	}
-	adev_buffer_up_read();
-	end_time = ktime_get();
-	scan_time = ktime_to_us(ktime_sub(end_time, start_time));
-	if (ret < 0) {
-		pr_err("unable to scan access-flag, page amount: %llu, page size: %d, node: %d\n",
-		       adev->page_count, page_size, adev->node);
-	}
-	ap->cur_times++;
-	pr_debug("pid[%d] scan took %lldus for %dth time\n", ap->pid, scan_time, ap->cur_times);
+    unsigned long scan_delay_ms;
+    start_time = ktime_get();
+    scan_work = to_delay_work(work);
+    ap = delay_work_to_ap(scan_work);
+    last_scan = (ap->cur_times + 1 >= ap->ntimes) && (ap->type == NORMAL_SCAN);
+    adev_buffer_down_read();
+    page_size = get_page_size(adev);
+    if (page_size == g_pagesize_huge) {
+        ret = scan_accessed_bit_forward_vm(ap->pid, page_size,
+                           ap->type, last_scan);
+    } else {
+        ret = scan_accessed_bit_forward_mm(ap->pid, page_size,
+                           ap->type, last_scan);
+    }
+    adev_buffer_up_read();
+    end_time = ktime_get();
+    scan_time = ktime_to_us(ktime_sub(end_time, start_time));
+    if (ret < 0) {
+        pr_err("unable to scan access-flag, page amount: %llu, page size: %d, node: %d\n",
+               adev->page_count, page_size, adev->node);
+    }
+    ap->cur_times++;
+    pr_debug("pid[%d] scan took %lldus for %dth time\n", ap->pid, scan_time, ap->cur_times);
 
-	scan_delay_ms = ap->scan_time;
-	if (ap->type == STATISTIC_SCAN) {
-		handle_statistic_scan(ap, start_time, scan_time, &scan_delay_ms);
-	}
-	ap->last_scan_delay_ms = scan_delay_ms;
-	if (ap->cur_times < ap->ntimes) {
-		queue_delayed_work(adev->scanq, &ap->scan_work, msecs_to_jiffies(scan_delay_ms));
-		ap->last_scan_end = ktime_get();
-	} else {
-		pr_debug("pid[%d] start to walk pagemap\n", ap->pid);
-		if (ap->type != STATISTIC_SCAN) {
-			access_walk_pagemap(ap);
-		}
-		complete(&ap->work_done);
-	}
+    scan_delay_ms = ap->scan_time;
+    if (ap->type == STATISTIC_SCAN) {
+        handle_statistic_scan(ap, start_time, scan_time, &scan_delay_ms);
+    }
+    ap->last_scan_delay_ms = scan_delay_ms;
+    if (ap->cur_times < ap->ntimes) {
+        queue_delayed_work(adev->scanq, &ap->scan_work, msecs_to_jiffies(scan_delay_ms));
+        ap->last_scan_end = ktime_get();
+    } else {
+        pr_debug("pid[%d] scan completed\n", ap->pid);
+        complete(&ap->work_done);
+    }
 }
 
 static int remote_ram_init(void)

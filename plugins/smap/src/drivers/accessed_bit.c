@@ -376,7 +376,7 @@ static void actc_data_add(phys_addr_t paddr, u32 page_size)
 		adev->access_bit_actc_data[pa_index]++;
 }
 
-static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)
+static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va, phys_addr_t *paddr_out)
 {
 	struct hstate *h;
 	unsigned long hmask;
@@ -407,6 +407,9 @@ static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)
 
 	paddr = PFN_PHYS(pte_pfn(pte));
 	actc_data_add(paddr, g_pagesize_huge);
+
+	if (paddr_out)
+		*paddr_out = paddr;
 
 	return 0;
 }
@@ -495,10 +498,12 @@ static struct vm_area_struct *get_vma_if_huge_page(struct kvm *kvm,
 	return vma;
 }
 
-static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid)
+static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid,
+		      bool last_scan, struct access_pid *ap)
 {
 	int ret = 0;
 	struct vm_area_struct *vma;
+	phys_addr_t paddr;
 
 	if (!kvm || !kvm->mm)
 		return -EINVAL;
@@ -511,7 +516,13 @@ static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid)
 		if (type == HAM_SCAN) {
 			hva_to_hpa_ham(kvm, host_va, pid);
 		} else {
-			ret = hva_to_hpa_hugetlb(kvm, host_va);
+			ret = hva_to_hpa_hugetlb(kvm, host_va, &paddr);
+			if (ret)
+				return ret;
+			if (last_scan && ap) {
+				u64 mask_paddr = paddr & TWO_MEGA_MASK;
+				add_to_bm_hugepage(host_va, mask_paddr, ap);
+			}
 		}
 	}
 	return ret;
@@ -619,7 +630,7 @@ static bool memslot_is_mem(struct kvm_memory_slot *memslot)
 }
 
 static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
-			     scan_type type)
+			     scan_type type, bool last_scan, struct access_pid *ap)
 {
 	struct kvm_memslots *slots;
 	struct kvm_memory_slot *memslot;
@@ -649,7 +660,7 @@ static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
 			hva = gfn_to_hva_memslot(memslot, gpa_to_gfn(gpa));
 			if (!get_vma_if_huge_page(kvm, hva))
 				continue;
-			ret = hva_to_hpa(kvm, hva, type, pid);
+			ret = hva_to_hpa(kvm, hva, type, pid, last_scan, ap);
 			if (ret)
 				continue;
 			if (type == STATISTIC_SCAN) {
@@ -1155,41 +1166,57 @@ static void update_statistic_scan_num(pid_t pid)
 	up_read(&statistic_lock);
 }
 
-static int scan_forward_2M(pid_t pid, int page_size, scan_type type)
+static int scan_forward_2M(pid_t pid, int page_size, scan_type type, bool last_scan)
 {
-	int srcu_idx;
-	struct file *filp;
-	struct kvm *kvm;
-	struct pid *pid_s;
-	struct task_struct *task;
-	if (type == NO_SCAN) {
-		return 0;
-	}
-	pid_s = find_get_pid(pid);
-	task = get_pid_task(pid_s, PIDTYPE_PID);
-	if (!task) {
-		put_pid(pid_s);
-		return -EINVAL;
-	}
+    int srcu_idx;
+    int ret = 0;
+    struct file *filp;
+    struct kvm *kvm;
+    struct pid *pid_s;
+    struct task_struct *task;
+    struct access_pid *ap = NULL;
 
-	filp = get_kvm_file_from_task(task);
-	if (!filp) {
-		release_resources(filp, task, pid_s);
-		return -EINVAL;
-	}
-	kvm = filp->private_data;
-	if (!kvm) {
-		release_resources(filp, task, pid_s);
-		return -EINVAL;
-	}
-	srcu_idx = pre_scan_kvm_memslots(kvm);
-	if (scan_kvm_memslots(kvm, pid, page_size, type))
-		pr_err("failed to scan kvm mem slots for pid: %d\n", pid);
+    if (type == NO_SCAN) {
+        return 0;
+    }
+    pid_s = find_get_pid(pid);
+    task = get_pid_task(pid_s, PIDTYPE_PID);
+    if (!task) {
+        put_pid(pid_s);
+        return -EINVAL;
+    }
 
-	post_scan_kvm_memslots(kvm, srcu_idx);
-	release_resources(filp, task, pid_s);
-	update_statistic_scan_num(pid);
-	return 0;
+    filp = get_kvm_file_from_task(task);
+    if (!filp) {
+        release_resources(filp, task, pid_s);
+        return -EINVAL;
+    }
+    kvm = filp->private_data;
+    if (!kvm) {
+        release_resources(filp, task, pid_s);
+        return -EINVAL;
+    }
+
+    if (last_scan) {
+        ap = find_access_pid(pid);
+        if (ap) {
+            ret = access_init_ap_bm(ap);
+            if (ret) {
+                pr_err("failed to init ap bm for pid: %d\n", pid);
+                release_resources(filp, task, pid_s);
+                return ret;
+            }
+        }
+    }
+
+    srcu_idx = pre_scan_kvm_memslots(kvm);
+    if (scan_kvm_memslots(kvm, pid, page_size, type, last_scan, ap))
+        pr_err("failed to scan kvm mem slots for pid: %d\n", pid);
+
+    post_scan_kvm_memslots(kvm, srcu_idx);
+    release_resources(filp, task, pid_s);
+    update_statistic_scan_num(pid);
+    return 0;
 }
 
 static inline void smap_flush_tlb_mm(struct mm_struct *mm)
@@ -1221,6 +1248,9 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		actc_data_add(paddr, PAGE_SIZE);
 		pte_walk->flag = true;
 		__ptep_test_and_clear_young(NULL, 0, pte);
+		if (pte_walk->last_scan && pte_walk->ap) {
+			add_to_bm_page(paddr, pte_walk->ap);
+		}
 	}
 	return 0;
 }
@@ -1397,16 +1427,18 @@ static void update_and_cleanup_statistic(int pid, struct pte_walk *pte_walk,
 	}
 }
 
-static int scan_forward_4k_mm(int pid, int page_size, scan_type type)
+static int scan_forward_4k_mm(int pid, int page_size, scan_type type, bool last_scan)
 {
 	int ret;
 	int i = 0;
 	int vma_count = 0;
 	struct mm_struct *mm;
 	struct smap_vma_struct *vma_array = NULL;
+	struct access_pid *ap = NULL;
 	struct pte_walk pte_walk = { .flag = false };
 	pte_walk.pid = pid;
 	pte_walk.type = type;
+	pte_walk.last_scan = last_scan;
 
 	mm = get_mm_by_pid(pid);
 	if (IS_ERR(mm) || !mm || !mmget_not_zero(mm)) {
@@ -1418,6 +1450,20 @@ static int scan_forward_4k_mm(int pid, int page_size, scan_type type)
 		pr_err("failed to take VMA snapshot, ret: %d\n", ret);
 		mmput(mm);
 		return -EINVAL;
+	}
+
+	if (last_scan) {
+		ap = find_access_pid(pid);
+		if (ap) {
+			ret = access_init_ap_bm(ap);
+			if (ret) {
+				pr_err("failed to init ap bm for pid: %d\n", pid);
+				kfree(vma_array);
+				mmput(mm);
+				return ret;
+			}
+			pte_walk.ap = ap;
+		}
 	}
 
 	ret = setup_statistic_scan(&pte_walk, pid, vma_array, vma_count);
@@ -1455,19 +1501,21 @@ static int scan_forward_4k_mm(int pid, int page_size, scan_type type)
 	return 0;
 }
 
-int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type)
+int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type,
+				  bool last_scan)
 {
 	if (page_size == g_pagesize_huge) {
-		return scan_forward_2M(pid, page_size, type);
+		return scan_forward_2M(pid, page_size, type, last_scan);
 	} else {
 		return -EINVAL;
 	}
 }
 
-int scan_accessed_bit_forward_mm(pid_t pid, int page_size, scan_type type)
+int scan_accessed_bit_forward_mm(pid_t pid, int page_size, scan_type type,
+				  bool last_scan)
 {
 	if (page_size == PAGE_SIZE) {
-		return scan_forward_4k_mm(pid, page_size, type);
+		return scan_forward_4k_mm(pid, page_size, type, last_scan);
 	}
 	return -EINVAL;
 }
