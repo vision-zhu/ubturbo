@@ -403,7 +403,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
 {
     size_t i, nrFreq, nrBit, acidx = 0;
     uint16_t freqMax = 0, freqMin = UINT16_MAX;
-    uint64_t actcLen, paddr, freqSum = 0, remoteHotNum = 0;
+    uint64_t actcLen, paddr, freqSum = 0, remoteHotNum = 0, white = 0;
     uint32_t remoteHotThreshold = GetRemoteHotThreshold();
     size_t len = pmb->len[nid];
     unsigned long *bitmap = pmb->data[nid];
@@ -430,6 +430,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         }
         if (TestBit(acidx, whiteListBitmap)) {
             actc[actcLen].isWhiteListPage = true;
+            white++;
         }
         actc[actcLen].freq = apf->freq[nid][actcLen];
         if (actc[actcLen].freq != 0) {
@@ -450,10 +451,12 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     attr->scanAttr.actCount[nid].freqNum = nrFreq;
     attr->scanAttr.actCount[nid].freqSum = freqSum;
     attr->scanAttr.actCount[nid].remoteHotNum = remoteHotNum;
+    attr->scanAttr.actCount[nid].whiteNum = white;
     attr->scanAttr.actCount[nid].pageNum = attr->scanAttr.actcLen[nid];
     attr->scanAttr.actCount[nid].freqZero = attr->scanAttr.actcLen[nid] - nrFreq;
-    SMAP_LOGGER_INFO("Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu, remoteHotNum %lu",
-                      nid, actcLen, nrFreq, nrBit, freqMax, freqMin, freqSum, remoteHotNum);
+    SMAP_LOGGER_INFO(
+        "Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu, remoteHotNum %lu, white %lu",
+                      nid, actcLen, nrFreq, nrBit, freqMax, freqMin, freqSum, remoteHotNum, white);
     return 0;
 }
 
