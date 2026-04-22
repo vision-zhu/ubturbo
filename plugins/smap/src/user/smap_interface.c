@@ -33,7 +33,7 @@
 #include "manage/virt.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
-
+#include "strategy/period_config.h"
 #include "smap_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
 #define REMOTE_NUMA_MEMORY_MAX (TIB / MIB)
@@ -253,7 +253,11 @@ static int InitAllThreads(struct ProcessManager *manager)
 {
     int ret;
     EnvMutexLock(&manager->threadLock);
-    ret = InitThread(manager, SCAN_MIGRATE_PERIOD, ScanMigrateWork);
+    uint32_t migPeriod = SCAN_MIGRATE_PERIOD;
+    if (GetFileConfSwitchConfig()) {
+        migPeriod = GetMigratePeriodConfig();
+    }
+    ret = InitThread(manager, migPeriod, ScanMigrateWork);
     if (ret) {
         SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
         DestroyAllThread(manager);
@@ -504,11 +508,15 @@ static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint
         SMAP_LOGGER_ERROR("Smap mig out msg is null.");
         return -EINVAL;
     }
+    uint32_t scanPeriod = LIGHT_STABLE_SCAN_CYCLE;
+    if (GetFileConfSwitchConfig()) {
+        scanPeriod = GetScanPeriodConfig();
+    }
     struct AccessAddPidPayload payload[MAX_NR_MIGOUT] = { 0 };
     for (int i = 0; i < msg->count; ++i) {
         payload[i].type = NORMAL_SCAN;
         payload[i].pid = msg->payload[i].pid;
-        payload[i].scanTime = LIGHT_STABLE_SCAN_CYCLE;
+        payload[i].scanTime = scanPeriod;
         if (!PidIsValid(msg->payload[i].pid)) {
             SMAP_LOGGER_WARNING("pid %d doesn't exist.", msg->payload[i].pid);
             payload[i].pid = NON_EXIST_PID;
