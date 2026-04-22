@@ -1857,3 +1857,30 @@ TEST_F(ManageTest, TestMappingAscFunc)
     free(map1);
     free(map2);
 }
+
+// Issue #14: 验证移除最大管理限制
+// MAX_4K_PROCESSES_CNT 和 MAX_2M_PROCESSES_CNT 现在设置为 10000
+TEST_F(ManageTest, TestMaxProcessesCntIncreased)
+{
+    // 验证常量值已从 300/100 增加到 10000
+    EXPECT_EQ(10000, MAX_4K_PROCESSES_CNT);
+    EXPECT_EQ(10000, MAX_2M_PROCESSES_CNT);
+}
+
+extern "C" bool IsHugeMode();
+TEST_F(ManageTest, TestGetCurrentMaxNrPid)
+{
+    // 验证 GetCurrentMaxNrPid 返回正确的值
+    // 4K模式返回 MAX_4K_PROCESSES_CNT (10000)
+    // 2M模式返回 MAX_2M_PROCESSES_CNT (10000)
+
+    GlobalMockObject::verify();
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    int maxNr = GetCurrentMaxNrPid();
+    EXPECT_EQ(10000, maxNr);
+
+    GlobalMockObject::verify();
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    maxNr = GetCurrentMaxNrPid();
+    EXPECT_EQ(10000, maxNr);
+}

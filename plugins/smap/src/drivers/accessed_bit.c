@@ -39,7 +39,7 @@
 #define DECIMAL 10
 #define DEFAULT_REF_COUNT 0
 #define TRUE_REF 1
-#define MAX_NR_KVM 100
+#define MAX_NR_KVM 10000
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
