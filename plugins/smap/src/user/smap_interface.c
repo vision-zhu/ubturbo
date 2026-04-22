@@ -646,6 +646,18 @@ int ubturbo_smap_migrate_out(struct MigrateOutMsg *msg, int pidType)
     ret = AddProcessesToGlobalManager(msg, pidType, nodeBitmap, &hasInvalidPid);
     if (ret) {
         SMAP_LOGGER_ERROR("Add processes to global manager failed: %d.", ret);
+        // rollback kernel resources: remove pids that were added to kernel
+        struct AccessRemovePidPayload *removePayload = calloc(msg->count, sizeof(struct AccessRemovePidPayload));
+        if (removePayload) {
+            for (int i = 0; i < msg->count; i++) {
+                removePayload[i].pid = msg->payload[i].pid;
+            }
+            int rollbackRet = AccessIoctlRemovePid(msg->count, removePayload);
+            if (rollbackRet) {
+                SMAP_LOGGER_ERROR("Rollback kernel pids failed: %d.", rollbackRet);
+            }
+            free(removePayload);
+        }
     }
 
     EnvMutexUnlock(&manager->lock);
