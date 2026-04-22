@@ -45,10 +45,7 @@ MODULE_PARM_DESC(
 	"MEBS_MODE = 7, MEBS_MODE_4B = 8, MEBS_MODE_6B = 9, PLDA_HDT_MODE = 10, PLDA_HDT_DECAY_MODE = 11, default skip");
 EXPORT_SYMBOL_GPL(node_modes);
 
-unsigned int smap_pgsize = HUGE_PAGE;
-module_param(smap_pgsize, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_pgsize, "SMAP migration page size: 0 for 4K, 1 for 2M, "
-			      "default 2M");
+unsigned int smap_pgsize = NR_PGSIZE_ARGS;
 EXPORT_SYMBOL_GPL(smap_pgsize);
 
 unsigned int smap_mode = VM_MODE;
@@ -104,12 +101,6 @@ int is_smap_args_valid(void)
 {
 	int i;
 
-	if (smap_pgsize >= NR_PGSIZE_ARGS) {
-		return -EINVAL;
-	}
-	if (smap_mode >= NR_MODE_ARGS) {
-		return -EINVAL;
-	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		if (node_modes[i] != INVALID_DATA_MODE &&
 		    is_data_mode_invalid(node_modes[i])) {

@@ -464,13 +464,19 @@ static int __ioctl_migrate_pid_remote_numa(void __user *argp)
 	return ret;
 }
 
-static int __ioctl_check_pagesize(void __user *argp)
+static int __ioctl_set_pagesize(void __user *argp)
 {
 	uint32_t pageType;
 	if (copy_from_user(&pageType, argp, sizeof(uint32_t))) {
 		return -EFAULT;
 	}
-	return pageType == smap_pgsize ? 0 : -EINVAL;
+	if (pageType >= NR_PGSIZE_ARGS) {
+		pr_err("invalid page type: %u\n", pageType);
+		return -EINVAL;
+	}
+	smap_pgsize = pageType;
+	pr_info("smap_pgsize set to %u\n", smap_pgsize);
+	return 0;
 }
 
 static long smu_mig_ioctl(struct file *file, unsigned int cmd,
@@ -486,7 +492,7 @@ static long smu_mig_ioctl(struct file *file, unsigned int cmd,
 		break;
 	}
 	case SMAP_CHECK_PAGESIZE: {
-		rc = __ioctl_check_pagesize(argp);
+		rc = __ioctl_set_pagesize(argp);
 		break;
 	}
 	case SMAP_MIG_MIGRATE_NUMA: {

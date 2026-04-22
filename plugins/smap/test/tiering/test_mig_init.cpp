@@ -353,35 +353,36 @@ TEST_F(MigInitTest, __IoctlMigratePidRemoteNuma)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-extern "C" int __ioctl_check_pagesize(void __user *argp);
-TEST_F(MigInitTest, __IoctlCheckPagesizeNormal)
+extern "C" int __ioctl_set_pagesize(void __user *argp);
+TEST_F(MigInitTest, __IoctlSetPagesizeNormal)
 {
-    uint32_t pageType = 1;
+    uint32_t pageType = HUGE_PAGE;
     MOCKER(copy_from_user)
         .stubs()
         .with(outBoundP(static_cast<void*>(&pageType), sizeof(uint32_t)))
         .will(returnValue(0UL));
-    int ret = __ioctl_check_pagesize(NULL);
+    int ret = __ioctl_set_pagesize(NULL);
     EXPECT_EQ(0, ret);
+    EXPECT_EQ(smap_pgsize, HUGE_PAGE);
 }
 
-TEST_F(MigInitTest, __IoctlCheckPagesizeAbnormalOne)
+TEST_F(MigInitTest, __IoctlSetPagesizeAbnormalOne)
 {
     MOCKER(copy_from_user)
         .stubs()
         .will(returnValue(1UL));
-    int ret = __ioctl_check_pagesize(NULL);
+    int ret = __ioctl_set_pagesize(NULL);
     EXPECT_EQ(-EFAULT, ret);
 }
 
-TEST_F(MigInitTest, __IoctlCheckPagesizeAbnormalTwo)
+TEST_F(MigInitTest, __IoctlSetPagesizeAbnormalTwo)
 {
-    uint32_t pageType = 0;
+    uint32_t pageType = NR_PGSIZE_ARGS;
     MOCKER(copy_from_user)
         .stubs()
         .with(outBoundP(static_cast<void*>(&pageType), sizeof(uint32_t)))
         .will(returnValue(0UL));
-    int ret = __ioctl_check_pagesize(NULL);
+    int ret = __ioctl_set_pagesize(NULL);
     EXPECT_EQ(-EINVAL, ret);
 }
 
