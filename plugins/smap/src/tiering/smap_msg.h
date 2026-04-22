@@ -12,7 +12,6 @@
 #include <linux/completion.h>
 #include "common.h"
 extern unsigned int smap_pgsize;
-extern unsigned int smap_mode;
 extern unsigned int smap_scene;
 
 #define DEFAULT_L1_NODE (0)
@@ -43,13 +42,6 @@ enum smap_pgsize_args {
 	NR_PGSIZE_ARGS,
 };
 
-enum smap_mode_args {
-	BARE_MODE,
-	VM_MODE,
-	PROCESS_MODE,
-	NR_MODE_ARGS,
-};
-
 enum smap_scene_args {
 	NORMAL_SCENE,
 	UB_QEMU_SCENE,
@@ -66,21 +58,6 @@ enum page_type_stat {
 };
 
 extern bool is_smap_pg_huge(void);
-
-static inline bool is_bare_mode(void)
-{
-	return smap_mode == BARE_MODE;
-}
-
-static inline bool is_vm_mode(void)
-{
-	return smap_mode == VM_MODE;
-}
-
-static inline bool is_process_mode(void)
-{
-	return smap_mode == PROCESS_MODE;
-}
 
 static inline bool is_data_mode_invalid(int mode)
 {

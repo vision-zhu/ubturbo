@@ -51,12 +51,6 @@ MODULE_PARM_DESC(smap_pgsize, "SMAP migration page size: 0 for 4K, 1 for 2M, "
 			      "default 2M");
 EXPORT_SYMBOL_GPL(smap_pgsize);
 
-unsigned int smap_mode = VM_MODE;
-module_param(smap_mode, uint, S_IRUGO);
-MODULE_PARM_DESC(smap_mode, "SMAP migrate mode: 0 for baremetal, 1 for VM, "
-			    "2 for process, default VM");
-EXPORT_SYMBOL_GPL(smap_mode);
-
 unsigned int smap_scene = NORMAL_SCENE;
 module_param(smap_scene, uint, S_IRUGO);
 MODULE_PARM_DESC(smap_scene, "SMAP usage scenarios: 0 for HCCS, 1 for UB_QEMU");
@@ -105,9 +99,6 @@ int is_smap_args_valid(void)
 	int i;
 
 	if (smap_pgsize >= NR_PGSIZE_ARGS) {
-		return -EINVAL;
-	}
-	if (smap_mode >= NR_MODE_ARGS) {
 		return -EINVAL;
 	}
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {

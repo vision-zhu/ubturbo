@@ -79,12 +79,6 @@ TEST_F(TrackingManageTest, IsArgsVaild)
     EXPECT_EQ(-EINVAL, ret);
 
     smap_pgsize = 0;
-    smap_mode = 9;
-    ret = is_smap_args_valid();
-    EXPECT_EQ(-EINVAL, ret);
-
-    smap_pgsize = 0;
-    smap_mode = 0;
     node_modes[0] = 100;
     ret = is_smap_args_valid();
     EXPECT_EQ(-EINVAL, ret);
