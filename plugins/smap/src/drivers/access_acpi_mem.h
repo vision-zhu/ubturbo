@@ -31,19 +31,16 @@ u64 get_node_actc_len(int node_id, int page_size);
 int calc_paddr_acidx_acpi(u64 paddr, int *nid, u64 *index, int page_size);
 int calc_acidx_paddr_acpi(int nid, u64 acidx, u64 *paddr, int page_size);
 
+/* No longer need to convert nid to pos with hardcoded limits */
 static inline int convert_nid_to_pos(int nid)
 {
-	return nid >= nr_local_numa ?
-		       nid - nr_local_numa + SMAP_MAX_LOCAL_NUMNODES :
-		       nid;
+	return nid;
 }
 
-/* 将numa_node中的偏移量转换为远端numa */
+/* No longer need to convert pos to nid with hardcoded limits */
 static inline int convert_pos_to_nid(unsigned long pos)
 {
-	return pos >= SMAP_MAX_LOCAL_NUMNODES ? (pos - SMAP_MAX_LOCAL_NUMNODES +
-						 (unsigned long)nr_local_numa) :
-						pos;
+	return (int)pos;
 }
 
 #endif /* _ACPI_MEM_H */

@@ -375,7 +375,7 @@ static int find_first_remote_numa(unsigned long *nodes)
 	pos = find_next_bit(nodes, size, nr_local_numa);
 	nid = convert_pos_to_nid(pos);
 	if ((nid >= nr_local_numa) &&
-	    (nid < nr_local_numa + SMAP_MAX_REMOTE_NUMNODES)) {
+	    (nid < MAX_NUMNODES)) {
 		return nid;
 	} else {
 		return NUMA_NO_NODE;

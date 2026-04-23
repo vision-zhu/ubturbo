@@ -8,6 +8,7 @@
 #define DRIVERS_CHECK_H
 
 #include <linux/mm.h>
+#include <linux/nodemask.h>
 #define TWO_MEGA_SHIFT 21
 #define TWO_MEGA_SIZE (1UL << TWO_MEGA_SHIFT)
 #define TWO_MEGA_MASK (~(TWO_MEGA_SIZE - 1))
@@ -22,9 +23,8 @@
 #define MAX(a, b) ((a) >= (b) ? (a) : (b))
 #define MIN(a, b) ((a) <= (b) ? (a) : (b))
 
-#define SMAP_MAX_LOCAL_NUMNODES 4
-#define SMAP_MAX_REMOTE_NUMNODES 18
-#define SMAP_MAX_NUMNODES (SMAP_MAX_LOCAL_NUMNODES + SMAP_MAX_REMOTE_NUMNODES)
+/* Use kernel's MAX_NUMNODES instead of hardcoded limits */
+#define SMAP_MAX_NUMNODES MAX_NUMNODES
 
 #define MAX_SIZE_PER_NUMA (1UL << 40)
 #define MAX_NR_PAGE_PER_NUMA (MAX_SIZE_PER_NUMA >> PAGE_SHIFT)

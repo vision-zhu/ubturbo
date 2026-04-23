@@ -27,8 +27,9 @@
 #define MAX_2M_MIGMSG_CNT (MAX_2M_PROCESSES_CNT * MAX_PER_PID_MIG_LIST_COUNT)
 #define MAX_4K_MIGMSG_CNT (MAX_4K_PROCESSES_CNT * MAX_PER_PID_MIG_LIST_COUNT)
 
-#define SMAP_MAX_LOCAL_NUMNODES 4
-#define SMAP_MAX_NUMNODES 22
+/* Use kernel's MAX_NUMNODES instead of hardcoded limits */
+#include <linux/nodemask.h>
+#define SMAP_MAX_NUMNODES MAX_NUMNODES
 
 extern u32 g_pagesize_huge;
 

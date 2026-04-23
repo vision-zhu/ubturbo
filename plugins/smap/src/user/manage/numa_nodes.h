@@ -14,8 +14,13 @@
 
 #define NUMA_NO_NODE (-1)
 
+/* Use dynamic numa node count instead of hardcoded limits
+ * Keep LOCAL_NUMA_BITS = 4 to maintain bitmap logic compatibility
+ * Increase REMOTE_NUMA_BITS to 28 to support more remote numa nodes
+ * MAX_NODES: 32 numa nodes total (4 local + 28 remote)
+ */
 #define LOCAL_NUMA_BITS 4
-#define REMOTE_NUMA_BITS 18
+#define REMOTE_NUMA_BITS 28
 #define MAX_NODES (LOCAL_NUMA_BITS + REMOTE_NUMA_BITS)
 
 #define LOCAL_NUMA_SHIFT 0

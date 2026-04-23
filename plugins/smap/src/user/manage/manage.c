@@ -36,7 +36,7 @@
 static struct ProcessManager g_processManager;
 
 static char g_mmapTypeName[][MMAP_TYPE_STRING_LEN] = { "mmap_private", "mmap_shared" };
-static char *g_nodePattern[LOCAL_NUMA_NUM] = { " N0=", " N1=", " N2=", " N3=" };
+static char *g_nodePattern[LOCAL_NUMA_NUM] = { " N0=", " N1=", " N2=", " N3=", " N4=", " N5=", " N6=", " N7=" };
 
 uint32_t g_pageSizeNormal;
 uint32_t g_pageSizeHuge;

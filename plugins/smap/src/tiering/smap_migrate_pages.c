@@ -637,8 +637,8 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 {
 	int i, j;
 	unsigned int nr_migrate_fail, nr_fail;
-	unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 0 };
-	struct folio **migrate_folios[SMAP_MAX_LOCAL_NUMNODES] = { NULL };
+	unsigned int mig_pages_cnt[MAX_NUMNODES] = { 0 };
+	struct folio **migrate_folios[MAX_NUMNODES] = { NULL };
 	unsigned long nr_pre_migrate_fail;
 	unsigned long max_nr_folios =
 		(task->pa_end - task->pa_start) / PAGE_SIZE;
@@ -647,7 +647,7 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 	ktime_t start_time, end_time;
 	s64 delta_time_ms;
 #endif
-	for (i = 0; i < SMAP_MAX_LOCAL_NUMNODES; i++) {
+	for (i = 0; i < nr_local_numa; i++) {
 		migrate_folios[i] =
 			vzalloc(max_nr_folios * sizeof(struct folio *));
 		if (!migrate_folios[i]) {
@@ -663,7 +663,7 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 	nr_pre_migrate_fail = nr_migrate_fail = 0;
 	process_pages_for_migration(task, migrate_folios, mig_pages_cnt,
 				    &nr_pre_migrate_fail, &nr_pre_migrate);
-	for (i = 0; i < SMAP_MAX_LOCAL_NUMNODES; i++) {
+	for (i = 0; i < nr_local_numa; i++) {
 		if (mig_pages_cnt[i] == 0) {
 			vfree(migrate_folios[i]);
 			continue;

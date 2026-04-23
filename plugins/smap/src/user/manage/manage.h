@@ -17,8 +17,12 @@
 #include "numa_nodes.h"
 #include "advanced-strategy/scene_info.h"
 
-#define LOCAL_NUMA_NUM 4
-#define REMOTE_NUMA_NUM 18
+/* Increase limits to support more numa nodes
+ * LOCAL_NUMA_NUM: 4 local numa nodes (kept for compatibility)
+ * REMOTE_NUMA_NUM: 28 remote numa nodes (increased from 18)
+ */
+#define LOCAL_NUMA_NUM LOCAL_NUMA_BITS
+#define REMOTE_NUMA_NUM REMOTE_NUMA_BITS
 #define RESERVED_RATIO 0.05
 #define RESERVED_MEMORY 200
 #define MAX_4K_PROCESSES_CNT 300

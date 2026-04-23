@@ -358,8 +358,8 @@ TEST_F(SmapMigratePagesTest, TestAddPageForMigrateBackFour)
     bool migrate_all = true;
     page_task_arg pta = {.found = true, .node = 1, .nr_cpus_allowed = 1};
     nr_local_numa = 2;
-    unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 0 };
-    struct folio **migrate_folios[SMAP_MAX_LOCAL_NUMNODES] = { nullptr };
+    unsigned int mig_pages_cnt[MAX_NUMNODES] = { 0 };
+    struct folio **migrate_folios[MAX_NUMNODES] = { nullptr };
     migrate_folios[1] = (struct folio**)vzalloc(2 * sizeof(struct folio*));
     MOCKER(pfn_valid).stubs().with(any()).will(returnValue(true));
     MOCKER(pfn_to_online_page).stubs().with(any()).will(returnValue((page*)-1));
@@ -472,7 +472,7 @@ TEST_F(SmapMigratePagesTest, TestSmapHandleMigrateBackSubtask4K)
     struct migrate_back_subtask task;
     task.pa_start = 0x100000;
     task.pa_end = 0x200000;
-    unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 0 };
+    unsigned int mig_pages_cnt[MAX_NUMNODES] = { 0 };
     mig_pages_cnt[0] = 1;
     MOCKER(refresh_nodes_nr_free).stubs().will(ignoreReturnValue());
     MOCKER(process_pages_for_migration).stubs()
@@ -489,7 +489,7 @@ TEST_F(SmapMigratePagesTest, TestSmapHandleMigrateBackSubtask4KMigrateFail)
     struct migrate_back_subtask task;
     task.pa_start = 0x100000;
     task.pa_end = 0x200000;
-    unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 1 };
+    unsigned int mig_pages_cnt[MAX_NUMNODES] = { 1 };
     MOCKER(refresh_nodes_nr_free).stubs().will(ignoreReturnValue());
     MOCKER(process_pages_for_migration).stubs()
         .with(any(), any(), outBoundP(mig_pages_cnt, sizeof(mig_pages_cnt)), any(), any())
@@ -505,7 +505,7 @@ TEST_F(SmapMigratePagesTest, TestSmapHandleMigrateBackSubtask4KEmptyMigration)
     struct migrate_back_subtask task;
     task.pa_start = 0x100000;
     task.pa_end = 0x200000;
-    unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = {};
+    unsigned int mig_pages_cnt[MAX_NUMNODES] = {};
     MOCKER(refresh_nodes_nr_free).stubs().will(ignoreReturnValue());
     MOCKER(process_pages_for_migration).stubs()
         .with(any(), any(), outBoundP(mig_pages_cnt, sizeof(mig_pages_cnt)), any(), any())
@@ -521,7 +521,7 @@ TEST_F(SmapMigratePagesTest, TestSmapHandleMigrateBackSubtask4KPreMigrateFail)
     struct migrate_back_subtask task;
     task.pa_start = 0x100000;
     task.pa_end = 0x200000;
-    unsigned int mig_pages_cnt[SMAP_MAX_LOCAL_NUMNODES] = { 1 };
+    unsigned int mig_pages_cnt[MAX_NUMNODES] = { 1 };
     int nr_pre_migrate_fail = 1;
     MOCKER(refresh_nodes_nr_free).stubs().will(ignoreReturnValue());
     MOCKER(process_pages_for_migration)
