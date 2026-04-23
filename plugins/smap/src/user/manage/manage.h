@@ -126,6 +126,7 @@ typedef struct {
     uint64_t freqNum;
     uint64_t pageNum;
     uint64_t freqSum;
+    uint64_t remoteHotNum;
 } ActCount;
 
 typedef struct {

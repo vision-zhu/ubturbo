@@ -403,7 +403,8 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
 {
     size_t i, nrFreq, nrBit, acidx = 0;
     uint16_t freqMax = 0, freqMin = UINT16_MAX;
-    uint64_t actcLen, paddr, freqSum = 0;
+    uint64_t actcLen, paddr, freqSum = 0, remoteHotNum = 0;
+    uint32_t remoteHotThreshold = GetRemoteHotThreshold();
     size_t len = pmb->len[nid];
     unsigned long *bitmap = pmb->data[nid];
     unsigned long *whiteListBitmap = pmb->whiteListBm[nid];
@@ -413,7 +414,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     }
     ActcData *actc = attr->scanAttr.actcData[nid];
 
-    nrFreq = nrBit = actcLen = 0;
+    nrFreq = nrBit = actcLen = remoteHotNum = 0;
     for (acidx = 0; acidx < BITS_PER_LONG * len; acidx++) {
         if (actcLen >= attr->walkPage.nrPages[nid] || actcLen >= apf->len[nid]) {
             break;
@@ -435,6 +436,9 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
             nrFreq++;
             freqSum += actc[actcLen].freq;
         }
+        if (actc[actcLen].freq >= remoteHotThreshold) {
+            remoteHotNum++;
+        }
         actc[actcLen].addr = actcLen;
         freqMax = MAX(freqMax, actc[actcLen].freq);
         freqMin = MIN(freqMin, actc[actcLen].freq);
@@ -445,10 +449,11 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     attr->scanAttr.actCount[nid].freqMin = freqMin;
     attr->scanAttr.actCount[nid].freqNum = nrFreq;
     attr->scanAttr.actCount[nid].freqSum = freqSum;
+    attr->scanAttr.actCount[nid].remoteHotNum = remoteHotNum;
     attr->scanAttr.actCount[nid].pageNum = attr->scanAttr.actcLen[nid];
     attr->scanAttr.actCount[nid].freqZero = attr->scanAttr.actcLen[nid] - nrFreq;
-    SMAP_LOGGER_INFO("Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu.", nid, actcLen,
-                     nrFreq, nrBit, freqMax, freqMin, freqSum);
+    SMAP_LOGGER_INFO("Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu, remoteHotNum %lu",
+                      nid, actcLen, nrFreq, nrBit, freqMax, freqMin, freqSum, remoteHotNum);
     return 0;
 }
 
@@ -589,7 +594,7 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
             attr->migrateParam[i].memSize = param->numaParam[i].memSize;
             SMAP_LOGGER_INFO("Multinuma vm destNid: %d, memSize: %lu", attr->migrateParam[i].nid,
                              attr->migrateParam[i].memSize);
-            
+
             for (int j = 0; j < nrLocalNuma && j < LOCAL_NUMA_NUM; j++) {
                 attr->strategyAttr.initRemoteMemRatio[j][param->numaParam[i].nid - nrLocalNuma] =
                     param->numaParam[i].ratio;
