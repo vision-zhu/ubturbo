@@ -15,6 +15,16 @@
 
 using namespace std;
 
+static cpu_set_t g_fake_cpu_mask;
+
+static int fake_sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask)
+{
+    (void)pid;
+    (void)cpusetsize;
+    *mask = g_fake_cpu_mask;
+    return 0;
+}
+
 class ManageTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -428,13 +438,17 @@ TEST_F(ManageTest, TestSetLocalByNumaMaps)
 }
 
 extern "C" int SetProcessLocalNuma(pid_t pid, uint32_t *nodeBitmap, bool hugeFlag);
+extern "C" int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
+extern "C" int GetNodeFromCpu(int cpu);
 TEST_F(ManageTest, TestSetProcessLocalNuma)
 {
-    char fakeContent[] = "00400000 N1=1 N2=1 kernelpagesize_kB=2048\n";
-    FILE *fakeFp = fmemopen(fakeContent, strlen(fakeContent), "r");
     int pid = 1;
     uint32_t nodeBitmap = 0;
-    MOCKER(OpenNumaMaps).stubs().will(returnValue(fakeFp));
+    CPU_ZERO(&g_fake_cpu_mask);
+    CPU_SET(1, &g_fake_cpu_mask);
+    CPU_SET(2, &g_fake_cpu_mask);
+    MOCKER(sched_getaffinity).stubs().will(invoke(fake_sched_getaffinity));
+    MOCKER(GetNodeFromCpu).stubs().will(returnValue(1)).then(returnValue(2));
     int ret = SetProcessLocalNuma(pid, &nodeBitmap, true);
     EXPECT_EQ(ret, 0);
     EXPECT_EQ(nodeBitmap, BIT(1) | BIT(2));
@@ -509,6 +523,8 @@ TEST_F(ManageTest, TestProcessAddManageNewPid)
     MOCKER(EnvMutexLock).stubs().will(ignoreReturnValue());
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     MOCKER(EnvMutexUnlock).stubs().will(ignoreReturnValue());
+    MOCKER(sched_getaffinity).stubs().will(returnValue(0));
+    MOCKER(GetNodeFromCpu).stubs().will(returnValue(4));
 
     ret = ProcessAddManage(&param, nullptr);
     EXPECT_EQ(0, ret);
@@ -532,7 +548,7 @@ TEST_F(ManageTest, TestProcessAddManageNewPid)
     EXPECT_EQ(param.scanTime, g_processManager.processes->scanTime);
     EXPECT_EQ(param.duration, g_processManager.processes->duration);
     EXPECT_EQ(50, g_processManager.processes->initLocalMemRatio);
-    EXPECT_EQ(0x11, g_processManager.processes->numaAttr.numaNodes);
+    EXPECT_EQ(0x10, g_processManager.processes->numaAttr.numaNodes);
     EXPECT_EQ(PROC_MOVE, g_processManager.processes->state);
 }
 
