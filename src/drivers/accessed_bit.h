@@ -68,6 +68,7 @@ struct freq_info {
 	actc_t freq;
 };
 
+int pid_pte_mkold(struct access_pid *ap);
 int smap_create_tracking_info_file(struct ham_tracking_info *info);
 int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 			uint64_t *freq_info_num);
