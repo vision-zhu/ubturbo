@@ -698,7 +698,8 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 				ap->cur_times = ap->ntimes;
 			}
 		}
-		if ((ap->cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID) <=
+		pid_pte_mkold(ap);
+		if ((ap->cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID) <
 		    ap->ntimes) {
 			submit_one_work(ap);
 		} else {
