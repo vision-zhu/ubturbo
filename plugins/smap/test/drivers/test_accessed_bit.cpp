@@ -219,12 +219,12 @@ TEST_F(AccessedBitTest, SmapCreatTrackingInfoFile)
 }
 
 extern "C" int scan_forward_2M(pid_t pid, int page_size, scan_type type);
-extern "C" int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type);
 TEST_F(AccessedBitTest, scan_accessed_bit_forward)
 {
     int ret;
     int page_size = PAGE_SIZE_4K;
-    ret = scan_accessed_bit_forward_vm(1, page_size, NORMAL_SCAN);
+    struct access_pid ap = { .pid = 1, .type = NO_SCAN };
+    ret = scan_accessed_bit_forward_vm(&ap, page_size);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -785,35 +785,50 @@ TEST_F(AccessedBitTest, take_vma_snapshot)
 
 extern "C" bool IS_ERR(const void *ptr);
 extern "C" struct mm_struct *mock_get_mm_by_pid(pid_t pid);
-extern "C" int scan_forward_4k_mm(int pid, int page_size);
+extern "C" bool mmget_not_zero(struct mm_struct *mm);
 extern "C" int take_vma_snapshot(struct mm_struct *mm,
                                  struct smap_vma_struct **vma_arr, int *vma_count);
-TEST_F(AccessedBitTest, scan_forward_4K_mm)
+extern "C" int setup_statistic_scan(struct pte_walk *pte_walk, pid_t pid,
+                                   struct smap_vma_struct *vma_array, int vma_count);
+extern "C" void update_and_cleanup_statistic(pid_t pid, struct pte_walk *pte_walk,
+                                             struct mm_struct *mm, struct smap_vma_struct *vma_array);
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_fail)
 {
+    struct access_pid ap = { .pid = 1 };
     struct mm_struct mm;
 
     MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(static_cast<struct mm_struct *>(nullptr)));
-    int ret = scan_forward_4k_mm(1, PAGE_SIZE_4K);
+    int ret = scan_accessed_bit_forward_mm(&ap, PAGE_SIZE_4K, false);
     EXPECT_EQ(-EINVAL, ret);
 
     GlobalMockObject::verify();
+    MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(&mm));
+    MOCKER(mmget_not_zero).stubs().will(returnValue(false));
+    ret = scan_accessed_bit_forward_mm(&ap, PAGE_SIZE_4K, false);
+    EXPECT_EQ(-EINVAL, ret);
+}
 
-    MOCKER(take_vma_snapshot).stubs().will(returnValue(0));
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_success)
+{
+    struct access_pid ap = { .pid = 1 };
+    struct mm_struct mm;
+
+    GlobalMockObject::verify();
     MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(&mm));
     MOCKER(IS_ERR).stubs().will(returnValue(false));
-    MOCKER(kfree).expects(once()).will(ignoreReturnValue());
-    ret = scan_forward_4k_mm(1, PAGE_SIZE_4K);
+    MOCKER(mmget_not_zero).stubs().will(returnValue(true));
+    MOCKER(take_vma_snapshot).stubs().will(returnValue(0));
+    MOCKER(setup_statistic_scan).stubs().will(returnValue(0));
+    MOCKER(small_vma_walk).stubs().will(returnValue(0));
+    MOCKER(update_and_cleanup_statistic).stubs().will(ignoreReturnValue());
+    MOCKER(kfree).stubs().will(ignoreReturnValue());
+    int ret = scan_accessed_bit_forward_mm(&ap, PAGE_SIZE_4K, false);
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm)
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_invalid_page)
 {
-    int ret;
-    int pid = 1234;
-    MOCKER(scan_forward_4k_mm).stubs().will(returnValue(1));
-    ret = scan_accessed_bit_forward_mm(pid, PAGE_SIZE_4K, NORMAL_SCAN);
-    EXPECT_EQ(1, ret);
-
-    ret = scan_accessed_bit_forward_mm(pid, PAGE_SIZE_2M, NORMAL_SCAN);
+    struct access_pid ap = { .pid = 1 };
+    int ret = scan_accessed_bit_forward_mm(&ap, PAGE_SIZE_2M, false);
     EXPECT_EQ(-EINVAL, ret);
 }

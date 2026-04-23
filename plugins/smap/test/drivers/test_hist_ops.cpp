@@ -36,7 +36,6 @@ protected:
 
 extern list_head drivers_remote_ram_list;
 extern "C" struct smap_hist_dev g_smap_hist_dev;
-extern "C" int ub_hist_init(void);
 
 extern "C" u64 align_addr(u64 addr, u32 low_bit_len);
 TEST_F(HistOpsTest, align_addr)
@@ -639,6 +638,6 @@ TEST_F(HistOpsTest, hist_init)
     MOCKER(addr_segs_init).stubs().will(returnValue(0));
     MOCKER(hist_buffer_init).stubs().will(returnValue(0));
     MOCKER(scan_thread_init).stubs().will(returnValue(0));
-    ret = hist_init(SIZE_2M);
+    ret = hist_init(SIZE_2M, UB_HIST_SMAP_TYPE_N7);
     EXPECT_EQ(0, ret);
 }
