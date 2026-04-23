@@ -28,3 +28,9 @@
 [submodule "plugins/ubdma/test/3rdparty/mockcpp"]
 	path = plugins/ubdma/test/3rdparty/mockcpp
 	url = https://gitee.com/mirrors_sinojelly/mockcpp.git
+[submodule "plugins/ucache/test/3rdparty/googletest"]
+	path = plugins/ucache/test/3rdparty/googletest
+	url = https://gitee.com/mirrors/googletest.git
+[submodule "plugins/ucache/test/3rdparty/mockcpp"]
+	path = plugins/ucache/test/3rdparty/mockcpp
+	url = https://gitee.com/mirrors_sinojelly/mockcpp.git
