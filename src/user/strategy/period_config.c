@@ -20,7 +20,7 @@
 #include "securec.h"
 #include "period_config.h"
 
-#define PERIOD_CONFIG_ENTRY 6
+#define PERIOD_CONFIG_ENTRY 7
 #define PERIOD_CONFIG_BUFFSIZE 500
 
 #define RETURN_OK 0
@@ -47,6 +47,10 @@
 #define DEFAULT_FREQ_WT 0
 #define MIN_FREQ_WT 0
 
+#define MAX_REMOTE_HOT_THRESHOLD 65535
+#define DEFAULT_REMOTE_HOT_THRESHOLD 65535
+#define MIN_REMOTE_HOT_THRESHOLD 0
+
 #define SCAN_MULTIPLE 5UL
 
 #define RADIX_10 10UL
@@ -57,6 +61,7 @@ typedef struct {
     uint32_t remoteFreqPercentile;
     uint32_t slowThreshold;
     uint64_t freqWt;
+    uint32_t remoteHotThreshold;
     bool fileConfSwitch;
     bool scanPeriodChanged;
     bool migratePeriodChanged;
@@ -98,6 +103,11 @@ uint32_t GetSlowThresholdConfig(void)
 uint64_t GetFreqWtConfig(void)
 {
     return g_periodConfig.freqWt;
+}
+
+uint32_t GetRemoteHotThreshold(void)
+{
+    return g_periodConfig.remoteHotThreshold;
 }
 
 bool GetFileConfSwitchConfig(void)
@@ -224,13 +234,30 @@ static int32_t ConfigFreqWt(char *substr, char *value)
         SMAP_LOGGER_ERROR("Config freq wt read failed, key:%s.", substr);
         return ret;
     }
-    g_tmpPeriodConfig.freqWt = tempFreqWt;
-    bool isTooLow = (MIN_FREQ_WT > 0 && g_tmpPeriodConfig.freqWt < MIN_FREQ_WT);
-    if (isTooLow || g_tmpPeriodConfig.freqWt > MAX_FREQ_WT) {
+    if (tempFreqWt < MIN_FREQ_WT || tempFreqWt > MAX_FREQ_WT) {
         SMAP_LOGGER_ERROR("Config freq wt(%d) invalid, range(%d-%d), key:%s.", g_tmpPeriodConfig.freqWt, MIN_FREQ_WT,
                           MAX_FREQ_WT, substr);
         return RETURN_ERROR;
     }
+    g_tmpPeriodConfig.freqWt = tempFreqWt;
+    return RETURN_OK;
+}
+
+static int32_t ConfigRemoteHotThreshold(char *substr, char * value)
+{
+    SMAP_LOGGER_DEBUG("Read config key:%s, value:%s.", substr, value);
+    uint32_t remoteHotThreshold;
+    int32_t ret = ConfigReadValueToInt(value, &remoteHotThreshold);
+    if (ret != RETURN_OK) {
+        SMAP_LOGGER_ERROR("Config remote hot threshold read failed, key:%s.", substr);
+        return ret;
+    }
+    if (remoteHotThreshold > MAX_REMOTE_HOT_THRESHOLD || remoteHotThreshold < MIN_REMOTE_FREQ_PERCENTILE) {
+        SMAP_LOGGER_ERROR("Config remote hot threshold(%d) invalid, range(%d-%d), key:%s.", remoteHotThreshold,
+                           MIN_REMOTE_FREQ_PERCENTILE, MAX_REMOTE_HOT_THRESHOLD, substr);
+        return RETURN_ERROR;
+    }
+    g_tmpPeriodConfig.remoteHotThreshold = remoteHotThreshold;
     return RETURN_OK;
 }
 
@@ -276,6 +303,12 @@ static PeriodConfigReadElem g_periodConfigRead[] = {
     {
         "smap.freq.wt",
         ConfigFreqWt,
+        1UL,
+        0UL,
+    },
+    {
+        "smap.remote.hot.threshold",
+        ConfigRemoteHotThreshold,
         1UL,
         0UL,
     },
@@ -429,6 +462,7 @@ static void InitPeriodConfig(void)
     g_periodConfig.remoteFreqPercentile = DEFAULT_REMOTE_FREQ_PERCENTILE;
     g_periodConfig.slowThreshold = DEFAULT_SLOW_THRESHOLD;
     g_periodConfig.freqWt = DEFAULT_FREQ_WT;
+    g_periodConfig.remoteHotThreshold = DEFAULT_REMOTE_HOT_THRESHOLD;
     g_periodConfig.fileConfSwitch = false;
     g_periodConfig.scanPeriodChanged = false;
     g_periodConfig.migratePeriodChanged = false;
@@ -469,6 +503,7 @@ static int32_t InitPeriodConfigFileBuffer(char periodDefaultConfig[PERIOD_CONFIG
         { "smap.remote.freq.percentile = %d\n", DEFAULT_REMOTE_FREQ_PERCENTILE },
         { "smap.slow.threshold = %d\n", DEFAULT_SLOW_THRESHOLD },
         { "smap.freq.wt = %d\n", DEFAULT_FREQ_WT },
+        { "smap.remote.hot.threshold = %d\n", DEFAULT_REMOTE_HOT_THRESHOLD },
     };
     size_t numConfigs = sizeof(configs) / sizeof(configs[0]);
 
@@ -550,7 +585,7 @@ int32_t GeneratePeriodConfigFile(const char *configFile)
 
 static bool UpdatePeriodConfigChanged(void)
 {
-    uint32_t oldScanPeriod, oldMigratePeriod, scanPeriod, migratePeriod;
+    uint32_t oldScanPeriod, oldMigratePeriod, oldRemoteHotThreshold, scanPeriod, migratePeriod, remoteHotThreshold;
     uint32_t oldRemoteFreqPercentile, oldSlowThreshold, remoteFreqPercentile, slowThreshold;
     uint64_t oldFreqWt, freqWt;
 
@@ -563,15 +598,17 @@ static bool UpdatePeriodConfigChanged(void)
     oldRemoteFreqPercentile = g_periodConfig.remoteFreqPercentile;
     oldSlowThreshold = g_periodConfig.slowThreshold;
     oldFreqWt = g_periodConfig.freqWt;
+    oldRemoteHotThreshold = g_periodConfig.remoteHotThreshold;
 
     scanPeriod = g_tmpPeriodConfig.scanPeriod;
     migratePeriod = g_tmpPeriodConfig.migratePeriod;
     remoteFreqPercentile = g_tmpPeriodConfig.remoteFreqPercentile;
     slowThreshold = g_tmpPeriodConfig.slowThreshold;
     freqWt = g_tmpPeriodConfig.freqWt;
+    remoteHotThreshold = g_tmpPeriodConfig.remoteHotThreshold;
 
-    if (oldScanPeriod == scanPeriod && oldMigratePeriod == migratePeriod &&
-        oldRemoteFreqPercentile == remoteFreqPercentile && oldSlowThreshold == slowThreshold && oldFreqWt == freqWt) {
+    if (oldScanPeriod == scanPeriod && oldMigratePeriod == migratePeriod && oldRemoteHotThreshold == remoteHotThreshold
+        && oldRemoteFreqPercentile == remoteFreqPercentile && oldSlowThreshold == slowThreshold && oldFreqWt == freqWt) {
         return false;
     }
 
@@ -593,6 +630,10 @@ static bool UpdatePeriodConfigChanged(void)
 
     if (oldFreqWt != freqWt) {
         SMAP_LOGGER_INFO("Start update freq wt from config to %lu.", freqWt);
+    }
+
+    if (oldRemoteHotThreshold != remoteHotThreshold) {
+        SMAP_LOGGER_INFO("Start update remote hot threshold from config to %lu.", remoteHotThreshold);
     }
 
     return true;

@@ -564,6 +564,19 @@ static int SeparateStrategy4KInner(ProcessAttr *process, struct MigList mlist[MA
     return ret;
 }
 
+static uint64_t CalcAdditionalPage(ProcessAttr *process, int localNid, int remoteNid, uint64_t aimNum,
+                                   const uint64_t numaOffest[], const uint64_t numaFreePage[])
+{
+    uint64_t additionalNum;
+    uint64_t swappableNum = process->scanAttr.actcLen[localNid] - numaOffest[localNid];
+
+    additionalNum = MIN(swappableNum, aimNum);
+    additionalNum = MIN(additionalNum, process->separateParam.maxMigrate);
+    additionalNum = MIN(additionalNum, numaFreePage[localNid]);
+    additionalNum = MIN(additionalNum, numaFreePage[remoteNid]);
+    return additionalNum;
+}
+
 static void UpdateSwapNum(ProcessAttr *process, uint64_t swapNum[LOCAL_NUMA_BITS][MAX_NODES], int localNumaNum,
                           uint64_t numaFreePage[MAX_NODES])
 {
@@ -573,17 +586,31 @@ static void UpdateSwapNum(ProcessAttr *process, uint64_t swapNum[LOCAL_NUMA_BITS
             numaOffset[nid1] += process->strategyAttr.nrMigratePages[nid1][nid2];
         }
     }
-    for (int localNid = 0; localNid < localNumaNum; localNid++) {
-        if (NotInAttrL1(process, localNid)) {
+    for (int remoteNid = localNumaNum; remoteNid < localNumaNum + REMOTE_NUMA_NUM; remoteNid++) {
+        if (NotInAttrL2(process, remoteNid)) {
             continue;
         }
-        for (int remoteNid = localNumaNum; remoteNid < localNumaNum + REMOTE_NUMA_NUM; remoteNid++) {
-            if (NotInAttrL2(process, remoteNid)) {
+        for (int localNid = 0; localNid < localNumaNum; localNid++) {
+            if (NotInAttrL1(process, localNid)) {
                 continue;
             }
             swapNum[localNid][remoteNid] = CalcSwapNum4K(process, localNid, remoteNid, numaOffset, numaFreePage);
             numaOffset[localNid] += swapNum[localNid][remoteNid];
             numaOffset[remoteNid] += swapNum[localNid][remoteNid];
+        }
+        uint64_t remoteGuarantee = process->scanAttr.actCount[remoteNid].remoteHotNum;
+        for (int localNid = 0; localNid < localNumaNum; localNid++) {
+            if (numaOffset[remoteNid] >= remoteGuarantee) {
+                break;
+            }
+            if (NotInAttrL1(process, localNid)) {
+                continue;
+            }
+            uint64_t newAddedNum = CalcAdditionalPage(process, localNid, remoteNid,
+                                                    remoteGuarantee - numaOffset[remoteNid], numaOffset, numaFreePage);
+            swapNum[localNid][remoteNid] += newAddedNum;
+            numaOffset[localNid] += newAddedNum;
+            numaOffset[remoteNid] += newAddedNum;
         }
     }
 }

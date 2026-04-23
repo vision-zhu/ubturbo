@@ -313,7 +313,7 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	if (*ppos % sizeof(actc_t)) {
 		goto out_free;
 	}
-		
+
 
 	len = 0;
 	if (!cnt || *ppos >= total_len) {
