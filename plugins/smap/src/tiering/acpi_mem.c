@@ -63,6 +63,10 @@ static int acpi_table_build_mem(struct acpi_subtable_header *header)
 	if (list_empty(&acpi_mem.mem)) {
 		list_add_tail(&mem->segment, &acpi_mem.mem);
 	} else {
+		list_for_each_entry_reverse(tmp, &acpi_mem.mem, segment) {
+			if (tmp->start < mem->start)
+				break;
+		}
 		if (list_entry_is_head(tmp, &acpi_mem.mem, segment)) {
 			tmp = list_first_entry(&acpi_mem.mem, struct acpi_mem_segment, segment);
 			if (mem->end >= (tmp->start >> 1) && mem->node == tmp->node) {
