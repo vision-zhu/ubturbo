@@ -14,7 +14,7 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "SMAP_ACPI: " fmt
 
-int nr_local_numa = 0;
+extern int nr_local_numa;
 struct mem_info acpi_mem = { .mem = LIST_HEAD_INIT(acpi_mem.mem) };
 static struct node_mem acpi_mem_cached[SMAP_MAX_NUMNODES];
 
@@ -197,12 +197,8 @@ int init_acpi_mem(void)
 		}
 		pr_info("node: %d PXM: %d [%#llx-%#llx]\n", mem->node, mem->pxm,
 			mem->start, mem->end);
-		if (mem->node >= nr_local_numa) {
-			nr_local_numa = mem->node + 1;
-			pr_info("number of local NUMA node: %u\n",
-				nr_local_numa);
-		}
 	}
+	pr_info("number of local NUMA node: %u\n", nr_local_numa);
 	calc_node_distance();
 
 	return 0;

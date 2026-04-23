@@ -159,6 +159,13 @@ replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "acpi_table_build_mem
 replace_string "${code_dir}/src/drivers/access_acpi_mem.h" "nr_local_numa" "drivers_nr_local_numa"
 replace_string "${code_dir}/src/drivers/access_acpi_mem.h" "is_paddr_local" "drivers_is_paddr_local"
 
+replace_string "${code_dir}/src/tiering/acpi_mem.c" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${code_dir}/src/tiering/acpi_mem.h" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${code_dir}/src/tiering/pid_ioctl.h" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${code_dir}/src/tiering/smap_migrate_pages.c" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${code_dir}/src/tiering/smap_migrate_pages.h" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${code_dir}/src/tiering/iomem.h" "nr_local_numa" "drivers_nr_local_numa"
+
 replace_string "${code_dir}/src/drivers/access_tracking.c" "remote_ram_list" "drivers_remote_ram_list"
 replace_string "${code_dir}/src/drivers/accessed_bit.c" "remote_ram_list" "drivers_remote_ram_list"
 replace_string "${code_dir}/src/drivers/accessed_bit.c" "walk->private" "walk->private_data" "true"
@@ -203,6 +210,21 @@ replace_string "${code_dir}/src/drivers/hist_ops.c" "remote_ram_list" "drivers_r
 replace_string "${code_dir}/src/drivers/hist_ops.c" "nr_local_numa" "drivers_nr_local_numa"
 replace_string "${code_dir}/src/drivers/hist_ops.c" "ram_changed" "drivers_ram_changed"
 
+# hist_tracking.c - also needs nr_local_numa
+replace_string "${code_dir}/src/drivers/hist_tracking.c" "nr_local_numa" "drivers_nr_local_numa"
+
+# access_tracking.c
+replace_string "${code_dir}/src/drivers/access_tracking.c" "nr_local_numa" "drivers_nr_local_numa"
+
+# access_mmu.c
+replace_string "${code_dir}/src/drivers/access_mmu.c" "nr_local_numa" "drivers_nr_local_numa"
+
+# accessed_bit.c
+replace_string "${code_dir}/src/drivers/accessed_bit.c" "nr_local_numa" "drivers_nr_local_numa"
+
+# access_pid.c
+replace_string "${code_dir}/src/drivers/access_pid.c" "nr_local_numa" "drivers_nr_local_numa"
+
 # migration.c
 replace_string "${code_dir}/src/user/strategy/migration.c" "InitMigList" "strategy_InitMigList"
 
@@ -216,6 +238,14 @@ replace_string "${code_dir}/src/tiering/smap_migrate_wrapper.c" "private" "priva
 
 # test/depends/include/linux/pagewalk.h
 replace_string "${CURRENT_PATH}/depends/include/linux/pagewalk.h" "private;" "private_data;" "true"
+
+replace_string "${CURRENT_PATH}/tiering/test_acpi_mem.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/tiering/test_smap_migrate_pages.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/tiering/test_mig_init.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/drivers/test_hist_tracking.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/drivers/test_hist_ops.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/drivers/test_access_tracking.cpp" "nr_local_numa" "drivers_nr_local_numa"
+replace_string "${CURRENT_PATH}/drivers/test_access_pid.cpp" "nr_local_numa" "drivers_nr_local_numa"
 
 add_extern ${code_dir}/src
 
