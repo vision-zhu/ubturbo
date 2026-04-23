@@ -124,6 +124,20 @@ static bool IsLocalNuma(unsigned long nid)
 
 static int SetNrLocalNuma(struct ProcessManager *manager)
 {
+    int ret;
+    int nrLocalNumaFromDriver = 0;
+
+    /* First try to get nr_local_numa from driver via ioctl */
+    ret = AccessIoctlGetNrLocalNuma(&nrLocalNumaFromDriver);
+    if (ret == 0 && nrLocalNumaFromDriver > 0) {
+        manager->nrLocalNuma = nrLocalNumaFromDriver;
+        SMAP_LOGGER_INFO("Get nr_local_numa from driver: %d", manager->nrLocalNuma);
+        return 0;
+    }
+
+    SMAP_LOGGER_WARNING("Failed to get nr_local_numa from driver, fallback to sysfs method");
+
+    /* Fallback to original sysfs method */
     DIR *dir = opendir(SYS_NODE_PATH);
     if (!dir) {
         SMAP_LOGGER_ERROR("Failed to open node directory: %d.", -errno);

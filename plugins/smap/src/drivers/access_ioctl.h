@@ -72,6 +72,8 @@ struct access_pid_freq_msg {
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
 #define SMAP_ACCESS_READ_PID_FREQ \
 	_IOW(SMAP_ACCESS_MAGIC, 6, struct access_pid_freq_msg)
+#define SMAP_ACCESS_GET_NR_LOCAL_NUMA \
+	_IOR(SMAP_ACCESS_MAGIC, 7, int)
 
 void access_ioctl_exit(void);
 int access_ioctl_init(void);

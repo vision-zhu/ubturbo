@@ -578,6 +578,17 @@ out_free_payload:
 	return ret;
 }
 
+static long ioctl_get_nr_local_numa(void __user *argp)
+{
+	int nr_local_numa_val = nr_local_numa;
+
+	if (copy_to_user(argp, &nr_local_numa_val, sizeof(nr_local_numa_val)))
+		return -EFAULT;
+
+	pr_info("get nr_local_numa: %d\n", nr_local_numa_val);
+	return 0;
+}
+
 static long smap_access_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
@@ -601,6 +612,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_get_tracking(argp);
 	case SMAP_ACCESS_READ_PID_FREQ:
 		return ioctl_read_pid_freq(argp);
+	case SMAP_ACCESS_GET_NR_LOCAL_NUMA:
+		return ioctl_get_nr_local_numa(argp);
 	default:
 		rc = -ENOTTY;
 	}

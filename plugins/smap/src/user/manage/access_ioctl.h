@@ -63,8 +63,10 @@ struct TrakingInfoPayload {
 #define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
 #define SMAP_ACCESS_READ_PID_FREQ _IOW(SMAP_ACCESS_MAGIC, 6, struct AccessPidFreq)
+#define SMAP_ACCESS_GET_NR_LOCAL_NUMA _IOR(SMAP_ACCESS_MAGIC, 7, int)
 
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
+int AccessIoctlGetNrLocalNuma(int *nrLocalNuma);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(size_t *len);

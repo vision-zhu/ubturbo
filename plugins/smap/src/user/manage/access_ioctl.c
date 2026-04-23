@@ -124,6 +124,18 @@ int AccessIoctlReadPidFreq(struct AccessPidFreq *apf)
     return ret;
 }
 
+int AccessIoctlGetNrLocalNuma(int *nrLocalNuma)
+{
+    struct ProcessManager *manager = GetProcessManager();
+
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_NR_LOCAL_NUMA, nrLocalNuma);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("access get nr local numa error: %d\n", -errno);
+        ret = -EBADF;
+    }
+    return ret;
+}
+
 int AccessRead(size_t len, char *buf)
 {
     struct ProcessManager *manager = GetProcessManager();
