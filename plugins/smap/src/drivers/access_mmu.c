@@ -70,13 +70,13 @@ static int calc_paddr_acidx(u64 paddr, int *nid, u64 *index)
 	return calc_paddr_acidx_iomem(paddr, nid, index, page_size);
 }
 
-static int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
+int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
 {
 	unsigned long pfn;
 	struct page *p_page = NULL;
 
-	if (nid >= nr_local_numa) {
-		return 0;
+	if (BIT_WORD(acidx) >= ap->bm_len[nid]) {
+		return -ERANGE;
 	}
 	pfn = PHYS_PFN(paddr);
 	if (!pfn_valid(pfn)) {
@@ -117,6 +117,18 @@ static int add_to_bm_page(u64 paddr, struct access_pid *ap)
 	}
 	set_bit(acidx, ap->paddr_bm[nid]);
 	ap->page_num[nid]++;
+	return 0;
+}
+
+int ap_bm_update(struct access_pid *ap, int node_id, u64 acidx,
+		struct page *page)
+{
+	if (BIT_WORD(acidx) >= ap->bm_len[node_id]) {
+		return -ERANGE;
+	}
+
+	set_bit(acidx, ap->paddr_bm[node_id]);
+	ap->page_num[node_id]++;
 	return 0;
 }
 

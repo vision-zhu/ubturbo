@@ -943,12 +943,11 @@ void clean_last_ap_data(struct access_pid *ap)
 	}
 }
 
-int access_walk_pagemap(struct access_pid *ap)
+int access_walk_pagemap_prepare(struct access_pid *ap)
 {
 	int ret;
 	struct access_tracking_dev *adev;
 	u64 nodes_page_count[SMAP_MAX_NUMNODES] = { 0 };
-	struct pagemapread pm = { 0 };
 	if (!ap) {
 		return -EINVAL;
 	}
@@ -967,6 +966,21 @@ int access_walk_pagemap(struct access_pid *ap)
 		return ret;
 	}
 	ret = init_vm_mapping(&ap->info);
+	return ret;
+}
+
+int access_walk_pagemap(struct access_pid *ap)
+{
+	int ret;
+	struct pagemapread pm = { 0 };
+	if (!ap) {
+		return -EINVAL;
+	}
+	if (ap->type != NORMAL_SCAN) {
+		return 0;
+	}
+
+	ret = access_walk_pagemap_prepare(ap);
 	if (ret)
 		return ret;
 	pm.ap = ap;
