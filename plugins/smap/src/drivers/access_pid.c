@@ -1009,7 +1009,6 @@ int read_pid_freq(pid_t pid, size_t *data_len, actc_t **data)
 		return -EINVAL;
 	}
 
-	pr_debug("start writing pid %d freq\n", pid);
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		if (ap->page_num[i] == 0 || !ap->paddr_bm[i] || !data[i]) {
 			continue;
