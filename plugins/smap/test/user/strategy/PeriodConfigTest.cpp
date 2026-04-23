@@ -44,6 +44,7 @@ typedef struct {
     uint32_t remoteFreqPercentile;
     uint32_t slowThreshold;
     uint64_t freqWt;
+    uint32_t remoteHotThreshold;
     bool fileConfSwitch;
     bool scanPeriodChanged;
     bool migratePeriodChanged;
@@ -243,7 +244,7 @@ TEST_F(PeriodConfigTest, ConfigFreqWtTest)
     GlobalMockObject::verify();
     ret = ConfigFreqWt(substr, value);
     EXPECT_EQ(RETURN_ERROR, ret);
-    EXPECT_EQ(65536, g_tmpPeriodConfig.freqWt);
+    EXPECT_EQ(0, g_tmpPeriodConfig.freqWt);
 
     GlobalMockObject::verify();
     char *value1 = "40";
@@ -326,7 +327,7 @@ TEST_F(PeriodConfigTest, PeriodConfigReviewTest)
     int32_t ret = PeriodConfigReview();
     EXPECT_EQ(-1, ret);
 
-    uint32_t num = 6;
+    uint32_t num = 7;
     for (int i = 0; i < num; i++) {
         g_periodConfigRead[i].needCfg = 2UL;
         g_periodConfigRead[i].realCfg = 2UL;
@@ -362,8 +363,8 @@ TEST_F(PeriodConfigTest, InitPeriodConfigTest)
     g_periodConfig.migratePeriodChanged = true;
 
     InitPeriodConfig();
-    EXPECT_EQ(100, g_periodConfig.scanPeriod);
-    EXPECT_EQ(1000, g_periodConfig.migratePeriod);
+    EXPECT_EQ(200, g_periodConfig.scanPeriod);
+    EXPECT_EQ(2000, g_periodConfig.migratePeriod);
     EXPECT_EQ(false, g_periodConfig.fileConfSwitch);
     EXPECT_EQ(false, g_periodConfig.scanPeriodChanged);
     EXPECT_EQ(false, g_periodConfig.migratePeriodChanged);
