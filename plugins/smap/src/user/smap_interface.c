@@ -394,10 +394,6 @@ static bool CheckMigOutPayloadItems(struct MigrateOutPayload *payload, int *tota
             SMAP_LOGGER_ERROR("[%d] pid: %d migrateMode %d invalid.", i, payload->pid, payload->inner[i].migrateMode);
             return false;
         }
-        if (GetRunMode() == WATERLINE_MODE && payload->inner[i].migrateMode == MIG_MEMSIZE_MODE) {
-            SMAP_LOGGER_ERROR("[%d] smap runMode is WATERLINE_MODE, not supported MIG_MEMSIZE_MODE.", i);
-            return false;
-        }
         if (GetRunMode() == MEM_POOL_MODE && payload->inner[i].migrateMode != MIG_MEMSIZE_MODE) {
             SMAP_LOGGER_ERROR("[%d] smap runMode is MEM_POOL_MODE, not supported mode except MIG_MEMSIZE_MODE.", i);
             return false;
@@ -1324,8 +1320,7 @@ int ubturbo_smap_run_mode_set(int runMode)
 
     int pageSize = GetPageSize();
     if (runMode == MEM_POOL_MODE && pageSize != GetHugePageSize()) {
-        SMAP_LOGGER_ERROR("Not Huge Page mode, set run mode failed.");
-        return -EINVAL;
+        SMAP_LOGGER_INFO("MEM_POOL_MODE for 4K process, memSize based migration enabled.");
     }
 
     ret = SyncRunMode(runMode);
@@ -1715,11 +1710,6 @@ static int CheckMigOutSyncMsg(int pidType, uint64_t maxWaitTime)
         return -EINVAL;
     }
 
-    if (pidType != PAGETYPE_HUGE) {
-        SMAP_LOGGER_ERROR("pidType is not 2M, ubturbo_smap_migrate_out_sync failed.");
-        return -EINVAL;
-    }
-
     return 0;
 }
 
@@ -1975,10 +1965,6 @@ static int SmapMigratePidRemoteNumaCheck(struct MigrateEscapeMsg *msg)
             return -EINVAL;
         }
 
-        if (GetRunMode() == WATERLINE_MODE && msg->payload[i].migrateMode == MIG_MEMSIZE_MODE) {
-            SMAP_LOGGER_ERROR("[%d] smap runMode is WATERLINE_MODE, not supported MIG_MEMSIZE_MODE.", i);
-            return -EINVAL;
-        }
         if (GetRunMode() == MEM_POOL_MODE && msg->payload[i].migrateMode != MIG_MEMSIZE_MODE) {
             SMAP_LOGGER_ERROR("[%d] smap runMode is MEM_POOL_MODE, not supported mode except MIG_MEMSIZE_MODE.", i);
             return -EINVAL;

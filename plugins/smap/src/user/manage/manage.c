@@ -2200,7 +2200,8 @@ bool MigOutIsDone(ProcessAttr *attr, bool *isMultiNumaPid)
             SMAP_LOGGER_ERROR("Invalid l1Node %d l2Node %d of pid %d.", l1Node, l2Node, pid);
             return false;
         }
-        remoteNum = KBToHugePage(attr->strategyAttr.memSize[l1Node][l2Node]);
+        remoteNum = IsHugeMode() ? KBToHugePage(attr->strategyAttr.memSize[l1Node][l2Node]) :
+                                   KBToNormalPage(attr->strategyAttr.memSize[l1Node][l2Node]);
         if (remoteNum > attr->walkPage.nrPage) {
             SMAP_LOGGER_WARNING("Pid %d mig memSize is larger than nrPage.", attr->pid);
         }
