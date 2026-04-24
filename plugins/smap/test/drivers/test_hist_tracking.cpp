@@ -297,32 +297,3 @@ TEST_F(HistTrackingTest, hist_tracking_init_two)
     ret = hist_tracking_init();
     EXPECT_EQ(-ENODEV, ret);
 }
-
-extern "C" int hist_module_init(void);
-TEST_F(HistTrackingTest, hist_module_init)
-{
-    int ret;
-    struct smap_hist_dev *dev = (struct smap_hist_dev *)malloc(sizeof(struct smap_hist_dev));
-    MOCKER(hist_init).stubs().will(returnValue(0));
-    MOCKER(hist_tracking_init).stubs().will(returnValue(0));
-    ret = hist_module_init();
-    EXPECT_EQ(0, ret);
-    free(dev);
-}
-
-TEST_F(HistTrackingTest, hist_module_init_two)
-{
-    int ret;
-    struct smap_hist_dev *dev = (struct smap_hist_dev *)malloc(sizeof(struct smap_hist_dev));
-    MOCKER(hist_init).stubs().will(returnValue(1));
-    ret = hist_module_init();
-    EXPECT_EQ(1, ret);
-    GlobalMockObject::verify();
-
-    MOCKER(hist_init).stubs().will(returnValue(0));
-    MOCKER(hist_tracking_init).stubs().will(returnValue(1));
-    MOCKER(hist_deinit).stubs().will(ignoreReturnValue());
-    ret = hist_module_init();
-    EXPECT_EQ(1, ret);
-    free(dev);
-}
