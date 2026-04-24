@@ -1106,7 +1106,7 @@ int hist_init(u32 pgsize)
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	int ret;
 
-	ret = ub_hist_init(dev->hw_type);
+	ret = ub_hist_init();
 	if (ret)
 		return ret;
 	dev->hw_type = ub_hist_get_hw_type();
