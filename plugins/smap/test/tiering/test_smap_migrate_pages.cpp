@@ -51,6 +51,11 @@ extern "C" int isolate_hugetlb(struct page *page, struct list_head *list);
 extern "C" bool __folio_test_movable(struct folio *folio);
 extern "C" bool get_page_unless_zero(struct page *page);
 extern "C" bool pfn_valid(unsigned long pfn);
+extern "C" void shake_page(struct page *page);
+extern "C" void folio_put(struct folio *folio);
+extern "C" void put_folios(struct folio **folios, unsigned int nr_folios);
+extern "C" unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
+    int to_node, enum smap_migrate_type type);
 extern "C" struct multi_migrate_struct {
 	ktime_t start_time;
 	ktime_t end_time;
@@ -200,32 +205,232 @@ TEST_F(SmapMigratePagesTest, TestMigrateMultiThreadedTwo)
 
 extern "C" int smap_isolate_and_migrate_folios(struct folio **folios, unsigned int nr_folios, new_folio_t get_new_folio,
     free_folio_t put_new_folio, unsigned long private_data, enum migrate_mode mode, unsigned int *nr_succeeded);
-TEST_F(SmapMigratePagesTest, TestSmapMigrate)
+
+// Test: nr_folios == 0, should return 0 directly
+TEST_F(SmapMigratePagesTest, TestSmapMigrateNrFoliosZero)
 {
     int to_node = 1;
     unsigned int failed_num = 0;
-    unsigned int nr_folios = 10;
-    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
-    MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(2));
+    unsigned int nr_folios = 0;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(sizeof(struct folio*)));
     failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
-    EXPECT_EQ(10, failed_num);
-
-    MOCKER(smap_isolate_and_migrate_folios).stubs().will(returnValue(2));
-    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
-    EXPECT_EQ(10, failed_num);
-
+    EXPECT_EQ(0, failed_num);
     vfree(folios);
 }
 
-TEST_F(SmapMigratePagesTest, TestSmapMigrateTwo)
+// Test: folios == NULL, should return nr_folios directly
+TEST_F(SmapMigratePagesTest, TestSmapMigrateFoliosNull)
 {
     int to_node = 1;
     unsigned int failed_num = 0;
     unsigned int nr_folios = 10;
+    failed_num = smap_migrate(nullptr, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(nr_folios, failed_num);
+}
+
+// Test: to_node < 0 (invalid node), should call put_folios and return nr_folios
+TEST_F(SmapMigratePagesTest, TestSmapMigrateInvalidNodeNegative)
+{
+    int to_node = -1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
     struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
-    MOCKER(isolate_and_migrate_folios).stubs().will(returnValue(10));
+    MOCKER(put_folios).stubs().will(ignoreReturnValue());
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(nr_folios, failed_num);
+    vfree(folios);
+}
+
+// Test: to_node >= SMAP_MAX_NUMNODES (invalid node), should call put_folios and return nr_folios
+TEST_F(SmapMigratePagesTest, TestSmapMigrateInvalidNodeTooLarge)
+{
+    int to_node = SMAP_MAX_NUMNODES;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(put_folios).stubs().will(ignoreReturnValue());
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(nr_folios, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_HOTNESS with partial success
+TEST_F(SmapMigratePagesTest, TestSmapMigrateHotnessPartialSuccess)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 5;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(nr_folios - nr_succeeded, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_HOTNESS with full success
+TEST_F(SmapMigratePagesTest, TestSmapMigrateHotnessFullSuccess)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 10;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(0, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_BACK with partial success
+TEST_F(SmapMigratePagesTest, TestSmapMigrateBackPartialSuccess)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 7;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
     failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_BACK);
-    EXPECT_EQ(10, failed_num);
+    EXPECT_EQ(nr_folios - nr_succeeded, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_BACK with error
+TEST_F(SmapMigratePagesTest, TestSmapMigrateBackWithError)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 0;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(-EINVAL));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_BACK);
+    EXPECT_EQ(nr_folios, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_REMOTE with partial success
+TEST_F(SmapMigratePagesTest, TestSmapMigrateRemotePartialSuccess)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 3;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(smap_isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
+    EXPECT_EQ(nr_folios - nr_succeeded, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_REMOTE with positive error (warning)
+TEST_F(SmapMigratePagesTest, TestSmapMigrateRemoteWithWarning)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 5;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(smap_isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(1));  // positive error triggers warning
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
+    EXPECT_EQ(nr_folios - nr_succeeded, failed_num);
+    vfree(folios);
+}
+
+// Test: MIGRATE_TYPE_REMOTE with negative error
+TEST_F(SmapMigratePagesTest, TestSmapMigrateRemoteWithError)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 0;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(smap_isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(-EINVAL));  // negative error
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_REMOTE);
+    EXPECT_EQ(nr_folios, failed_num);
+    vfree(folios);
+}
+
+// Test: HUGE_PAGE mode with success
+TEST_F(SmapMigratePagesTest, TestSmapMigrateHugePageSuccess)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 512;  // 512 base pages = 1 huge page (2MB)
+    g_pagesize_huge = 2097152;  // 2MB huge page
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    smap_pgsize = HUGE_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    // nr_succeeded >>= (__builtin_ctz(g_pagesize_huge) - PAGE_SHIFT) adjusts the count
+    // 512 >> (21 - 12) = 512 >> 9 = 1 huge page succeeded
+    EXPECT_EQ(nr_folios - 1, failed_num);
+    smap_pgsize = NORMAL_PAGE;
+    vfree(folios);
+}
+
+// Test: NORMAL_PAGE mode with err==0 and nr_succeeded==0 triggers shake_page
+TEST_F(SmapMigratePagesTest, TestSmapMigrateShakePage)
+{
+    int to_node = 1;
+    unsigned int failed_num = 0;
+    unsigned int nr_folios = 10;
+    unsigned int nr_succeeded = 0;
+    struct folio folio;
+    struct folio **folios = static_cast<struct folio**>(vzalloc(nr_folios * sizeof(struct folio*)));
+    folios[0] = &folio;
+    MOCKER(isolate_and_migrate_folios)
+        .stubs()
+        .with(any(), any(), any(), any(), any(), any(), outBoundP(&nr_succeeded, sizeof(nr_succeeded)))
+        .will(returnValue(0));
+    MOCKER(calc_time_us).stubs().will(returnValue((ktime_t)100));
+    MOCKER(folio_try_get).stubs().with(any()).will(returnValue(true));
+    MOCKER(shake_page).stubs().with(any()).will(ignoreReturnValue());
+    MOCKER(folio_put).stubs().with(any()).will(ignoreReturnValue());
+    smap_pgsize = NORMAL_PAGE;
+    failed_num = smap_migrate(folios, nr_folios, to_node, MIGRATE_TYPE_HOTNESS);
+    EXPECT_EQ(nr_folios, failed_num);
     vfree(folios);
 }
 
