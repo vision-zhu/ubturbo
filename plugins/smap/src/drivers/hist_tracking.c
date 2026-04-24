@@ -42,10 +42,6 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "hist: " fmt
 
-static unsigned int hist_type = UB_HIST_SMAP_TYPE_N6;
-module_param(hist_type, uint, S_IRUGO);
-MODULE_PARM_DESC(hist_type, "ub hist hardware type: 0 for N6, 1 for N7");
-
 extern struct list_head access_dev;
 
 static inline void reset_actc_data(struct access_tracking_dev *hdev)
@@ -336,13 +332,7 @@ int hist_module_init(void)
 		pr_err("parse ACPI table failed: %d\n", ret);
 		return ret;
 	}
-	if (hist_type > UB_HIST_SMAP_TYPE_N7) {
-		pr_err("invalid hist type: %u, value: 0 for N6, 1 for N7",
-		       hist_type);
-		ret = -EINVAL;
-		goto err_hist_init;
-	}
-	ret = hist_init(SIZE_2M, hist_type);
+	ret = hist_init(SIZE_2M);
 	if (ret) {
 		pr_err("init SMAP histogram device failed, ret: %d\n", ret);
 		return ret;
@@ -359,8 +349,6 @@ int hist_module_init(void)
 
 err_tracking_add:
 	hist_deinit();
-	return ret;
-err_hist_init:
 	reset_acpi_mem();
 	return ret;
 }

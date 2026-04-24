@@ -22,13 +22,7 @@
 #include "ub_hist.h"
 
 #define REG_BASE_ADDR_N6_0 0x33030a0000
-#define REG_BASE_ADDR_N6_1 0x330a0a0000
-#define REG_BASE_ADDR_N6_2 0x73030a0000
-#define REG_BASE_ADDR_N6_3 0x730a0a0000
 #define REG_BASE_ADDR_N7_0 0x2d21320000
-#define REG_BASE_ADDR_N7_1 0x2d21360000
-#define REG_BASE_ADDR_N7_2 0x3d21320000
-#define REG_BASE_ADDR_N7_3 0x3d21360000
 #define UDIE_PHY_ADDR_STS_REGS_N6_OFFSET 0x4000
 #define UDIE_PHY_ADDR_STS_REGS_N7_OFFSET 0x1000
 #define DEVICE_MEM_LEN_N6 0x8000
@@ -46,8 +40,7 @@ static DEFINE_SPINLOCK(ub_hist_ba_list_lock);
 static DEFINE_MUTEX(dev_sta_mutex);
 static ub_hist_smap_type g_ub_hist_smap_type;
 
-	static struct ub_hist_ba_device *
-	ub_hist_find_dev_by_tag(uint64_t ba_tag)
+static struct ub_hist_ba_device *ub_hist_find_dev_by_tag(uint64_t ba_tag)
 {
 	unsigned long flags;
 	struct ub_hist_ba_device *ba_dev;
@@ -437,55 +430,47 @@ static struct platform_driver ub_hist_platform_driver = {
         },
 };
 
-static inline bool ub_hist_check_addr_in_n7_bas(u64 ba_tag)
-{
-	return (ba_tag == REG_BASE_ADDR_N7_0) ||
-	       (ba_tag == REG_BASE_ADDR_N7_1) ||
-	       (ba_tag == REG_BASE_ADDR_N7_2) || (ba_tag == REG_BASE_ADDR_N7_3);
-}
-
-static inline bool ub_hist_check_addr_in_n6_bas(u64 ba_tag)
-{
-	return (ba_tag == REG_BASE_ADDR_N6_0) ||
-	       (ba_tag == REG_BASE_ADDR_N6_1) ||
-	       (ba_tag == REG_BASE_ADDR_N6_2) || (ba_tag == REG_BASE_ADDR_N6_3);
-}
-
-static bool ub_hist_verify_hw_type(void)
+static int ub_hist_set_hw_type(void)
 {
 	struct ub_hist_ba_device *ba_dev;
-	u64 ba_tag;
-	bool ret = true;
-
-	spin_lock(&ub_hist_ba_list_lock);
-	list_for_each_entry(ba_dev, &ub_hist_ba_list, list) {
-		ba_tag = ba_dev->info.ba_tag;
-		ret = (g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7) ?
-			      ub_hist_check_addr_in_n7_bas(ba_tag) :
-			      ub_hist_check_addr_in_n6_bas(ba_tag);
-		if (!ret)
-			break;
+	ba_dev = list_first_entry_or_null(&ub_hist_ba_list,
+					  struct ub_hist_ba_device, list);
+	if (!ba_dev) {
+		pr_err("BA device not found\n");
+		return -ENODEV;
 	}
-	spin_unlock(&ub_hist_ba_list_lock);
-	return ret;
+	if (ba_dev->info.ba_tag == REG_BASE_ADDR_N6_0) {
+		g_ub_hist_smap_type = UB_HIST_SMAP_TYPE_N6;
+		return 0;
+	}
+	if (ba_dev->info.ba_tag == REG_BASE_ADDR_N7_0) {
+		g_ub_hist_smap_type = UB_HIST_SMAP_TYPE_N7;
+		return 0;
+	}
+
+	pr_err("Invalid hardware type detected\n");
+	return -EINVAL;
 }
 
-int ub_hist_init(ub_hist_smap_type hw_type)
+ub_hist_smap_type ub_hist_get_hw_type(void)
+{
+	return g_ub_hist_smap_type;
+}
+EXPORT_SYMBOL(ub_hist_get_hw_type);
+
+int ub_hist_init(void)
 {
 	int ret;
 
-	g_ub_hist_smap_type = hw_type;
 	ret = platform_driver_register(&ub_hist_platform_driver);
 	if (ret) {
 		pr_err("failed to register platform driver, ret: %d\n", ret);
 		return ret;
 	}
+	ret = ub_hist_set_hw_type();
+	if (ret)
+		return ret;
 
-	if (!ub_hist_verify_hw_type()) {
-		pr_err("parameter hist_type doesn't match the hardware type\n");
-		ub_hist_exit();
-		return -EINVAL;
-	}
 	pr_debug("UB histogram init successfully\n");
 	return ret;
 }

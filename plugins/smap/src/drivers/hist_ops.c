@@ -26,7 +26,6 @@
 #include "ub_hist.h"
 #include "hist_ops.h"
 
-#define MAX_READ_TRY (2)
 #define HOT_WINDOW_RATIO (10)
 #define SCAN_INTERVAL_RANGE_US 1000
 
@@ -67,10 +66,7 @@ static inline u32 get_hist_addr_shift(enum ub_hist_sts_size sts_size)
 static inline u64 align_addr_by_sts_size(u64 addr,
 					 enum ub_hist_sts_size sts_size)
 {
-	u32 shift;
-
-	shift = get_hist_addr_shift(sts_size);
-
+	u32 shift = get_hist_addr_shift(sts_size);
 	return align_addr(addr, shift);
 }
 
@@ -78,10 +74,8 @@ static inline bool paddr_within_ba(u64 pa, struct ub_hist_ba_info *ba_info)
 {
 	if (ba_info->cc_range.start <= pa && pa < ba_info->cc_range.end)
 		return true;
-
 	if (ba_info->nc_range.start <= pa && pa < ba_info->nc_range.end)
 		return true;
-
 	return false;
 }
 
@@ -338,7 +332,7 @@ static int generate_aligned_2m_scan_wins_info(struct segs_info *win_info,
  * Filter windows by BA tag and store qualified 4k windows back to win_info->segs
  * @win_info: Windows set information structure containing all 4k scan windows
  * @max_wins_4k_per_ba: Maximum 4k scan windows to keep per BA
- * Return 0 on success, negative error code on failure 
+ * Return 0 on success, negative error code on failure
  */
 static int filter_4k_scan_hot_wins(struct segs_info *win_info,
 				   u32 max_wins_4k_per_ba)
@@ -350,7 +344,7 @@ static int filter_4k_scan_hot_wins(struct segs_info *win_info,
 	u32 total_wins_sel = 1;
 	u32 max_scan_wins_per_ba = 1;
 
-	if (!win_info || win_info->cnt == 0 || max_wins_4k_per_ba <= 0)
+	if (!win_info || !win_info->segs || win_info->cnt == 0 || max_wins_4k_per_ba <= 0)
 		return -EINVAL;
 	current_ba_tag = win_info->segs[0].ba_tag;
 	for (; index < win_info->cnt;) {
@@ -475,7 +469,7 @@ static bool addr_is_cc_mem(u64 addr)
 	for (i = 0; i < dev->ba_cnt; i++) {
 		if (dev->ba_info[i].cc_range.start <= addr &&
 		    addr < dev->ba_info[i].cc_range.end)
-			return false;
+			return true;
 	}
 	return false;
 }
@@ -756,7 +750,7 @@ static void add_to_actc_data(actc_t *dst, actc_t *src, int len)
 	int i, sum;
 	int j;
 	int group_count;
-	u32 freq;
+	u32 freq = 0;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	if (PAGE_SIZE == PAGE_SIZE_64K && dev->pgsize == SIZE_4K) {
 		group_count = len / PAGE_SIZE_64K_DIV_4K;
@@ -1107,18 +1101,16 @@ void hist_deinit(void)
 	ub_hist_exit();
 }
 
-int hist_init(u32 pgsize, ub_hist_smap_type hw_type)
+int hist_init(u32 pgsize)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	int ret;
 
-	dev->hw_type = hw_type;
-	pr_info("Smap hist dev init start, dev->hw_type: %u\n", dev->hw_type);
-
 	ret = ub_hist_init(dev->hw_type);
 	if (ret)
 		return ret;
-
+	dev->hw_type = ub_hist_get_hw_type();
+	pr_info("Smap hist dev init start, dev->hw_type: %u\n", dev->hw_type);
 	dev->freq_register_cnt = (dev->hw_type == UB_HIST_SMAP_TYPE_N6) ?
 					 BA_STS_VALUE_N6_COUNT :
 					 BA_STS_VALUE_N7_COUNT;

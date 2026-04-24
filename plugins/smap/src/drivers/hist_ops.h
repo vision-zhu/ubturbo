@@ -82,7 +82,7 @@ struct hist_ops {
 };
 
 struct smap_hist_dev *get_hist_dev(void);
-int hist_init(u32 pgsize, ub_hist_smap_type hw_type);
+int hist_init(u32 pgsize);
 void hist_deinit(void);
 void fetch_hist_actc_buf(actc_t *dst_buf, struct addr_seg *seg);
 void hist_update_pgsize(u32 pgsize);
