@@ -435,7 +435,7 @@ static void NumaSwapMemPool(ProcessAttr *current)
 
 static void NumaMigReduceDeal(ProcessAttr *current)
 {
-    if (GetRunMode() == MEM_POOL_MODE) {
+    if (current->migrateMode == MIG_MEMSIZE_MODE) {
         NumaSwapMemPool(current);
     } else {
         CalProcessNuma(&current->strategyAttr);
