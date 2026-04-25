@@ -101,8 +101,6 @@ cd $BUILD_DIR || {
 }
 
 cd $CURRENT_PATH/3rdparty/mockcpp
-rm * -rf
-git checkout .
 dos2unix ../mockcpp_support_arm64.patch
 dos2unix src/UnixCodeModifier.cpp
 git apply ../mockcpp_support_arm64.patch
@@ -116,21 +114,21 @@ BUILD_CMD="make -j $((N_CPUS-2))"
  
 echo $CMAKE_CMD
 $CMAKE_CMD || {
-    echo "Failed to configure smap_dt build!"
+    echo "Failed to configure ubdma_dt build!"
     exit 1
 }
 echo
-echo "Done configuring smap_dt build"
+echo "Done configuring ubdma_dt build"
 echo
 echo $BUILD_CMD
 $BUILD_CMD || {
-    echo "Failed to build smap_dt"
+    echo "Failed to build ubdma_dt"
     exit 1
 }
 echo
 echo Success
 
-./smap_dt
+./ubdma_dt
 
 mkdir -p build/gcovr_report
 lcov --d ./ --c --output-file test.info --rc lcov_branch_coverage=1
