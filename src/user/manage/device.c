@@ -27,6 +27,8 @@
 #include "smap_ioctl.h"
 #include "device.h"
 
+#define DISABLE_TRACKING_RETRY_DELAY_US 50000
+
 typedef enum {
     PGSIZE_FOUR_KB = 0,
     PGSIZE_TWO_MB = 9,
@@ -37,8 +39,6 @@ typedef enum {
     MODE_MAX,
 } ScanMode;
 
-#define MAX_DISABLE_SCAN_ATTEMPS 3
-
 static int SendCmdToAllNodes(int fds[], unsigned long cmd, int arg)
 {
     int i;
@@ -47,7 +47,7 @@ static int SendCmdToAllNodes(int fds[], unsigned long cmd, int arg)
     for (i = 0; i < MAX_NODES; i++) {
         if (fds[i] >= 0) {
             if (ioctl(fds[i], cmd, arg) < 0) {
-                SMAP_LOGGER_ERROR("ioctl for node%d failed: %s, skipped.", i, strerror(errno));
+                SMAP_LOGGER_DEBUG("ioctl for node%d failed: %s, skipped.", i, strerror(errno));
                 ret = -EBADF;
             }
         }
@@ -80,23 +80,14 @@ static inline int DisableTrackingInternal(struct ProcessManager *manager)
 int DisableTracking(struct ProcessManager *manager)
 {
     int ret;
-    int attempts = 0;
 
-    while (attempts < MAX_DISABLE_SCAN_ATTEMPS) {
+    while (1) {
         ret = DisableTrackingInternal(manager);
         if (!ret) {
             break;
         }
-        SMAP_LOGGER_INFO("Scanning still in progress, attempt %d/%d, will retry.",
-                         attempts + 1, MAX_DISABLE_SCAN_ATTEMPS);
-        attempts++;
-        if (attempts < MAX_DISABLE_SCAN_ATTEMPS) {
-            sleep(1);
-            continue;
-        } else {
-            SMAP_LOGGER_WARNING("Max attempts reached, skipping current migration cycle.");
-            return ret;
-        }
+        SMAP_LOGGER_DEBUG("Scanning still in progress, will retry.");
+        usleep(DISABLE_TRACKING_RETRY_DELAY_US);
     }
     return ret;
 }
