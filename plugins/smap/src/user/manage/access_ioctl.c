@@ -112,13 +112,13 @@ int AccessIoctlWalkPagemap(size_t *len)
     return ret;
 }
 
-int AccessIoctlReadPidFreq(struct AccessPidFreq *apf)
+int AccessIoctlCreateProcfs(struct UserInfo *ui)
 {
     struct ProcessManager *manager = GetProcessManager();
 
-    int ret = ioctl(manager->fds.access, SMAP_ACCESS_READ_PID_FREQ, apf);
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_CREATE_PROCFS, ui);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("access read pid freq error: %d\n", -errno);
+        SMAP_LOGGER_ERROR("access create procfs error: %d\n", -errno);
         ret = -EBADF;
     }
     return ret;

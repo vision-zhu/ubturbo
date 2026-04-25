@@ -56,19 +56,24 @@ struct TrakingInfoPayload {
     uint16_t *data;
 };
 
+struct UserInfo {
+    uid_t uid;
+    gid_t gid;
+};
+
 #define SMAP_ACCESS_MAGIC 0xBB
 #define SMAP_ACCESS_ADD_PID _IOW(SMAP_ACCESS_MAGIC, 1, struct AccessAddPidMsg)
 #define SMAP_ACCESS_REMOVE_PID _IOW(SMAP_ACCESS_MAGIC, 2, struct AccessRemovePidMsg)
 #define SMAP_ACCESS_REMOVE_ALL_PID _IOW(SMAP_ACCESS_MAGIC, 3, int)
 #define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
-#define SMAP_ACCESS_READ_PID_FREQ _IOW(SMAP_ACCESS_MAGIC, 6, struct AccessPidFreq)
+#define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct UserInfo)
 
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(size_t *len);
-int AccessIoctlReadPidFreq(struct AccessPidFreq *apf);
+int AccessIoctlCreateProcfs(struct UserInfo *ui);
 int AccessRead(size_t len, char *buf);
 
 #endif /* __ACCESS_IOCTL_H__ */

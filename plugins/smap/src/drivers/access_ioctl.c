@@ -28,6 +28,10 @@ static dev_t ioctl_access_dev;
 static struct class *access_class;
 static struct cdev access_cdev;
 static struct device *access_device;
+static struct user_info ubturbo_ui = { 0 };
+kuid_t procfs_kuid;
+kgid_t procfs_kgid;
+struct proc_dir_entry *smap_procfs_root = NULL;
 
 static char *smap_bitmap_buf = NULL;
 static size_t smap_buf_len = 0;
@@ -170,92 +174,54 @@ static long ioctl_remove_all_pid(void __user *argp)
 	return 0;
 }
 
-static bool is_pid_freq_msg_valid(struct access_pid_freq_msg *msg)
+static void remove_procfs_root(void)
 {
-	int i;
-
-	if (find_access_pid(msg->pid) == NULL) {
-		return false;
-	}
-	for (i = 0; i < ARRAY_SIZE(msg->len); i++) {
-		if (msg->len[i] > MAX_NR_PAGE_PER_NUMA)
-			return false;
-	}
-
-	return true;
+	proc_remove(smap_procfs_root);
+	smap_procfs_root = NULL;
 }
 
-static int transfer_frequency_data(struct access_pid_freq_msg *msg,
-				   actc_t **data)
+static int create_procfs_root(struct user_info *ui)
 {
-	int i;
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		if (msg->len[i] == 0)
-			continue;
-		if (copy_to_user(msg->freq[i], data[i],
-				 sizeof(actc_t) * msg->len[i])) {
-			pr_err("failed to copy frequency of pid: %d on node%d to user\n",
-			       msg->pid, i);
-			return -EFAULT;
-		}
+	smap_procfs_root = proc_mkdir(SMAP_PROC_ROOT, NULL);
+	if (!smap_procfs_root) {
+		pr_err("failed to create /proc/%s\n", SMAP_PROC_ROOT);
+		return -ENOMEM;
 	}
+
+	procfs_kuid = make_kuid(&init_user_ns, ui->uid);
+	procfs_kgid = make_kgid(&init_user_ns, ui->gid);
+	proc_set_user(smap_procfs_root, procfs_kuid, procfs_kgid);
 	return 0;
 }
 
-static long ioctl_read_pid_freq(void __user *argp)
+static inline bool is_user_unchanged(struct user_info *ui)
+{
+	return ui && ui->uid == ubturbo_ui.uid && ui->gid == ubturbo_ui.gid;
+}
+
+static long ioctl_create_smap_procfs(void __user *argp)
 {
 	int ret;
-	int i;
-	struct access_pid_freq_msg msg;
-	actc_t *freq[SMAP_MAX_NUMNODES] = { 0 };
+	struct user_info temp_ui;
 
-	pr_debug("read pid frequency\n");
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
-		pr_err("read frequency of access pid is not allowed\n");
-		return -EAGAIN;
+	if (copy_from_user(&temp_ui, argp, sizeof(temp_ui)))
+		return -EFAULT;
+
+	if (smap_procfs_root && is_user_unchanged(&temp_ui)) {
+		pr_info("procfs root directory unchanged\n");
+		return 0;
 	}
 
-	if (copy_from_user(&msg, argp, sizeof(msg))) {
-		ret = -EFAULT;
-		goto out_ret;
-	}
+	remove_procfs_root();
 
-	if (!is_pid_freq_msg_valid(&msg)) {
-		pr_err("invalid pid: %d passed to access read frequency\n",
-		       msg.pid);
-		ret = -EINVAL;
-		goto out_ret;
-	}
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		if (msg.len[i] == 0) {
-			continue;
-		}
-		freq[i] = vzalloc(msg.len[i] * sizeof(actc_t));
-		if (!freq[i]) {
-			ret = -ENOMEM;
-			goto out;
-		}
-	}
-
-	ret = read_pid_freq(msg.pid, msg.len, freq);
+	ret = create_procfs_root(&temp_ui);
 	if (ret) {
-		pr_err("failed to read frequency of pid: %d\n", msg.pid);
-		goto out;
+		remove_procfs_root();
+		return ret;
 	}
 
-	ret = transfer_frequency_data(&msg, freq);
-out:
-	for (i = 0; i < ARRAY_SIZE(freq); i++)
-		vfree(freq[i]);
-out_ret:
-	if (ret)
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ);
-	else
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ |
-						     AP_STATE_MIG);
-	return ret;
+	pr_info("procfs root directory create\n");
+	return 0;
 }
 
 #ifndef BYTES_PER_LONG
@@ -599,8 +565,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_walk_pagemap(argp);
 	case SMAP_ACCESS_GET_TRACKING:
 		return ioctl_get_tracking(argp);
-	case SMAP_ACCESS_READ_PID_FREQ:
-		return ioctl_read_pid_freq(argp);
+	case SMAP_ACCESS_CREATE_PROCFS:
+		return ioctl_create_smap_procfs(argp);
 	default:
 		rc = -ENOTTY;
 	}
@@ -690,6 +656,7 @@ err_cdev:
 void access_ioctl_exit(void)
 {
 	access_remove_all_pid();
+	remove_procfs_root();
 	access_dev_exit();
 }
 

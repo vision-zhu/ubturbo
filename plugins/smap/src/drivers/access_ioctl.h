@@ -8,6 +8,7 @@
 #define _SRC_ACCESS_IOCTL_H
 
 #include <linux/types.h>
+#include <linux/proc_fs.h>
 
 #include "check.h"
 
@@ -17,6 +18,8 @@
 #define BASE_MINOR 0
 #define NR_MINOR 1
 #define MAX_SCAN_DURATION_SEC 300
+
+#define SMAP_PROC_ROOT "smap"
 
 typedef enum {
 	NO_SCAN = -1,
@@ -61,6 +64,15 @@ struct access_pid_freq_msg {
 	u16 *freq[SMAP_MAX_NUMNODES];
 };
 
+struct user_info {
+	uid_t uid;
+	gid_t gid;
+};
+
+extern kuid_t procfs_kuid;
+extern kgid_t procfs_kgid;
+extern struct proc_dir_entry *smap_procfs_root;
+
 #define SMAP_ACCESS_MAGIC 0xBB
 #define SMAP_ACCESS_ADD_PID \
 	_IOW(SMAP_ACCESS_MAGIC, 1, struct access_add_pid_msg)
@@ -70,8 +82,7 @@ struct access_pid_freq_msg {
 #define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING \
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
-#define SMAP_ACCESS_READ_PID_FREQ \
-	_IOW(SMAP_ACCESS_MAGIC, 6, struct access_pid_freq_msg)
+#define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct user_info)
 
 void access_ioctl_exit(void);
 int access_ioctl_init(void);
