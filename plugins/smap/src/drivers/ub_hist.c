@@ -21,6 +21,8 @@
 #include <linux/uaccess.h>
 #include "ub_hist.h"
 
+#define REG_BASE_ADDR_N6_0 0x33030a0000
+#define REG_BASE_ADDR_N7_0 0x2d21320000
 #define UDIE_PHY_ADDR_STS_REGS_N6_OFFSET 0x4000
 #define UDIE_PHY_ADDR_STS_REGS_N7_OFFSET 0x1000
 #define DEVICE_MEM_LEN_N6 0x8000
@@ -428,6 +430,28 @@ static struct platform_driver ub_hist_platform_driver = {
         },
 };
 
+static int ub_hist_set_hw_type(void)
+{
+	struct ub_hist_ba_device *ba_dev;
+	ba_dev = list_first_entry_or_null(&ub_hist_ba_list,
+					  struct ub_hist_ba_device, list);
+	if (!ba_dev) {
+		pr_err("BA device not found\n");
+		return -ENODEV;
+	}
+	if (ba_dev->info.ba_tag == REG_BASE_ADDR_N6_0) {
+		g_ub_hist_smap_type = UB_HIST_SMAP_TYPE_N6;
+		return 0;
+	}
+	if (ba_dev->info.ba_tag == REG_BASE_ADDR_N7_0) {
+		g_ub_hist_smap_type = UB_HIST_SMAP_TYPE_N7;
+		return 0;
+	}
+
+	pr_err("Invalid hardware type detected\n");
+	return -EINVAL;
+}
+
 ub_hist_smap_type ub_hist_get_hw_type(void)
 {
 	return g_ub_hist_smap_type;
@@ -443,6 +467,9 @@ int ub_hist_init(void)
 		pr_err("failed to register platform driver, ret: %d\n", ret);
 		return ret;
 	}
+	ret = ub_hist_set_hw_type();
+	if (ret)
+		return ret;
 
 	pr_debug("UB histogram init successfully\n");
 	return ret;
