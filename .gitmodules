@@ -1,6 +1,7 @@
 [submodule "test/3rdparty/mockcpp"]
 	path = test/3rdparty/mockcpp
 	url = https://gitee.com/mirrors_sinojelly/mockcpp.git
+	tag = v2.7
 [submodule "test/3rdparty/googletest"]
 	path = test/3rdparty/googletest
 	url = https://gitee.com/mirrors/googletest.git
@@ -22,12 +23,14 @@
 [submodule "plugins/smap/test/3rdparty/mockcpp"]
 	path = plugins/smap/test/3rdparty/mockcpp
 	url = https://gitee.com/mirrors_sinojelly/mockcpp.git
+	tag = v2.7
 [submodule "plugins/ubdma/test/3rdparty/googletest"]
 	path = plugins/ubdma/test/3rdparty/googletest
 	url = https://gitee.com/mirrors/googletest.git
 [submodule "plugins/ubdma/test/3rdparty/mockcpp"]
 	path = plugins/ubdma/test/3rdparty/mockcpp
 	url = https://gitee.com/mirrors_sinojelly/mockcpp.git
+	tag = v2.7
 [submodule "plugins/ucache/test/3rdparty/googletest"]
 	path = plugins/ucache/test/3rdparty/googletest
 	url = https://gitee.com/mirrors/googletest.git
