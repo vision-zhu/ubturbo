@@ -10,7 +10,6 @@
 #include "turbo_def.h"
 #include "turbo_serialize.h"
 
-#define MOCKER_CPP(api, TT) MOCKCPP_NS::mockAPI(#api, reinterpret_cast<TT>(api))
 using namespace std;
 using namespace turbo::serialize;
 using namespace turbo::ucache;

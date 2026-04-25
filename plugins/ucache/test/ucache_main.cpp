@@ -1,7 +1,7 @@
 /*
- * Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  */
-#include "gtest.h"
+#include "gtest/gtest.h"
 
 int main(int argc, char **argv)
 {

@@ -126,7 +126,7 @@ TEST_F(TaskExecutorTest, HandleCollectResource_CgroupInfo)
     TaskRequest tReq;
     TaskResponse tResp;
 
-    ResourceQueryType qType = ResourceQueryType::NUMA_INFO;
+    ResourceQueryType qType = ResourceQueryType::CGROUP_INFO;
     UCacheOutStream out;
     out << qType;
     tReq.payload = out.Str();
@@ -240,7 +240,7 @@ TEST_F(TaskExecutorTest, HandleMigrationStrategy_ExecuteFailed)
 
     uint32_t result = HandleMigrationStrategy(tReq, tResp);
 
-    EXPECT_EQ(result, UCACHE_OK);
+    EXPECT_NE(result, UCACHE_OK);
 }
 
 TEST_F(TaskExecutorTest, ValidateCollectResourceParam_Valid)
@@ -354,9 +354,9 @@ TEST_F(TaskExecutorTest, ValidateMigrationStrategyParams_Valid)
     out << param;
     std::string payload = out.Str();
 
-    MOCKER_CPP(ValidateStrategyParam, bool (*)(const MigrationStrategyParam &)).expexts(once()).will(returnValue(true));
+    MOCKER_CPP(ValidateStrategyParam, bool (*)(const MigrationStrategyParam &)).expects(once()).will(returnValue(true));
 
-    uint32_t result = ValidateMigrationStrategyParams(param);
+    uint32_t result = ValidateMigrationStrategyParams(payload);
 
     EXPECT_EQ(result, UCACHE_OK);
 }
@@ -375,10 +375,10 @@ TEST_F(TaskExecutorTest, ValidateMigrationStrategyParams_Invalid)
     std::string payload = out.Str();
 
     MOCKER_CPP(ValidateStrategyParam, bool (*)(const MigrationStrategyParam &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(false));
 
-    uint32_t result = ValidateMigrationStrategyParams(param);
+    uint32_t result = ValidateMigrationStrategyParams(payload);
 
     EXPECT_EQ(result, EXECUTE_INVALID_PARAM);
 }
@@ -393,10 +393,10 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_CollectResource_Valid)
     out << qType;
     tReq.payload = out.Str();
 
-    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expexts(once()).will(returnValue(true));
+    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(true));
 
     MOCKER_CPP(ValidateCollectResourceParam, uint32_t (*)(const std::string &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     uint32_t result = ValidateTaskParams(tReq);
@@ -407,12 +407,12 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_CollectResource_Valid)
 TEST_F(TaskExecutorTest, ValidateTaskParams_MigrationStrategy_Valid)
 {
     TaskRequest tReq;
-    tReq.type = TaskType::COLLECT_RESOURCE;
+    tReq.type = TaskType::MIGRATION_STRATEGY;
 
     MigrationStrategyParam param;
     param.dstNid = 2;
-    param.highWatermarkPages = 500;
-    param.lowWatermarkPages = 1000;
+    param.highWatermarkPages = 1000;
+    param.lowWatermarkPages = 500;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -420,10 +420,10 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_MigrationStrategy_Valid)
     out << param;
     tReq.payload = out.Str();
 
-    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expexts(once()).will(returnValue(true));
+    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(true));
 
     MOCKER_CPP(ValidateMigrationStrategyParams, uint32_t (*)(const std::string &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     uint32_t result = ValidateTaskParams(tReq);
@@ -436,7 +436,7 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_InvalidTaskType)
     TaskRequest tReq;
     tReq.type = static_cast<TaskType>(999);
 
-    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expexts(once()).will(returnValue(false));
+    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(false));
 
     uint32_t result = ValidateTaskParams(tReq);
 
@@ -485,26 +485,26 @@ TEST_F(TaskExecutorTest, UCacheExecuteTask_CollectResource)
     req.len = reqStream.GetSize();
     req.data = new uint8_t[req.len];
     memcpy_s(req.data, req.len, reqStream.GetBufferPointer(), req.len);
-    TurboByteBuffer resq;
+    TurboByteBuffer resp;
 
-    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expexts(once()).will(returnValue(true));
+    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(true));
 
     MOCKER_CPP(ValidateCollectResourceParam, uint32_t (*)(const std::string &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     MOCKER_CPP(HandleCollectResource, uint32_t (*)(const TaskRequest &, TaskResponse &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     uint32_t result = TaskExecutor().UCacheExecuteTask(req, resp);
 
     EXPECT_EQ(result, UCACHE_OK);
-    EXPECT_NE(resq.data, nullptr);
-    EXPECT_EQ(resq.len, 0);
+    EXPECT_NE(resp.data, nullptr);
+    EXPECT_GT(resp.len, 0);
 
-    if (resq.data) {
-        delete[] resq.data;
+    if (resp.data) {
+        delete[] resp.data;
     }
     delete[] req.data;
 }
@@ -532,26 +532,26 @@ TEST_F(TaskExecutorTest, UCacheExecuteTask_MigrationStrategy)
     req.data = new uint8_t[req.len];
     memcpy_s(req.data, req.len, reqStream.GetBufferPointer(), req.len);
 
-    TurboByteBuffer resq;
+    TurboByteBuffer resp;
 
-    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expexts(once()).will(returnValue(true));
+    MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(true));
 
-    MOCKER_CPP(ValidateCollectResourceParam, uint32_t (*)(const std::string &))
-        .expexts(once())
+    MOCKER_CPP(ValidateMigrationStrategyParams, uint32_t (*)(const std::string &))
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     MOCKER_CPP(HandleMigrationStrategy, uint32_t (*)(const TaskRequest &, TaskResponse &))
-        .expexts(once())
+        .expects(once())
         .will(returnValue(UCACHE_OK));
 
     uint32_t result = TaskExecutor().UCacheExecuteTask(req, resp);
 
     EXPECT_EQ(result, UCACHE_OK);
-    EXPECT_NE(resq.data, nullptr);
-    EXPECT_EQ(resq.len, 0);
+    EXPECT_NE(resp.data, nullptr);
+    EXPECT_GT(resp.len, 0);
 
-    if (resq.data) {
-        delete[] resq.data;
+    if (resp.data) {
+        delete[] resp.data;
     }
     delete[] req.data;
 }

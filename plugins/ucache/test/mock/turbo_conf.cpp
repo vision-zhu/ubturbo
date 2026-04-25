@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Huawei Technologies Co., Ltd. 2024-2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved.
  */
 #include "turbo_conf.h"
 namespace turbo::config {
@@ -47,7 +47,7 @@ uint32_t UBTurboGetStr(const std::string &section, const std::string &configKey,
  */
 uint32_t UBTurboGetBool(const std::string &section, const std::string &configKey, bool &configValue)
 {
-    return false;
+    return 0;
 }
 
 } // namespace turbo::config

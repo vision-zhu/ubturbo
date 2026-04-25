@@ -41,7 +41,7 @@ set(MOCK_SRC
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/ TESTCASE_SRC)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/ TESTCASE_UCACHE_OS_TURBO_PLUGIN_SRC)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/resource_collector TESTCASE_RESOURCE_EXPORT_SRC)
-aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/task_EXECUTOR TESTCASE_TASK_EXECUTOR_SRC)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/task_executor TESTCASE_TASK_EXECUTOR_SRC)
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/src/common TESTCASE_UCACHE_OS_TURBO_PLUGIN_COMMON_SRC)
 
 set(TEST_SRC

@@ -8,8 +8,6 @@
 #include <string>
 #include "ucache_turbo_config.h"
 
-#define MOCKER_CPP(api, TT) MOCKCPP_NS::mockAPI(#api, reinterpret_cast<TT>(api))
-
 using namespace std;
 using namespace turbo::config;
 using namespace turbo::ucache;

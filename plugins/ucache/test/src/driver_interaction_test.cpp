@@ -42,7 +42,7 @@ TEST_F(UcacheDriversIntTest, MigrateIoFailedTest)
 TEST_F(UcacheDriversIntTest, EnsureDevice)
 {
     turbo::ucache::DriverInteraction &driver = turbo::ucache::DriverInteraction::GetInstance();
-    MOCKER_CPP(stat, int (*)(void *)).stubs().will(returnValue(0));
+    MOCKER_CPP(stat, int (*)(const char *, struct stat *)).stubs().will(returnValue(0));
     uint32_t ret = driver.EnsureDevice();
     EXPECT_EQ(ret, false);
 
