@@ -16,7 +16,7 @@
 using namespace std;
 using namespace turbo::ucache;
 
-class UcacheDriversIntTest : public ::testing::Test {
+class DriverInteractionTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -31,7 +31,7 @@ protected:
     }
 };
 
-TEST_F(UcacheDriversIntTest, MigrateIoFailedTest)
+TEST_F(DriverInteractionTest, MigrateIoFailedTest)
 {
     turbo::ucache::DriverInteraction &driver = turbo::ucache::DriverInteraction::GetInstance();
 
@@ -39,7 +39,7 @@ TEST_F(UcacheDriversIntTest, MigrateIoFailedTest)
     EXPECT_EQ(ret, UCACHE_ERR);
 }
 
-TEST_F(UcacheDriversIntTest, EnsureDevice)
+TEST_F(DriverInteractionTest, EnsureDevice)
 {
     turbo::ucache::DriverInteraction &driver = turbo::ucache::DriverInteraction::GetInstance();
     MOCKER_CPP(stat, int (*)(const char *, struct stat *)).stubs().will(returnValue(0));
@@ -51,7 +51,7 @@ TEST_F(UcacheDriversIntTest, EnsureDevice)
     EXPECT_EQ(ret, true);
 }
 
-TEST_F(UcacheDriversIntTest, MigrateFoliosInfoTest)
+TEST_F(DriverInteractionTest, MigrateFoliosInfoTest)
 {
     MOCKER_CPP(&turbo::ucache::DriverInteraction::EnsureDevice, bool (*)(void *)).stubs().will(returnValue(true));
     MOCKER_CPP(ioctl, int (*)(int, unsigned long, void *)).stubs().will(returnValue(UCACHE_OK));
@@ -61,7 +61,7 @@ TEST_F(UcacheDriversIntTest, MigrateFoliosInfoTest)
     EXPECT_EQ(ret, UCACHE_OK);
 }
 
-TEST_F(UcacheDriversIntTest, MigrateFoliosInfoOpenFailTest)
+TEST_F(DriverInteractionTest, MigrateFoliosInfoOpenFailTest)
 {
     MOCKER_CPP(&turbo::ucache::DriverInteraction::EnsureDevice, bool (*)(void *)).stubs().will(returnValue(false));
     turbo::ucache::DriverInteraction &driver = turbo::ucache::DriverInteraction::GetInstance();
