@@ -26,6 +26,7 @@ typedef enum {
 	HAM_SCAN,
 	NORMAL_SCAN,
 	STATISTIC_SCAN,
+	FIRST_SCAN,         /* 首次扫描：新pid加入时的充分扫描 */
 	MAX_SCAN_TYPE,
 } scan_type;
 

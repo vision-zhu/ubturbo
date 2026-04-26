@@ -543,6 +543,65 @@ static int UpdateScanTime(ProcessAttr *process)
     return AccessIoctlAddPid(1, &payload);
 }
 
+/*
+ * 处理首次扫描进程：更新扫描计数，并在完成后切换为 NORMAL_SCAN
+ *
+ * 返回值：true - 首次扫描已完成，需要切换；false - 首次扫描仍在进行
+ */
+static bool HandleFirstScanProcess(ProcessAttr *process)
+{
+    process->firstScanCount++;
+    SMAP_LOGGER_INFO("Pid %d first scan count: %u/%u.", process->pid,
+                     process->firstScanCount, FIRST_SCAN_COUNT);
+
+    if (process->firstScanCount >= FIRST_SCAN_COUNT) {
+        /* 首次扫描完成，切换为 NORMAL_SCAN */
+        process->scanType = NORMAL_SCAN;
+        process->firstScanCount = 0;
+
+        /* 根据进程类型设置扫描周期 */
+        if (process->type == VM_TYPE) {
+            process->scanTime = SCAN_TIME_2M;
+        } else {
+            process->scanTime = SCAN_TIME_4K;
+        }
+
+        SMAP_LOGGER_INFO("Pid %d first scan completed, switch to NORMAL_SCAN with scanTime=%ums.",
+                         process->pid, process->scanTime);
+
+        /* 更新内核中的扫描参数 */
+        struct AccessAddPidPayload payload;
+        payload.pid = process->pid;
+        payload.numaNodes = process->numaAttr.numaNodes;
+        payload.type = NORMAL_SCAN;
+        payload.scanTime = process->scanTime;
+        payload.duration = 0;
+        int ret = AccessIoctlAddPid(1, &payload);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Update pid %d to NORMAL_SCAN failed: %d.", process->pid, ret);
+        }
+
+        return true;
+    }
+    return false;
+}
+
+/*
+ * 更新首次扫描进程的状态
+ * 首次扫描期间不进行迁移，只收集冷热信息
+ */
+static void UpdateFirstScanProcesses(struct ProcessManager *manager)
+{
+    EnvMutexLock(&manager->lock);
+    for (ProcessAttr *current = manager->processes; current; current = current->next) {
+        if (current->scanType != FIRST_SCAN) {
+            continue;
+        }
+        HandleFirstScanProcess(current);
+    }
+    EnvMutexUnlock(&manager->lock);
+}
+
 static void UpdateScene(struct ProcessManager *manager)
 {
     EnvMutexLock(&manager->lock);
@@ -653,6 +712,10 @@ int ScanMigrateWork(ThreadCtx *ctx)
     SMAP_LOGGER_DEBUG("Tracking disabled.");
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
+
+    /* 更新首次扫描进程状态，完成后切换为 NORMAL_SCAN */
+    UpdateFirstScanProcesses(manager);
+
     ret = PerformMigrationPreparation(manager);
     if (ret) {
         SMAP_LOGGER_DEBUG("Migration preparation failed: %d.", ret);

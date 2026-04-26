@@ -647,9 +647,19 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
             free(attr);
             return ret;
         }
+        /* 新pid首次加入时，设置为首次扫描模式 */
+        attr->scanType = FIRST_SCAN;
+        attr->scanTime = FIRST_SCAN_TIME_MS;
+        attr->firstScanCount = 0;
+        SMAP_LOGGER_INFO("Set new pid %d to FIRST_SCAN mode, scanTime=%ums, firstScanCount=0.",
+                         param->pid, attr->scanTime);
     } else if (param->scanType == HAM_SCAN || param->scanType == STATISTIC_SCAN) {
         attr->state = PROC_MOVE;
         SMAP_LOGGER_INFO("Set pid %d state to %d.", param->pid, PROC_MOVE);
+    } else if (param->scanType == FIRST_SCAN) {
+        attr->firstScanCount = 0;
+        attr->scanTime = FIRST_SCAN_TIME_MS;
+        SMAP_LOGGER_INFO("Set pid %d to FIRST_SCAN mode with scanTime=%ums.", param->pid, attr->scanTime);
     }
 
     attr->type = type;
@@ -1746,9 +1756,9 @@ int BuildAllPidData(void)
             break;
         }
         ProcessAttr *current = GetProcessAttrLocked(pmb.pid);
-        if (current && current->scanType == NORMAL_SCAN) {
-            SMAP_LOGGER_INFO("Pid %d, numaNodes %#x, nrLocalNuma %u.", current->pid, current->numaAttr.numaNodes,
-                             g_processManager.nrLocalNuma);
+        if (current && (current->scanType == NORMAL_SCAN || current->scanType == FIRST_SCAN)) {
+            SMAP_LOGGER_INFO("Pid %d, numaNodes %#x, nrLocalNuma %u, scanType %d.", current->pid, current->numaAttr.numaNodes,
+                             g_processManager.nrLocalNuma, current->scanType);
             SetPidNrPages(current, pmb.nrPages, MAX_NODES);
             ret = FillPidData(current, &pmb);
             if (ret) {

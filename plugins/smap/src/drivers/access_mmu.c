@@ -191,7 +191,10 @@ static int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap)
 		return -ERANGE;
 	}
 	set_bit(acidx, ap->paddr_bm[nid]);
-	set_pa_prior(ap, vaddr, acidx, nid);
+	/* 只在首次扫描(FIRST_SCAN)时更新prior参数，NORMAL_SCAN不再更新 */
+	if (ap->type == FIRST_SCAN) {
+		set_pa_prior(ap, vaddr, acidx, nid);
+	}
 	ap->page_num[nid]++;
 	return 0;
 }
