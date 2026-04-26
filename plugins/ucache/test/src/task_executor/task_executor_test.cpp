@@ -2,10 +2,11 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 
-#include "task_executor.h"
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
+
 #include "resource_collector.h"
+#include "task_executor.h"
 #include "turbo_ipc_server.h"
 #include "turbo_serialize.h"
 #include "turbo_strategy_executor.h"
@@ -30,6 +31,12 @@ uint32_t ValidateMigrationStrategyParams(const std::string &payload);
 uint32_t ValidateTaskParams(const TaskRequest &tReq);
 } // namespace turbo::ucache
 
+constexpr int HIGH_WATERMARK_PAGES = 1000;
+constexpr int LOW_WATERMARK_PAGES = 500;
+constexpr int MB_TO_KB = 1024;
+constexpr int INVALID_TASK_TYPE = 999;
+constexpr int TARGET_NODE_ID = 2;
+constexpr int TARGET_LEN = 10;
 class TaskExecutorTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -150,7 +157,7 @@ TEST_F(TaskExecutorTest, HandleCollectResource_MemWatermark)
     tReq.payload = out.Str();
 
     MemWatermarkInfo memWatermark;
-    memWatermark.minFreeKBytes = 1024;
+    memWatermark.minFreeKBytes = MB_TO_KB;
 
     MOCKER(GetMemWatermarkInfo).expects(once()).will(returnValue(UCACHE_OK));
 
@@ -165,7 +172,7 @@ TEST_F(TaskExecutorTest, HandleCollectResource_InvalidResourceType)
     TaskRequest tReq;
     TaskResponse tResp;
 
-    ResourceQueryType qType = static_cast<ResourceQueryType>(999);
+    ResourceQueryType qType = static_cast<ResourceQueryType>(INVALID_TASK_TYPE);
     UCacheOutStream out;
     out << qType;
     tReq.payload = out.Str();
@@ -179,8 +186,8 @@ TEST_F(TaskExecutorTest, ConvertToMigrationStrategy_normal)
 {
     MigrationStrategyParam param;
     param.dstNid = 1;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1", "docker2"};
     param.srcNids = {0, 1};
 
@@ -200,8 +207,8 @@ TEST_F(TaskExecutorTest, HandleMigrationStrategy_Success)
 
     MigrationStrategyParam param;
     param.dstNid = 1;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -225,8 +232,8 @@ TEST_F(TaskExecutorTest, HandleMigrationStrategy_ExecuteFailed)
 
     MigrationStrategyParam param;
     param.dstNid = 1;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -260,9 +267,9 @@ TEST_F(TaskExecutorTest, ValidateCollectResourceParam_Valid)
 TEST_F(TaskExecutorTest, ValidateStrategyParam_Invalid)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0, 1};
 
@@ -274,9 +281,9 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_Invalid)
 TEST_F(TaskExecutorTest, ValidateStrategyParam_EmptySrcNids)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {};
 
@@ -288,9 +295,9 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_EmptySrcNids)
 TEST_F(TaskExecutorTest, ValidateStrategyParam_EmptyDockerIds)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {};
     param.srcNids = {0};
 
@@ -302,9 +309,9 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_EmptyDockerIds)
 TEST_F(TaskExecutorTest, ValidateStrategyParam_NegativeSrcNids)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {-1};
 
@@ -317,8 +324,8 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_NegativeDstNids)
 {
     MigrationStrategyParam param;
     param.dstNid = -1;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -330,9 +337,9 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_NegativeDstNids)
 TEST_F(TaskExecutorTest, ValidateStrategyParam_InvalidWatermark)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 500;
-    param.lowWatermarkPages = 1000;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = LOW_WATERMARK_PAGES;
+    param.lowWatermarkPages = HIGH_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -344,9 +351,9 @@ TEST_F(TaskExecutorTest, ValidateStrategyParam_InvalidWatermark)
 TEST_F(TaskExecutorTest, ValidateMigrationStrategyParams_Valid)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 500;
-    param.lowWatermarkPages = 1000;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = LOW_WATERMARK_PAGES;
+    param.lowWatermarkPages = HIGH_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -364,9 +371,9 @@ TEST_F(TaskExecutorTest, ValidateMigrationStrategyParams_Valid)
 TEST_F(TaskExecutorTest, ValidateMigrationStrategyParams_Invalid)
 {
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 500;
-    param.lowWatermarkPages = 1000;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = LOW_WATERMARK_PAGES;
+    param.lowWatermarkPages = HIGH_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -410,9 +417,9 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_MigrationStrategy_Valid)
     tReq.type = TaskType::MIGRATION_STRATEGY;
 
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 
@@ -434,7 +441,7 @@ TEST_F(TaskExecutorTest, ValidateTaskParams_MigrationStrategy_Valid)
 TEST_F(TaskExecutorTest, ValidateTaskParams_InvalidTaskType)
 {
     TaskRequest tReq;
-    tReq.type = static_cast<TaskType>(999);
+    tReq.type = static_cast<TaskType>(INVALID_TASK_TYPE);
 
     MOCKER_CPP(IsValidTaskType, bool (*)(TaskType)).expects(once()).will(returnValue(false));
 
@@ -447,7 +454,7 @@ TEST_F(TaskExecutorTest, UCacheExecuteTask_InvalidBuffer)
 {
     TurboByteBuffer req;
     req.data = nullptr;
-    req.len = 10;
+    req.len = TARGET_LEN;
 
     TurboByteBuffer resp;
 
@@ -515,9 +522,9 @@ TEST_F(TaskExecutorTest, UCacheExecuteTask_MigrationStrategy)
     tReq.type = TaskType::MIGRATION_STRATEGY;
 
     MigrationStrategyParam param;
-    param.dstNid = 2;
-    param.highWatermarkPages = 1000;
-    param.lowWatermarkPages = 500;
+    param.dstNid = TARGET_NODE_ID;
+    param.highWatermarkPages = HIGH_WATERMARK_PAGES;
+    param.lowWatermarkPages = LOW_WATERMARK_PAGES;
     param.dockerIds = {"docker1"};
     param.srcNids = {0};
 

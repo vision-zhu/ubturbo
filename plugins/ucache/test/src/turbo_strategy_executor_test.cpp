@@ -12,7 +12,7 @@
 using namespace std;
 using namespace turbo::ucache;
 
-class UcacheAgentStrategyExecutorTest : public ::testing::Test {
+class TurboStrategyExecutorTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -27,7 +27,7 @@ protected:
     }
 };
 
-TEST_F(UcacheAgentStrategyExecutorTest, ExecuteMigrationStrategyTest)
+TEST_F(TurboStrategyExecutorTest, ExecuteMigrationStrategyTest)
 {
     TurboStrategyExecutor executor;
     MigrationStrategy strategy = {

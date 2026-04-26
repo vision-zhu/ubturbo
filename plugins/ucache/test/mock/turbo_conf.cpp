@@ -3,6 +3,8 @@
  */
 #include "turbo_conf.h"
 namespace turbo::config {
+constexpr uint32_t CONFIGVALUE = 5;
+
 /**
  * @brief 获取无符号短整型类型配置
  * @param section [in] 配置节
@@ -14,7 +16,7 @@ namespace turbo::config {
 uint32_t UBTurboGetUInt32(const std::string &section, const std::string &configKey, uint32_t &configValue)
 {
     if (configKey == "cpuboostllc.monitor.interval") {
-        configValue = 5;
+        configValue = CONFIGVALUE;
     }
     return 0;
 }

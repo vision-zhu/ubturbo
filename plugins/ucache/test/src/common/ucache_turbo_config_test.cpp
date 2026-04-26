@@ -53,12 +53,13 @@ TEST_F(UcacheTurboConfigTest, LoadMigrateConfig)
     EXPECT_GT(obj.GetMigrateInterval(), 0);
 }
 
+constexpr int INTERVAL = 100;
 TEST_F(UcacheTurboConfigTest, GetMigrateInterval)
 {
     UcacheTurboConfig obj;
-    obj.migrateInterval = 100;
+    obj.migrateInterval = INTERVAL;
     uint32_t interval = obj.GetMigrateInterval();
-    EXPECT_EQ(interval, 100);
+    EXPECT_EQ(interval, INTERVAL);
 }
 
 TEST_F(UcacheTurboConfigTest, LoadMigrateConfig_Invalid)
