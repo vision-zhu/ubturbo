@@ -651,9 +651,22 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
             free(attr);
             return ret;
         }
+        /* 新pid首次加入时，设置为首次扫描模式和首次迁移标志 */
+        attr->scanType = FIRST_SCAN;
+        attr->scanTime = MIN_SCAN_PERIOD;
+        attr->firstScanCount = 0;
+        attr->isFirstMigrate = true;
+        SMAP_LOGGER_INFO("Set new pid %d to FIRST_SCAN mode, scanTime=%ums, firstScanCount=0, isFirstMigrate=true.",
+                         param->pid, attr->scanTime);
     } else if (param->scanType == HAM_SCAN || param->scanType == STATISTIC_SCAN) {
         attr->state = PROC_MOVE;
-        SMAP_LOGGER_INFO("Set pid %d state to %d.", param->pid, PROC_MOVE);
+        attr->isFirstMigrate = false;
+        SMAP_LOGGER_INFO("Set pid %d state to %d, isFirstMigrate=false.", param->pid, PROC_MOVE);
+    } else if (param->scanType == FIRST_SCAN) {
+        attr->firstScanCount = 0;
+        attr->scanTime = MIN_SCAN_PERIOD;
+        attr->isFirstMigrate = true;
+        SMAP_LOGGER_INFO("Set pid %d to FIRST_SCAN mode with scanTime=%ums, isFirstMigrate=true.", param->pid, attr->scanTime);
     }
 
     attr->type = type;

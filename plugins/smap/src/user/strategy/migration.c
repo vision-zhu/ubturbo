@@ -497,6 +497,31 @@ static void PostMigration(struct ProcessManager *manager, struct MigrateMsg *mMs
             SMAP_LOGGER_DEBUG("set pid %d state from migrate to idle.", current->pid);
             current->state = PROC_IDLE;
         }
+        /* 首次迁移完成后恢复扫描周期 */
+        if (current->isFirstMigrate && current->state == PROC_IDLE) {
+            uint32_t normalScanTime;
+            if (GetFileConfSwitchConfig()) {
+                normalScanTime = GetScanPeriodConfig();
+            } else {
+                normalScanTime = current->sceneInfo.cycles.scanCycle;
+            }
+            current->scanTime = normalScanTime;
+            current->isFirstMigrate = false;
+            SMAP_LOGGER_INFO("Pid %d first migrate completed, restore scanTime to %ums, isFirstMigrate=false.",
+                             current->pid, current->scanTime);
+
+            /* 更新内核中的扫描参数 */
+            struct AccessAddPidPayload payload;
+            payload.pid = current->pid;
+            payload.numaNodes = current->numaAttr.numaNodes;
+            payload.type = current->scanType;
+            payload.scanTime = current->scanTime;
+            payload.duration = 0;
+            int ret = AccessIoctlAddPid(1, &payload);
+            if (ret) {
+                SMAP_LOGGER_ERROR("Update pid %d scanTime after first migrate failed: %d.", current->pid, ret);
+            }
+        }
     }
     EnvMutexUnlock(&manager->lock);
 }
@@ -541,6 +566,59 @@ static int UpdateScanTime(ProcessAttr *process)
         payload.scanTime = process->sceneInfo.cycles.scanCycle;
     }
     return AccessIoctlAddPid(1, &payload);
+}
+
+/*
+ * 处理首次扫描进程：更新扫描计数，并在完成后切换为 NORMAL_SCAN
+ *
+ * 返回值：true - 首次扫描已完成，需要切换；false - 首次扫描仍在进行
+ */
+static bool HandleFirstScanProcess(ProcessAttr *process)
+{
+    process->firstScanCount++;
+    SMAP_LOGGER_INFO("Pid %d first scan count: %u/%u.", process->pid,
+                     process->firstScanCount, FIRST_SCAN_COUNT);
+
+    if (process->firstScanCount >= FIRST_SCAN_COUNT) {
+        /* 首次扫描完成，切换为 NORMAL_SCAN，但保持短扫描周期等待首次迁移 */
+        process->scanType = NORMAL_SCAN;
+        process->firstScanCount = 0;
+
+        /* 首次扫描完成后保持 MIN_SCAN_PERIOD，首次迁移后由 PostMigration 恢复正常周期 */
+        SMAP_LOGGER_INFO("Pid %d first scan completed, switch to NORMAL_SCAN, keep scanTime=%ums (MIN_SCAN_PERIOD).",
+                         process->pid, process->scanTime);
+
+        /* 更新内核中的扫描参数（仅更新 scanType，保持当前 scanTime） */
+        struct AccessAddPidPayload payload;
+        payload.pid = process->pid;
+        payload.numaNodes = process->numaAttr.numaNodes;
+        payload.type = NORMAL_SCAN;
+        payload.scanTime = process->scanTime;
+        payload.duration = 0;
+        int ret = AccessIoctlAddPid(1, &payload);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Update pid %d to NORMAL_SCAN failed: %d.", process->pid, ret);
+        }
+
+        return true;
+    }
+    return false;
+}
+
+/*
+ * 更新首次扫描进程的状态
+ * 首次扫描期间不进行迁移，只收集冷热信息
+ */
+static void UpdateFirstScanProcesses(struct ProcessManager *manager)
+{
+    EnvMutexLock(&manager->lock);
+    for (ProcessAttr *current = manager->processes; current; current = current->next) {
+        if (current->scanType != FIRST_SCAN) {
+            continue;
+        }
+        HandleFirstScanProcess(current);
+    }
+    EnvMutexUnlock(&manager->lock);
 }
 
 static void UpdateScene(struct ProcessManager *manager)
@@ -653,6 +731,10 @@ int ScanMigrateWork(ThreadCtx *ctx)
     SMAP_LOGGER_DEBUG("Tracking disabled.");
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
+
+    /* 更新首次扫描进程状态，完成后切换为 NORMAL_SCAN */
+    UpdateFirstScanProcesses(manager);
+
     ret = PerformMigrationPreparation(manager);
     if (ret) {
         SMAP_LOGGER_DEBUG("Migration preparation failed: %d.", ret);

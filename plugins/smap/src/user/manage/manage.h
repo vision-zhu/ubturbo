@@ -70,6 +70,14 @@
 #define PID_CMD_LENGTH 64
 #define MAX_LINE_LENGTH 1024
 
+/* 首次扫描参数定义 */
+#define FIRST_SCAN_TIME_MS 50      /* 首次扫描周期：50ms */
+#define FIRST_SCAN_COUNT 80        /* 首次扫描次数：80次 */
+#define FIRST_SCAN_DURATION_MS (FIRST_SCAN_TIME_MS * FIRST_SCAN_COUNT)  /* 总时长4000ms */
+
+/* 首次迁移前短扫描周期定义 */
+#define MIN_SCAN_PERIOD 50         /* 首次迁移前最小扫描周期：50ms */
+
 extern EnvAtomic g_forbiddenNodes[MAX_NODES];
 
 typedef uint16_t actc_t;
@@ -148,6 +156,7 @@ typedef enum {
     HAM_SCAN,
     NORMAL_SCAN,
     STATISTIC_SCAN,
+    FIRST_SCAN,         /* 首次扫描：新pid加入时的充分扫描 */
     SCAN_TYPE_MAX,
 } ScanType;
 
@@ -212,6 +221,8 @@ struct ProcessAttribute {
     uint32_t duration; // scanType为统计模式时记录统计时长
     ScanType scanType; // 标识添加进程组件
     time_t scanStart;
+    uint32_t firstScanCount; // 首次扫描计数：记录已扫描次数
+    bool isFirstMigrate;     // 首次迁移标志：true表示首次迁移尚未完成
     SceneInfo sceneInfo; // 场景：轻载/重载/稳态/非稳态，扫描周期等
     MigrateMode migrateMode; // 内存迁移模式，按照比例或是大小
     int initLocalMemRatio; // 接口设置的内存比例
