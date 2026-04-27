@@ -313,7 +313,7 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	if (*ppos % sizeof(actc_t)) {
 		goto out_free;
 	}
-		
+
 
 	len = 0;
 	if (!cnt || *ppos >= total_len) {
@@ -909,6 +909,7 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 				ap->cur_times = ap->ntimes;
 			}
 		}
+		pid_pte_mkold(ap);
 		if ((ap->cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID) <=
 		    ap->ntimes) {
 			submit_one_work(ap);

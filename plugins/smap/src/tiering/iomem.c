@@ -251,7 +251,7 @@ static int extract_hex_content(const char *file_path, u64 *content)
 	}
 
 	buf[ret] = '\0';
-	pr_debug("content of %s: %s\n", file_path, buf);
+	pr_debug("content of %s: %s", file_path, buf);
 	ret = kstrtoull(buf, HEX, &value);
 	if (ret)
 		goto error;

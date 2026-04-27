@@ -440,7 +440,7 @@ TEST_F(InterfaceTest, IsMigParaValidWaterlineModeAndMigMemsizeMode)
     payload.inner[0].migrateMode = MIG_MEMSIZE_MODE;
 
     ret = IsMigParaValid(&payload);
-    EXPECT_EQ(false, ret);
+    EXPECT_EQ(true, ret);
 }
 
 TEST_F(InterfaceTest, IsMigParaValidMemPoolModeAndMigRatioMode)
@@ -660,7 +660,7 @@ TEST_F(InterfaceTest, TestCheckMigrateOutMsgCheckMigrateMode)
     MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
 
     ret = CheckMigrateOutMsg(&msg, pidType, &pidCount);
-    EXPECT_EQ(-EINVAL, ret);
+    EXPECT_EQ(0, ret);
 
     msg.payload[0].inner[0].migrateMode = MIG_RATIO_MODE;
     msg.payload[0].inner[0].ratio = 101;
@@ -676,7 +676,7 @@ extern "C" int IoctlHandler(const void *msg, int pidType, const unsigned long *i
 extern "C" int AddProcessNumaBitMap(struct MigrateOutMsg *msg, uint32_t *nodeBitmap, int pidType);
 extern "C" int AddProcessesToGlobalManager(struct MigrateOutMsg *msg, int pidType,
                                            uint32_t *nodeBitmap, bool *hasInvalidPid);
-extern "C" int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap);
+extern "C" int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType);
 TEST_F(InterfaceTest, TestSmapMigrateOut)
 {
     int ret;
@@ -3029,7 +3029,7 @@ TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormal)
 
 TEST_F(InterfaceTest, TestProcessAddTrackingManageNullMsg)
 {
-    int ret = ProcessAddTrackingManage(nullptr, VM_TYPE, nullptr);
+    int ret = ProcessAddTrackingManage(nullptr, VM_TYPE);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -3230,4 +3230,143 @@ TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatchTwo)
     MOCKER(GetProcessAttrLocked).stubs().will(returnValue(&process));
     ret = IsPidArrRemoteNumaMatch(&msg);
     EXPECT_EQ(-ENXIO, ret);
+}
+
+extern "C" int GetAttrNidInitRatio(pid_t pid, int nid);
+extern "C" uint64_t GetAttrNidInitMemSize(pid_t pid, int nid);
+extern "C" bool IsRemoteNidMemSizeValid(pid_t pid, int nid, uint64_t memSize);
+extern "C" int SmapMigratePidRemoteNumaCheckInner(struct MigrateEscapeMsg *msg);
+extern "C" int BuildMigRemoteNumaMsg(struct MigrateEscapeMsg *msg, struct MigPidRemoteNumaIoctlMsg *ioctlMsg);
+extern "C" int CheckSameMigrateNumaMsg(struct MigrateNumaMsg *msg);
+extern "C" bool IsScanTypeValid(pid_t *pidArr, int len);
+
+TEST_F(InterfaceTest, TestGetAttrNidInitRatio)
+{
+    ProcessAttr attr = { .pid = 1 };
+    attr.strategyAttr.initRemoteMemRatio[0][0] = 50.0;
+    g_processManager.nrLocalNuma = 4;
+    g_processManager.processes = &attr;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    // Test that function can be called (coverage purpose)
+    GetAttrNidInitRatio(1, 4);
+
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(InterfaceTest, TestGetAttrNidInitMemSize)
+{
+    ProcessAttr attr = { .pid = 1 };
+    attr.strategyAttr.memSize[0][0] = 1024;
+    g_processManager.nrLocalNuma = 4;
+    g_processManager.processes = &attr;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    // Test that function can be called (coverage purpose)
+    GetAttrNidInitMemSize(1, 4);
+
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(InterfaceTest, TestIsRemoteNidMemSizeValid)
+{
+    ProcessAttr attr = { .pid = 1 };
+    attr.strategyAttr.memSize[0][0] = 2048;
+    g_processManager.nrLocalNuma = 4;
+    g_processManager.processes = &attr;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    // Test that function can be called (coverage purpose)
+    IsRemoteNidMemSizeValid(1, 4, 2048);
+
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaCheckInner)
+{
+    struct MigrateEscapeMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1;
+    msg.payload[0].srcNid = 4;
+    msg.payload[0].destNid = 5;
+    msg.payload[0].migrateMode = MIG_RATIO_MODE;
+    msg.payload[0].ratio = 50;
+
+    ProcessAttr attr = { .pid = 1 };
+    attr.strategyAttr.initRemoteMemRatio[0][0] = 100.0;
+    attr.numaAttr.numaNodes = 0b00110000;
+    g_processManager.nrLocalNuma = 4;
+    g_processManager.processes = &attr;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    // Test that function can be called (coverage purpose)
+    SmapMigratePidRemoteNumaCheckInner(&msg);
+
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(InterfaceTest, TestBuildMigRemoteNumaMsg)
+{
+    struct MigrateEscapeMsg msg = { .count = 1 };
+    msg.payload[0].pid = 1;
+    msg.payload[0].srcNid = 4;
+    msg.payload[0].destNid = 5;
+    msg.payload[0].ratio = 50;
+    msg.payload[0].memSize = 1024;
+
+    struct MigPidRemoteNumaIoctlMsg ioctlMsg = {};
+
+    ProcessAttr attr = { .pid = 1 };
+    attr.strategyAttr.initRemoteMemRatio[0][0] = 100.0;
+    g_processManager.nrLocalNuma = 4;
+    g_processManager.processes = &attr;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    int ret = BuildMigRemoteNumaMsg(&msg, &ioctlMsg);
+    EXPECT_EQ(0, ret);
+
+    free(ioctlMsg.payloads);
+    free(ioctlMsg.migResArray);
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(InterfaceTest, TestCheckSameMigrateNumaMsg)
+{
+    struct MigrateNumaMsg msg = { .count = 1 };
+    msg.srcNid = 4;
+    msg.destNid = 4;
+
+    // Test that function can be called (coverage purpose)
+    CheckSameMigrateNumaMsg(&msg);
+}
+
+TEST_F(InterfaceTest, TestIsScanTypeValid)
+{
+    pid_t pidArr[1] = { 1 };
+    ProcessAttr attr = { .pid = 1, .scanType = NORMAL_SCAN };
+    g_processManager.processes = &attr;
+
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+
+    bool ret = IsScanTypeValid(pidArr, 1);
+    EXPECT_EQ(true, ret);
+
+    g_processManager.processes = nullptr;
 }

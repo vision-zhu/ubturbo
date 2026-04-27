@@ -74,7 +74,7 @@ uint32_t GetPageSize(void)
     return g_processManager.tracking.pageSize;
 }
 
-static int RemoteNumaInfoInit(void)
+static void RemoteNumaInfoInit(void)
 {
     EnvMutexInit(&g_processManager.remoteNumaInfo.lock);
     for (int j = 0; j < REMOTE_NUMA_NUM; j++) {
@@ -108,7 +108,7 @@ int ProcessManagerInit(uint32_t pageType)
     if (ret != 0) {
         SMAP_LOGGER_ERROR("Generat period config file failed, ret is %d.", ret);
     }
-
+    PeriodConfigRead(PERIOD_CONFIG_PATH);
     int size = sysconf(_SC_PAGESIZE);
     if (size != PAGESIZE_4K && size != PAGESIZE_64K) {
         SMAP_LOGGER_ERROR("Get pagesize failed.");
@@ -403,7 +403,8 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
 {
     size_t i, nrFreq, nrBit, acidx = 0;
     uint16_t freqMax = 0, freqMin = UINT16_MAX;
-    uint64_t actcLen, paddr, freqSum = 0;
+    uint64_t actcLen, paddr, freqSum = 0, remoteHotNum = 0, white = 0;
+    uint32_t remoteHotThreshold = GetRemoteHotThreshold();
     size_t len = pmb->len[nid];
     unsigned long *bitmap = pmb->data[nid];
     unsigned long *whiteListBitmap = pmb->whiteListBm[nid];
@@ -413,7 +414,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     }
     ActcData *actc = attr->scanAttr.actcData[nid];
 
-    nrFreq = nrBit = actcLen = 0;
+    nrFreq = nrBit = actcLen = remoteHotNum = 0;
     for (acidx = 0; acidx < BITS_PER_LONG * len; acidx++) {
         if (actcLen >= attr->walkPage.nrPages[nid] || actcLen >= apf->len[nid]) {
             break;
@@ -429,11 +430,15 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         }
         if (TestBit(acidx, whiteListBitmap)) {
             actc[actcLen].isWhiteListPage = true;
+            white++;
         }
         actc[actcLen].freq = apf->freq[nid][actcLen];
         if (actc[actcLen].freq != 0) {
             nrFreq++;
             freqSum += actc[actcLen].freq;
+        }
+        if (actc[actcLen].freq >= remoteHotThreshold) {
+            remoteHotNum++;
         }
         actc[actcLen].addr = actcLen;
         freqMax = MAX(freqMax, actc[actcLen].freq);
@@ -445,10 +450,13 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     attr->scanAttr.actCount[nid].freqMin = freqMin;
     attr->scanAttr.actCount[nid].freqNum = nrFreq;
     attr->scanAttr.actCount[nid].freqSum = freqSum;
+    attr->scanAttr.actCount[nid].remoteHotNum = remoteHotNum;
+    attr->scanAttr.actCount[nid].whiteNum = white;
     attr->scanAttr.actCount[nid].pageNum = attr->scanAttr.actcLen[nid];
     attr->scanAttr.actCount[nid].freqZero = attr->scanAttr.actcLen[nid] - nrFreq;
-    SMAP_LOGGER_INFO("Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu.", nid, actcLen,
-                     nrFreq, nrBit, freqMax, freqMin, freqSum);
+    SMAP_LOGGER_INFO(
+        "Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu, remoteHotNum %lu, white %lu",
+                      nid, actcLen, nrFreq, nrBit, freqMax, freqMin, freqSum, remoteHotNum, white);
     return 0;
 }
 
@@ -589,7 +597,7 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
             attr->migrateParam[i].memSize = param->numaParam[i].memSize;
             SMAP_LOGGER_INFO("Multinuma vm destNid: %d, memSize: %lu", attr->migrateParam[i].nid,
                              attr->migrateParam[i].memSize);
-            
+
             for (int j = 0; j < nrLocalNuma && j < LOCAL_NUMA_NUM; j++) {
                 attr->strategyAttr.initRemoteMemRatio[j][param->numaParam[i].nid - nrLocalNuma] =
                     param->numaParam[i].ratio;
@@ -629,15 +637,11 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
         return -ENOMEM;
     }
 
-    if (!nodeBitmap) {
-        ret = SetProcessLocalNuma(param->pid, &attr->numaAttr.numaNodes, type == VM_TYPE);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", param->pid, ret);
-            free(attr);
-            return ret;
-        }
-    } else {
-        attr->numaAttr.numaNodes = *nodeBitmap;
+    ret = SetProcessLocalNuma(param->pid, &attr->numaAttr.numaNodes, type == VM_TYPE);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", param->pid, ret);
+        free(attr);
+        return ret;
     }
 
     if (param->scanType == NORMAL_SCAN) {
@@ -768,11 +772,15 @@ int SetProcessLocalNuma(pid_t pid, uint32_t *nodeBitmap, bool hugeFlag)
         SMAP_LOGGER_WARNING("Set pid %d local numa by cpu failed: %d.", pid, ret1);
     }
     SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by cpu: %#x.", pid, *nodeBitmap);
-    ret2 = SetLocalNumaByNumaMaps(pid, nodeBitmap, hugeFlag);
-    if (ret2) {
-        SMAP_LOGGER_WARNING("Set pid %d local numa by numa maps failed: %d.", pid, ret2);
+    if (hugeFlag) {
+        ret2 = SetLocalNumaByNumaMaps(pid, nodeBitmap, hugeFlag);
+        if (ret2) {
+            SMAP_LOGGER_WARNING("Set pid %d local numa by numa maps failed: %d.", pid, ret2);
+        }
+        SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by numa maps: %#x.", pid, *nodeBitmap);
+    } else {
+        return ret1;
     }
-    SMAP_LOGGER_INFO("pid %d node bitmap after set local numa by numa maps: %#x.", pid, *nodeBitmap);
 
     return ret1 & ret2;
 }
@@ -989,7 +997,7 @@ static int InitPidFreq(ProcessAttr *attr, struct AccessPidFreq *apf)
             continue;
         }
         /* Use calloc to ensure freq[i] is zeroed */
-        apf->freq[i] = calloc(apf->len[i], sizeof(uint16_t));
+        apf->freq[i] = calloc(apf->len[i], sizeof(actc_t));
         if (!apf->freq[i]) {
             SMAP_LOGGER_ERROR("Alloc pid %d data memory failed\n", apf->pid);
             FreePidFreq(apf);

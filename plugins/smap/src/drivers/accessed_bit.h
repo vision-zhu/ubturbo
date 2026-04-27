@@ -39,7 +39,7 @@ struct ham_tracking_info {
 	struct proc_dir_entry *pde;
 	u64 len[NR_LEVEL];
 	u64 *paddr[NR_LEVEL];
-	u16 *freq[NR_LEVEL];
+	actc_t *freq[NR_LEVEL];
 	struct list_head node;
 };
 
@@ -52,7 +52,7 @@ struct pte_walk {
 	pid_t pid;
 	scan_type type;
 	int nid;
-	u16 *buf;
+	actc_t *buf;
 	int buf_len;
 	bool flag;
 	struct hva_info *hva_info;
@@ -65,9 +65,10 @@ struct pte_walk {
 
 struct freq_info {
 	u64 hpa;
-	u16 freq;
+	actc_t freq;
 };
 
+int pid_pte_mkold(struct access_pid *ap);
 int smap_create_tracking_info_file(struct ham_tracking_info *info);
 int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 			uint64_t *freq_info_num);

@@ -310,46 +310,6 @@ static void SortActcData(ProcessAttr *process)
     }
 }
 
-static uint64_t CalcMigrateNumByFreq4K(ProcessAttr *process, int localNid, int remoteNid, const uint64_t numaOffset[],
-                                       const uint64_t numaFreePage[])
-{
-    uint64_t migrateNum, low = 0, high;
-    uint32_t slowThred;
-    uint64_t lastFreqNum;
-    ActCount localActCount = process->scanAttr.actCount[localNid];
-    ActCount remoteActCount = process->scanAttr.actCount[remoteNid];
-    uint64_t localLen = process->scanAttr.actcLen[localNid] - numaOffset[localNid];
-    uint64_t remoteLen = process->scanAttr.actcLen[remoteNid] - numaOffset[remoteNid];
-    if (remoteActCount.freqNum > numaOffset[remoteNid]) {
-        lastFreqNum = remoteActCount.freqNum - numaOffset[remoteNid];
-    } else {
-        lastFreqNum = 0;
-    }
-    // calculate migrate num based on actc length, max migrate num and free page num
-    migrateNum = MIN(localLen, remoteLen);
-    migrateNum = MIN(migrateNum, process->separateParam.maxMigrate);
-    migrateNum = MIN(migrateNum, numaFreePage[localNid]);
-    migrateNum = MIN(migrateNum, numaFreePage[remoteNid]);
-    migrateNum = MIN(migrateNum, lastFreqNum);
-
-    // slow threshold
-    slowThred = MAX(STRATEGY_MIN_HOT_COLD_THRED_VALUE, (localActCount.freqMax / STRATEGY_FREQ_THRED_DIVISOR));
-    // calculate migrate num based on freq
-    high = migrateNum;
-    while (low < high) {
-        uint64_t mid = low + (high - low + 1) / 2;
-        uint64_t freqL1 = process->scanAttr.actcData[localNid][mid - 1 + numaOffset[localNid]].freq;
-        uint64_t freqL2 = process->scanAttr.actcData[remoteNid][mid - 1 + numaOffset[remoteNid]].freq;
-        if (((freqL1 == 0) && (freqL2 > 0)) || (freqL1 + slowThred < freqL2)) {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    migrateNum = low;
-    return migrateNum;
-}
-
 static int BuildMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
                           uint64_t numaOffset[MAX_NODES], int from, int to)
 {
@@ -380,6 +340,8 @@ static uint64_t CalcSwapNum4K(ProcessAttr *process, int localNid, int remoteNid,
     ActCount *remoteActCount = &process->scanAttr.actCount[remoteNid];
     uint64_t localLen = process->scanAttr.actcLen[localNid] - numaOffset[localNid];
     uint64_t remoteLen = process->scanAttr.actcLen[remoteNid] - numaOffset[remoteNid];
+    uint64_t localFree = localActCount->pageNum - localActCount->whiteNum;
+    uint64_t remoteFree = remoteActCount->pageNum - remoteActCount->whiteNum;
     if (localActCount->freqZero > numaOffset[localNid]) {
         lastZeroNum = localActCount->freqZero - numaOffset[localNid];
     } else {
@@ -396,6 +358,8 @@ static uint64_t CalcSwapNum4K(ProcessAttr *process, int localNid, int remoteNid,
     migrateNum = MIN(migrateNum, numaFreePage[remoteNid]);
     migrateNum = MIN(migrateNum, lastZeroNum);
     migrateNum = MIN(migrateNum, lastFreqNum);
+    migrateNum = MIN(migrateNum, localFree);
+    migrateNum = MIN(migrateNum, remoteFree);
     return migrateNum;
 }
 
@@ -564,6 +528,19 @@ static int SeparateStrategy4KInner(ProcessAttr *process, struct MigList mlist[MA
     return ret;
 }
 
+static uint64_t CalcAdditionalPage(ProcessAttr *process, int localNid, int remoteNid, uint64_t aimNum,
+                                   const uint64_t numaOffest[], const uint64_t numaFreePage[])
+{
+    uint64_t additionalNum;
+    uint64_t swappableNum = process->scanAttr.actcLen[localNid] - numaOffest[localNid];
+
+    additionalNum = MIN(swappableNum, aimNum);
+    additionalNum = MIN(additionalNum, process->separateParam.maxMigrate);
+    additionalNum = MIN(additionalNum, numaFreePage[localNid]);
+    additionalNum = MIN(additionalNum, numaFreePage[remoteNid]);
+    return additionalNum;
+}
+
 static void UpdateSwapNum(ProcessAttr *process, uint64_t swapNum[LOCAL_NUMA_BITS][MAX_NODES], int localNumaNum,
                           uint64_t numaFreePage[MAX_NODES])
 {
@@ -573,17 +550,31 @@ static void UpdateSwapNum(ProcessAttr *process, uint64_t swapNum[LOCAL_NUMA_BITS
             numaOffset[nid1] += process->strategyAttr.nrMigratePages[nid1][nid2];
         }
     }
-    for (int localNid = 0; localNid < localNumaNum; localNid++) {
-        if (NotInAttrL1(process, localNid)) {
+    for (int remoteNid = localNumaNum; remoteNid < localNumaNum + REMOTE_NUMA_NUM; remoteNid++) {
+        if (NotInAttrL2(process, remoteNid)) {
             continue;
         }
-        for (int remoteNid = localNumaNum; remoteNid < localNumaNum + REMOTE_NUMA_NUM; remoteNid++) {
-            if (NotInAttrL2(process, remoteNid)) {
+        for (int localNid = 0; localNid < localNumaNum; localNid++) {
+            if (NotInAttrL1(process, localNid)) {
                 continue;
             }
             swapNum[localNid][remoteNid] = CalcSwapNum4K(process, localNid, remoteNid, numaOffset, numaFreePage);
             numaOffset[localNid] += swapNum[localNid][remoteNid];
             numaOffset[remoteNid] += swapNum[localNid][remoteNid];
+        }
+        uint64_t remoteGuarantee = process->scanAttr.actCount[remoteNid].remoteHotNum;
+        for (int localNid = 0; localNid < localNumaNum; localNid++) {
+            if (numaOffset[remoteNid] >= remoteGuarantee) {
+                break;
+            }
+            if (NotInAttrL1(process, localNid)) {
+                continue;
+            }
+            uint64_t newAddedNum = CalcAdditionalPage(process, localNid, remoteNid,
+                                                    remoteGuarantee - numaOffset[remoteNid], numaOffset, numaFreePage);
+            swapNum[localNid][remoteNid] += newAddedNum;
+            numaOffset[localNid] += newAddedNum;
+            numaOffset[remoteNid] += newAddedNum;
         }
     }
 }

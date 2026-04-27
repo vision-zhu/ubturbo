@@ -36,7 +36,7 @@
 #include "manage/virt.h"
 #include "manage/smap_config.h"
 #include "strategy/migration.h"
-
+#include "strategy/period_config.h"
 #include "smap_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
 #define REMOTE_NUMA_MEMORY_MAX (TIB / MIB)
@@ -256,7 +256,11 @@ static int InitAllThreads(struct ProcessManager *manager)
 {
     int ret;
     EnvMutexLock(&manager->threadLock);
-    ret = InitThread(manager, SCAN_MIGRATE_PERIOD, ScanMigrateWork);
+    uint32_t migPeriod = SCAN_MIGRATE_PERIOD;
+    if (GetFileConfSwitchConfig()) {
+        migPeriod = GetMigratePeriodConfig();
+    }
+    ret = InitThread(manager, migPeriod, ScanMigrateWork);
     if (ret) {
         SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
         DestroyAllThread(manager);
@@ -397,10 +401,6 @@ static bool CheckMigOutPayloadItems(struct MigrateOutPayload *payload, int *tota
             SMAP_LOGGER_ERROR("[%d] pid: %d migrateMode %d invalid.", i, payload->pid, payload->inner[i].migrateMode);
             return false;
         }
-        if (GetRunMode() == WATERLINE_MODE && payload->inner[i].migrateMode == MIG_MEMSIZE_MODE) {
-            SMAP_LOGGER_ERROR("[%d] smap runMode is WATERLINE_MODE, not supported MIG_MEMSIZE_MODE.", i);
-            return false;
-        }
         if (GetRunMode() == MEM_POOL_MODE && payload->inner[i].migrateMode != MIG_MEMSIZE_MODE) {
             SMAP_LOGGER_ERROR("[%d] smap runMode is MEM_POOL_MODE, not supported mode except MIG_MEMSIZE_MODE.", i);
             return false;
@@ -409,7 +409,7 @@ static bool CheckMigOutPayloadItems(struct MigrateOutPayload *payload, int *tota
             SMAP_LOGGER_ERROR("[%d] pid: %d ratio %d invalid.", i, payload->pid, payload->inner[i].ratio);
             return false;
         }
-        if (payload->inner[i].migrateMode == MIG_MEMSIZE_MODE && payload->inner[i].memSize % KB_PER_2MB != 0) {
+        if (payload->inner[i].migrateMode == MIG_MEMSIZE_MODE && payload->inner[i].memSize % KB_PER_4KB != 0) {
             SMAP_LOGGER_ERROR("[%d] pid: %d memSize %d is not 2M aligned.", i, payload->pid, payload->inner[i].memSize);
             return false;
         }
@@ -500,32 +500,32 @@ static int CheckMigrateOutMsg(struct MigrateOutMsg *msg, int pidType)
     return 0;
 }
 
-static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap)
+static int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType)
 {
     int ret = 0;
     if (!msg) {
         SMAP_LOGGER_ERROR("Smap mig out msg is null.");
         return -EINVAL;
     }
+    uint32_t scanPeriod = LIGHT_STABLE_SCAN_CYCLE;
+    if (GetFileConfSwitchConfig()) {
+        scanPeriod = GetScanPeriodConfig();
+    }
     struct AccessAddPidPayload payload[MAX_NR_MIGOUT] = { 0 };
     for (int i = 0; i < msg->count; ++i) {
         payload[i].type = NORMAL_SCAN;
         payload[i].pid = msg->payload[i].pid;
-        payload[i].scanTime = LIGHT_STABLE_SCAN_CYCLE;
+        payload[i].scanTime = scanPeriod;
         if (!PidIsValid(msg->payload[i].pid)) {
             SMAP_LOGGER_WARNING("pid %d doesn't exist.", msg->payload[i].pid);
             payload[i].pid = NON_EXIST_PID;
             continue;
         }
         // assign values for local numa nodes
-        if (!nodeBitmap) {
-            ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
-                return ret;
-            }
-        } else {
-            payload[i].numaNodes = nodeBitmap[i];
+        ret = SetProcessLocalNuma(msg->payload[i].pid, &payload[i].numaNodes, pidType == VM_TYPE);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Query pid %d memory usage failed: %d.", msg->payload[i].pid, ret);
+            return ret;
         }
         // assign values for remote numa nodes
         for (int j = 0; j < msg->payload[i].count; ++j) {
@@ -638,7 +638,7 @@ int ubturbo_smap_migrate_out(struct MigrateOutMsg *msg, int pidType)
     }
 
     // send ioctl to add pid to access pid list
-    ret = ProcessAddTrackingManage(msg, pidType, nodeBitmap);
+    ret = ProcessAddTrackingManage(msg, pidType);
     if (ret) {
         SMAP_LOGGER_ERROR("Add process tracking failed: %d.", ret);
         EnvMutexUnlock(&manager->lock);
@@ -1267,17 +1267,27 @@ static int QueryVMFreqFromKernel(int pid, uint16_t *data, uint32_t lengthIn, uin
 {
     int ret;
     struct ProcessManager *manager = GetProcessManager();
+    actc_t *tmpData = malloc(sizeof(actc_t) * lengthIn);
+    if (tmpData == NULL) {
+        SMAP_LOGGER_ERROR("QueryVMFreqFromKernel malloc tmpData failed.\n");
+        return -ENOMEM;
+    }
     struct TrakingInfoPayload payload = {
         .pid = pid,
         .length = lengthIn,
-        .data = data,
+        .data = tmpData,
     };
     ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_TRACKING, &payload);
     if (ret < 0) {
         SMAP_LOGGER_ERROR("access ioctl remove get tracking info error: %s\n", strerror(errno));
+        free(tmpData);
         return -EBADF;
     }
     *lengthOut = payload.length;
+    for (uint32_t i = 0; i < payload.length; i++) {
+        data[i] = tmpData[i];
+    }
+    free(tmpData);
     return ret;
 }
 
@@ -2008,11 +2018,6 @@ static int SmapMigratePidRemoteNumaCheck(struct MigrateEscapeMsg *msg)
         if (msg->payload[i].migrateMode < MIG_RATIO_MODE || msg->payload[i].migrateMode > MIG_MEMSIZE_MODE) {
             SMAP_LOGGER_ERROR("[%d] pid: %d migrateMode %d invalid.",
                 i, msg->payload[i].pid, msg->payload[i].migrateMode);
-            return -EINVAL;
-        }
-
-        if (GetRunMode() == WATERLINE_MODE && msg->payload[i].migrateMode == MIG_MEMSIZE_MODE) {
-            SMAP_LOGGER_ERROR("[%d] smap runMode is WATERLINE_MODE, not supported MIG_MEMSIZE_MODE.", i);
             return -EINVAL;
         }
         if (GetRunMode() == MEM_POOL_MODE && msg->payload[i].migrateMode != MIG_MEMSIZE_MODE) {
