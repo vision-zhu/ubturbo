@@ -1155,3 +1155,168 @@ TEST_F(MigrationTest, TestPostMigrationTwo)
     EXPECT_EQ(PROC_IDLE, current.state);
     free(mMsg.migList);
 }
+
+extern "C" void NumaMigByMemSize(ProcessAttr *current);
+TEST_F(MigrationTest, TestNumaMigByMemSizeDemote)
+{
+    int nrLocalNuma = 4;
+    int l1Node = 0;
+    int l2Node = 5;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = l2Node;
+    attr.migrateParam[0].memSize = 10240; // 5 hugepages
+    attr.scanAttr.actcLen[l1Node] = 100;
+    attr.scanAttr.actcLen[l2Node] = 2;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetAttrL1).stubs().will(returnValue(l1Node));
+
+    NumaMigByMemSize(&attr);
+    EXPECT_EQ(3, attr.strategyAttr.nrMigratePages[l1Node][l2Node]);
+}
+
+TEST_F(MigrationTest, TestNumaMigByMemSizePromote)
+{
+    int nrLocalNuma = 4;
+    int l1Node = 0;
+    int l2Node = 5;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = l2Node;
+    attr.migrateParam[0].memSize = 2048; // 1 hugepage
+    attr.scanAttr.actcLen[l1Node] = 100;
+    attr.scanAttr.actcLen[l2Node] = 10;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetAttrL1).stubs().will(returnValue(l1Node));
+
+    NumaMigByMemSize(&attr);
+    EXPECT_EQ(9, attr.strategyAttr.nrMigratePages[l2Node][l1Node]);
+}
+
+TEST_F(MigrationTest, TestNumaMigByMemSizeNoMigrate)
+{
+    int nrLocalNuma = 4;
+    int l1Node = 0;
+    int l2Node = 5;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = l2Node;
+    attr.migrateParam[0].memSize = 4096; // 2 hugepages
+    attr.scanAttr.actcLen[l1Node] = 100;
+    attr.scanAttr.actcLen[l2Node] = 2;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetAttrL1).stubs().will(returnValue(l1Node));
+
+    NumaMigByMemSize(&attr);
+    EXPECT_EQ(0, attr.strategyAttr.nrMigratePages[l1Node][l2Node]);
+    EXPECT_EQ(0, attr.strategyAttr.nrMigratePages[l2Node][l1Node]);
+}
+
+TEST_F(MigrationTest, TestNumaMigByMemSizeInvalidL1)
+{
+    int nrLocalNuma = 4;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetAttrL1).stubs().will(returnValue(-1));
+
+    NumaMigByMemSize(&attr);
+    EXPECT_EQ(0, attr.strategyAttr.nrMigratePages[0][5]);
+}
+
+TEST_F(MigrationTest, TestNumaMigByMemSize4KMode)
+{
+    int nrLocalNuma = 4;
+    int l1Node = 0;
+    int l2Node = 5;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = l2Node;
+    attr.migrateParam[0].memSize = 8; // 2 4K pages (8KB / 4 = 2)
+    attr.scanAttr.actcLen[l1Node] = 100;
+    attr.scanAttr.actcLen[l2Node] = 1;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetAttrL1).stubs().will(returnValue(l1Node));
+
+    NumaMigByMemSize(&attr);
+    // 8KB / 4KB = 2 pages, currentPages=1, migNum=1
+    EXPECT_EQ(1, attr.strategyAttr.nrMigratePages[l1Node][l2Node]);
+}
+
+TEST_F(MigrationTest, TestNumaMigReduceDealMemSizeMode)
+{
+    int nrLocalNuma = 4;
+    int l1Node = 0;
+    int l2Node = 5;
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = l2Node;
+    attr.migrateParam[0].memSize = 10240; // 5 hugepages
+    attr.scanAttr.actcLen[l1Node] = 100;
+    attr.scanAttr.actcLen[l2Node] = 2;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(l1Node));
+
+    NumaMigReduceDeal(&attr);
+    EXPECT_EQ(3, attr.strategyAttr.nrMigratePages[l1Node][l2Node]);
+}
+
+TEST_F(MigrationTest, TestNumaMigReduceDealRatioMode)
+{
+    ProcessAttr attr = {};
+    attr.strategyAttr.nrPagesPerLocalNuma[0] = 100;
+    attr.strategyAttr.allocRemoteNrPages[0][0] = 200;
+    attr.strategyAttr.l3RemoteMemRatio[0][0] = 50;
+    attr.migrateMode = MIG_RATIO_MODE;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    NumaMigReduceDeal(&attr);
+    EXPECT_EQ(150, attr.strategyAttr.nrMigratePages[4][0]);
+}
+
+TEST_F(MigrationTest, TestNumaMigReduceDealMemPoolMode)
+{
+    int l2Node = 4;
+    ProcessAttr attr = {};
+    attr.migrateMode = MIG_RATIO_MODE;
+    attr.strategyAttr.allocRemoteNrPages[0][0] = 100;
+    attr.scanAttr.actcLen[l2Node] = 5;
+    attr.strategyAttr.memSize[0][0] = 4096;
+
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(l2Node));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+
+    NumaMigReduceDeal(&attr);
+    EXPECT_EQ(5, attr.strategyAttr.nrMigratePages[l2Node][0]);
+}

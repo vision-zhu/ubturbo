@@ -433,10 +433,46 @@ static void NumaSwapMemPool(ProcessAttr *current)
     }
 }
 
+static void NumaMigByMemSize(ProcessAttr *current)
+{
+    int nrLocalNuma = GetNrLocalNuma();
+    int l1Node = GetAttrL1(current);
+    if (l1Node < 0 || l1Node >= nrLocalNuma) {
+        SMAP_LOGGER_ERROR("NumaMigByMemSize pid %d L1 %d is invalid.", current->pid, l1Node);
+        return;
+    }
+    for (int i = 0; i < current->remoteNumaCnt; i++) {
+        int l2Node = current->migrateParam[i].nid;
+        if (l2Node < nrLocalNuma || l2Node >= MAX_NODES) {
+            SMAP_LOGGER_ERROR("NumaMigByMemSize pid %d L2 %d is invalid.", current->pid, l2Node);
+            continue;
+        }
+        uint64_t targetPages = IsHugeMode() ? KBToHugePage(current->migrateParam[i].memSize) :
+                                              KBToNormalPage(current->migrateParam[i].memSize);
+        uint64_t currentPages = current->scanAttr.actcLen[l2Node];
+        int32_t migNum;
+        if (targetPages > currentPages) {
+            migNum = targetPages - currentPages;
+            migNum = MIN(migNum, current->scanAttr.actcLen[l1Node]);
+            current->strategyAttr.nrMigratePages[l1Node][l2Node] = migNum;
+            SMAP_LOGGER_INFO("Pid %d needs demote %d pages from L1(%d) to L2(%d).",
+                             current->pid, migNum, l1Node, l2Node);
+        } else if (targetPages < currentPages) {
+            migNum = currentPages - targetPages;
+            migNum = MIN(migNum, current->scanAttr.actcLen[l2Node]);
+            current->strategyAttr.nrMigratePages[l2Node][l1Node] = migNum;
+            SMAP_LOGGER_INFO("Pid %d needs promote %d pages from L2(%d) to L1(%d).",
+                             current->pid, migNum, l2Node, l1Node);
+        }
+    }
+}
+
 static void NumaMigReduceDeal(ProcessAttr *current)
 {
     if (GetRunMode() == MEM_POOL_MODE) {
         NumaSwapMemPool(current);
+    } else if (current->migrateMode == MIG_MEMSIZE_MODE) {
+        NumaMigByMemSize(current);
     } else {
         CalProcessNuma(&current->strategyAttr);
     }
