@@ -103,12 +103,18 @@ TEST_F(AccessMMUTest, set_non_anon_bm)
 {
     int ret = 0;
     struct page page;
+    struct access_pid ap = {0};
+    ap.bm_len[0] = 1;
+    ap.white_list_bm[0] = (unsigned long *)malloc(sizeof(unsigned long));
+
     MOCKER(pfn_valid).stubs().will(returnValue(true));
     MOCKER(pfn_to_online_page).stubs().will(returnValue(&page));
     MOCKER(PageHuge).stubs().will(returnValue(1));
     MOCKER(PageAnon).stubs().will(returnValue(true));
-    ret = set_non_anon_bm(nullptr, 0, 0, 0);
+    ret = set_non_anon_bm(&ap, 0, 0, 0);
     EXPECT_EQ(0, ret);
+
+    free(ap.white_list_bm[0]);
 }
 
 extern "C" int add_to_bm_page(u64 paddr, struct access_pid *ap);

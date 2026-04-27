@@ -74,7 +74,7 @@ uint32_t GetPageSize(void)
     return g_processManager.tracking.pageSize;
 }
 
-static int RemoteNumaInfoInit(void)
+static void RemoteNumaInfoInit(void)
 {
     EnvMutexInit(&g_processManager.remoteNumaInfo.lock);
     for (int j = 0; j < REMOTE_NUMA_NUM; j++) {
