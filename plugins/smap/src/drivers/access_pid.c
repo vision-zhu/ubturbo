@@ -398,6 +398,9 @@ static int create_procfs(struct access_pid *ap)
 	if (ret == 0)
 		return -EINVAL;
 
+	if (pid_procfs_exists(pid)) {
+		return 0;
+	}
 	root_pde = proc_mkdir(dirname, smap_procfs_root);
 	if (!root_pde) {
 		if (pid_procfs_exists(pid)) {
