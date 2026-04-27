@@ -219,12 +219,11 @@ TEST_F(AccessedBitTest, SmapCreatTrackingInfoFile)
 }
 
 extern "C" int scan_forward_2M(pid_t pid, int page_size, scan_type type);
-extern "C" int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type);
 TEST_F(AccessedBitTest, scan_accessed_bit_forward)
 {
     int ret;
     int page_size = PAGE_SIZE_4K;
-    ret = scan_accessed_bit_forward_vm(1, page_size, NORMAL_SCAN);
+    ret = scan_accessed_bit_forward_vm(1, page_size, NO_SCAN);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -785,35 +784,32 @@ TEST_F(AccessedBitTest, take_vma_snapshot)
 
 extern "C" bool IS_ERR(const void *ptr);
 extern "C" struct mm_struct *mock_get_mm_by_pid(pid_t pid);
-extern "C" int scan_forward_4k_mm(int pid, int page_size);
 extern "C" int take_vma_snapshot(struct mm_struct *mm,
                                  struct smap_vma_struct **vma_arr, int *vma_count);
-TEST_F(AccessedBitTest, scan_forward_4K_mm)
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_fail)
 {
     struct mm_struct mm;
 
     MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(static_cast<struct mm_struct *>(nullptr)));
-    int ret = scan_forward_4k_mm(1, PAGE_SIZE_4K);
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN);
     EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_success)
+{
+    struct mm_struct mm;
 
     GlobalMockObject::verify();
-
-    MOCKER(take_vma_snapshot).stubs().will(returnValue(0));
     MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(&mm));
     MOCKER(IS_ERR).stubs().will(returnValue(false));
-    MOCKER(kfree).expects(once()).will(ignoreReturnValue());
-    ret = scan_forward_4k_mm(1, PAGE_SIZE_4K);
+    MOCKER(take_vma_snapshot).stubs().will(returnValue(0));
+    MOCKER(kfree).stubs().will(ignoreReturnValue());
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN);
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm)
+TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_invalid_page)
 {
-    int ret;
-    int pid = 1234;
-    MOCKER(scan_forward_4k_mm).stubs().will(returnValue(1));
-    ret = scan_accessed_bit_forward_mm(pid, PAGE_SIZE_4K, NORMAL_SCAN);
-    EXPECT_EQ(1, ret);
-
-    ret = scan_accessed_bit_forward_mm(pid, PAGE_SIZE_2M, NORMAL_SCAN);
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_2M, NORMAL_SCAN);
     EXPECT_EQ(-EINVAL, ret);
 }
