@@ -638,6 +638,6 @@ TEST_F(HistOpsTest, hist_init)
     MOCKER(addr_segs_init).stubs().will(returnValue(0));
     MOCKER(hist_buffer_init).stubs().will(returnValue(0));
     MOCKER(scan_thread_init).stubs().will(returnValue(0));
-    ret = hist_init(SIZE_2M, UB_HIST_SMAP_TYPE_N7);
+    ret = hist_init(SIZE_2M);
     EXPECT_EQ(0, ret);
 }
