@@ -34,7 +34,7 @@ uint32_t ValidateTaskParams(const TaskRequest &tReq);
 constexpr int HIGH_WATERMARK_PAGES = 1000;
 constexpr int LOW_WATERMARK_PAGES = 500;
 constexpr int MB_TO_KB = 1024;
-constexpr int INVALID_TASK_TYPE = 999;
+constexpr int INVALID_TASK_TYPES = 999;
 constexpr int TARGET_NODE_ID = 2;
 constexpr int TARGET_LEN = 10;
 class TaskExecutorTest : public ::testing::Test {
