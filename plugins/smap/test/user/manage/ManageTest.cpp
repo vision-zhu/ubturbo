@@ -276,6 +276,7 @@ TEST_F(ManageTest, TestCheckPid)
     GlobalMockObject::verify();
     MOCKER(GetPidType).stubs().will(returnValue(VM_TYPE));
     MOCKER(PidIsValid).stubs().will(returnValue(true));
+    MOCKER(ShouldBlockPid).stubs().will(returnValue(false));
     MOCKER(IsQemuTask).stubs().will(returnValue((int)PROCESS_TYPE));
     ret = CheckPid(pid);
     EXPECT_EQ(-EINVAL, ret);
@@ -1872,4 +1873,118 @@ TEST_F(ManageTest, TestMappingAscFunc)
     EXPECT_EQ(1, ret);
     free(map1);
     free(map2);
+}
+
+extern "C" bool ShouldBlockPid(pid_t pid);
+extern "C" bool IsKernelThread(pid_t pid);
+extern "C" bool IsRealtimeTask(pid_t pid);
+TEST_F(ManageTest, TestShouldBlockPidInitAndSwapper)
+{
+    // pid <= 1 should be blocked (swapper and init)
+    bool ret = ShouldBlockPid(0);
+    EXPECT_EQ(true, ret);
+    ret = ShouldBlockPid(1);
+    EXPECT_EQ(true, ret);
+}
+
+TEST_F(ManageTest, TestShouldBlockPidNormalProcess)
+{
+    // normal process should not be blocked
+    MOCKER(IsKernelThread).stubs().will(returnValue(false));
+    MOCKER(IsRealtimeTask).stubs().will(returnValue(false));
+    bool ret = ShouldBlockPid(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestShouldBlockPidKernelThread)
+{
+    // kernel thread should be blocked
+    MOCKER(IsKernelThread).stubs().will(returnValue(true));
+    bool ret = ShouldBlockPid(100);
+    EXPECT_EQ(true, ret);
+}
+
+TEST_F(ManageTest, TestShouldBlockPidRealtimeTask)
+{
+    // realtime task should be blocked
+    MOCKER(IsKernelThread).stubs().will(returnValue(false));
+    MOCKER(IsRealtimeTask).stubs().will(returnValue(true));
+    bool ret = ShouldBlockPid(200);
+    EXPECT_EQ(true, ret);
+}
+
+TEST_F(ManageTest, TestIsKernelThreadSnprintfFailed)
+{
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(-1));
+    bool ret = IsKernelThread(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestIsKernelThreadFopenFailed)
+{
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(static_cast<FILE *>(nullptr)));
+    bool ret = IsKernelThread(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestIsKernelThreadFgetsFailed)
+{
+    static FILE fake_file;
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&fake_file));
+    MOCKER(fgets).stubs().will(returnValue(static_cast<char *>(nullptr)));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsKernelThread(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestIsRealtimeTaskSnprintfFailed)
+{
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(-1));
+    bool ret = IsRealtimeTask(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestIsRealtimeTaskFopenFailed)
+{
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(static_cast<FILE *>(nullptr)));
+    bool ret = IsRealtimeTask(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestIsRealtimeTaskFgetsFailed)
+{
+    static FILE fake_file;
+    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&fake_file));
+    MOCKER(fgets).stubs().will(returnValue(static_cast<char *>(nullptr)));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsRealtimeTask(1234);
+    EXPECT_EQ(false, ret);
+}
+
+TEST_F(ManageTest, TestCheckPidWithShouldBlockPid)
+{
+    int ret;
+    pid_t pid = 1;  // swapper/init
+
+    MOCKER(GetPidType).stubs().will(returnValue(VM_TYPE));
+    MOCKER(PidIsValid).stubs().will(returnValue(true));
+    // ShouldBlockPid will be called for pid=1 and return true
+    ret = CheckPid(pid);
+    EXPECT_EQ(-EPERM, ret);
 }

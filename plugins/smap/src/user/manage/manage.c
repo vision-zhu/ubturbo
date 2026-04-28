@@ -156,6 +156,125 @@ bool PidIsValid(pid_t pid)
     return access(path, F_OK) == 0;
 }
 
+#define PF_KTHREAD 0x00200000
+#define SCHED_FIFO 1
+#define SCHED_RR 2
+
+static bool IsKernelThread(pid_t pid)
+{
+    char path[64];
+    char line[MAX_LINE_LENGTH];
+    FILE *fp;
+    unsigned long flags;
+    int ret;
+
+    ret = snprintf_s(path, sizeof(path), sizeof(path), "/proc/%d/stat", pid);
+    if (ret == -1) {
+        return false;
+    }
+
+    fp = fopen(path, "r");
+    if (!fp) {
+        return false;
+    }
+
+    if (fgets(line, sizeof(line), fp) == NULL) {
+        fclose(fp);
+        return false;
+    }
+    fclose(fp);
+
+    // stat格式: pid (comm) state ppid pgrp session tty_nr tpgid flags ...
+    // flags在第9个字段，跳过前8个字段
+    char *ptr = line;
+    int field = 0;
+    while (field < 8 && ptr) {
+        ptr = strchr(ptr, ' ');
+        if (ptr) {
+            ptr++;
+            field++;
+        }
+    }
+    if (!ptr) {
+        return false;
+    }
+
+    if (sscanf_s(ptr, "%lu", &flags) != 1) {
+        return false;
+    }
+
+    return (flags & PF_KTHREAD) != 0;
+}
+
+static bool IsRealtimeTask(pid_t pid)
+{
+    char path[64];
+    char line[MAX_LINE_LENGTH];
+    FILE *fp;
+    int policy;
+    int ret;
+
+    ret = snprintf_s(path, sizeof(path), sizeof(path), "/proc/%d/stat", pid);
+    if (ret == -1) {
+        return false;
+    }
+
+    fp = fopen(path, "r");
+    if (!fp) {
+        return false;
+    }
+
+    if (fgets(line, sizeof(line), fp) == NULL) {
+        fclose(fp);
+        return false;
+    }
+    fclose(fp);
+
+    // stat格式: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime priority nice num_threads itrealvalue starttime vsize rss rsslim startcode endcode startstack kstkesp kstkeip signal blocked sigignore sigcatch wchan nswap cnswap exit_signal processor rt_priority policy ...
+    // policy在第41个字段
+    char *ptr = line;
+    int field = 0;
+    while (field < 40 && ptr) {
+        ptr = strchr(ptr, ' ');
+        if (ptr) {
+            ptr++;
+            field++;
+        }
+    }
+    if (!ptr) {
+        return false;
+    }
+
+    if (sscanf_s(ptr, "%d", &policy) != 1) {
+        return false;
+    }
+
+    return policy == SCHED_FIFO || policy == SCHED_RR;
+}
+
+bool ShouldBlockPid(pid_t pid)
+{
+    // swapper + init
+    if (pid <= 1) {
+        SMAP_LOGGER_WARNING("pid %d is swapper or init, blocked.", pid);
+        return true;
+    }
+
+    // 内核线程
+    if (IsKernelThread(pid)) {
+        SMAP_LOGGER_WARNING("pid %d is kernel thread, blocked.", pid);
+        return true;
+    }
+
+    // 实时任务
+    if (IsRealtimeTask(pid)) {
+        SMAP_LOGGER_WARNING("pid %d is realtime task, blocked.", pid);
+        return true;
+    }
+
+    return false;
+}
+
 int IsQemuTask(pid_t pid)
 {
     char comm[BUFFER_SIZE];
@@ -499,6 +618,10 @@ static int CheckPid(pid_t pid)
     if (!PidIsValid(pid)) {
         SMAP_LOGGER_ERROR("Input pid %d is invalid.", pid);
         return -ESRCH;
+    }
+    if (ShouldBlockPid(pid)) {
+        SMAP_LOGGER_ERROR("Pid %d should be blocked, not allowed to migrate.", pid);
+        return -EPERM;
     }
     ret = IsQemuTask(pid);
     if (ret != type) {

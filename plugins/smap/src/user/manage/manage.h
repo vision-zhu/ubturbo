@@ -373,6 +373,8 @@ int LoadMangerNrVmNum(void);
 
 bool PidIsValid(pid_t pid);
 
+bool ShouldBlockPid(pid_t pid);
+
 int IsQemuTask(pid_t pid);
 
 PidType GetPidType(struct ProcessManager *manager);
