@@ -218,12 +218,12 @@ TEST_F(AccessedBitTest, SmapCreatTrackingInfoFile)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" int scan_forward_2M(pid_t pid, int page_size, scan_type type);
+extern "C" int scan_forward_2M(pid_t pid, int page_size, scan_type type, struct access_pid *ap);
 TEST_F(AccessedBitTest, scan_accessed_bit_forward)
 {
     int ret;
     int page_size = PAGE_SIZE_4K;
-    ret = scan_accessed_bit_forward_vm(1, page_size, NO_SCAN);
+    ret = scan_accessed_bit_forward_vm(1, page_size, NO_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -296,14 +296,14 @@ TEST_F(AccessedBitTest, GetHamPagesFreqs)
     list_del(&info.node);
 }
 
-extern "C" int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va);
+extern "C" int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va, struct access_pid *ap);
 TEST_F(AccessedBitTest, hva_to_hpa_hugetlb)
 {
     int ret;
     struct kvm kvm = { .mm = NULL };
 
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
-    ret = hva_to_hpa_hugetlb(nullptr, 0);
+    ret = hva_to_hpa_hugetlb(nullptr, 0, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -314,7 +314,7 @@ TEST_F(AccessedBitTest, hva_to_hpa_hugetlb_two)
     struct kvm kvm = { .mm = NULL };
 
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_4K));
-    ret = hva_to_hpa_hugetlb(&kvm, 0);
+    ret = hva_to_hpa_hugetlb(&kvm, 0, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -327,14 +327,14 @@ TEST_F(AccessedBitTest, hva_to_hpa_hugetlb_three)
 
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
     MOCKER(huge_pte_offset).stubs().will(returnValue((pte_t *)nullptr));
-    ret = hva_to_hpa_hugetlb(&kvm, 0);
+    ret = hva_to_hpa_hugetlb(&kvm, 0, nullptr);
     EXPECT_EQ(-EFAULT, ret);
 
     GlobalMockObject::verify();
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
     MOCKER(huge_pte_offset).stubs().will(returnValue(&pte));
     MOCKER(smap_huge_ptep_get).stubs().will(returnValue(pte));
-    ret = hva_to_hpa_hugetlb(&kvm, 0);
+    ret = hva_to_hpa_hugetlb(&kvm, 0, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -348,20 +348,20 @@ TEST_F(AccessedBitTest, hva_to_hpa_hugetlb_success)
     MOCKER(huge_page_size).stubs().will(returnValue(PAGE_SIZE_2M));
     MOCKER(huge_pte_offset).stubs().will(returnValue(&pte));
     MOCKER(actc_data_add).expects(once()).will(ignoreReturnValue());
-    ret = hva_to_hpa_hugetlb(&kvm, 0);
+    ret = hva_to_hpa_hugetlb(&kvm, 0, nullptr);
     EXPECT_EQ(0, ret);
 }
 
-extern "C" int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid);
+extern "C" int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid, struct access_pid *ap);
 TEST_F(AccessedBitTest, hvaToHpaWithNullKvm)
 {
     int ret;
     struct kvm kvm = { .mm = NULL };
 
-    ret = hva_to_hpa(nullptr, 0, NORMAL_SCAN, 1);
+    ret = hva_to_hpa(nullptr, 0, NORMAL_SCAN, 1, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 
-    ret = hva_to_hpa(&kvm, 0, NORMAL_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, NORMAL_SCAN, 1, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -374,7 +374,7 @@ TEST_F(AccessedBitTest, hvaToHpaWithErrorVma)
     struct vm_area_struct vma;
 
     MOCKER(find_vma).stubs().will(returnValue(static_cast<struct vm_area_struct *>(nullptr)));
-    ret = hva_to_hpa(&kvm, 0, NORMAL_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, NORMAL_SCAN, 1, nullptr);
     EXPECT_EQ(-EFAULT, ret);
 }
 
@@ -390,9 +390,9 @@ TEST_F(AccessedBitTest, hvaToHpaTest)
     // since all following tests should success
     MOCKER(find_vma).stubs().will(returnValue(&vma));
     MOCKER(is_vm_hugetlb_page).stubs().will(returnValue(false));
-    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1, nullptr);
     EXPECT_EQ(0, ret);
-    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1, nullptr);
     EXPECT_EQ(0, ret);
 
     GlobalMockObject::verify();
@@ -404,14 +404,14 @@ TEST_F(AccessedBitTest, hvaToHpaTest)
     MOCKER(hva_to_hpa_hugetlb).stubs()
         .will(returnValue(-EINVAL))
         .then(returnValue(0));
-    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1, nullptr);
     EXPECT_EQ(0, ret);
-    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1);
+    ret = hva_to_hpa(&kvm, 0, HAM_SCAN, 1, nullptr);
     EXPECT_EQ(0, ret);
 }
 
 extern "C" struct vm_area_struct *get_vma_if_huge_page(struct kvm *kvm, unsigned long host_va);
-extern "C" int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size, scan_type type);
+extern "C" int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size, scan_type type, struct access_pid *ap);
 TEST_F(AccessedBitTest, scanKvmMemslotsWithNullKvm)
 {
     int ret;
@@ -426,11 +426,11 @@ TEST_F(AccessedBitTest, scanKvmMemslotsWithNullKvm)
     };
     struct kvm_memslots slots;
 
-    ret = scan_kvm_memslots(&kvm, 1, 0, STATISTIC_SCAN);
+    ret = scan_kvm_memslots(&kvm, 1, 0, STATISTIC_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 
     MOCKER(kvm_memslots).stubs().will(returnValue((struct kvm_memslots *)nullptr));
-    ret = scan_kvm_memslots(&kvm, 1, 0, STATISTIC_SCAN);
+    ret = scan_kvm_memslots(&kvm, 1, 0, STATISTIC_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -468,7 +468,7 @@ TEST_F(AccessedBitTest, scanKvmMemslotsTest)
         .then(returnValue(0));
     MOCKER(smap_kvm_pgtable_stage2_mkold).stubs().will(returnValue(true));
     MOCKER(kvm_flush_remote_tlbs).stubs().will(ignoreReturnValue());
-    ret = scan_kvm_memslots(&kvm, 1, PAGE_SIZE_2M, STATISTIC_SCAN);
+    ret = scan_kvm_memslots(&kvm, 1, PAGE_SIZE_2M, STATISTIC_SCAN, nullptr);
     EXPECT_EQ(0, ret);
 }
 
@@ -675,7 +675,7 @@ TEST_F(AccessedBitTest, scan_forward_2M_pid_fail)
     MOCKER(find_get_pid).stubs().will(returnValue(static_cast<struct pid *>(nullptr)));
     MOCKER(get_pid_task).stubs().will(returnValue((struct task_struct *)nullptr));
     MOCKER(put_pid).expects(once()).will(ignoreReturnValue());
-    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN);
+    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -687,7 +687,7 @@ TEST_F(AccessedBitTest, scan_forward_2M_kvm_file_fail)
     MOCKER(get_pid_task).stubs().will(returnValue(&task));
     MOCKER(get_kvm_file_from_task).stubs().will(returnValue(static_cast<struct file *>(nullptr)));
     MOCKER(release_resources).expects(once()).will(ignoreReturnValue());
-    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN);
+    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -703,7 +703,7 @@ TEST_F(AccessedBitTest, scan_forward_2M_success)
     MOCKER(pre_scan_kvm_memslots).expects(once()).will(returnValue(0));
     MOCKER(scan_kvm_memslots).stubs().will(returnValue(0));
     MOCKER(post_scan_kvm_memslots).expects(once()).will(ignoreReturnValue());
-    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN);
+    ret = scan_forward_2M(1, PAGE_SIZE_2M, NORMAL_SCAN, nullptr);
     EXPECT_EQ(0, ret);
 }
 
@@ -791,7 +791,7 @@ TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_fail)
     struct mm_struct mm;
 
     MOCKER(mock_get_mm_by_pid).stubs().will(returnValue(static_cast<struct mm_struct *>(nullptr)));
-    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN);
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }
 
@@ -804,12 +804,12 @@ TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_success)
     MOCKER(IS_ERR).stubs().will(returnValue(false));
     MOCKER(take_vma_snapshot).stubs().will(returnValue(0));
     MOCKER(kfree).stubs().will(ignoreReturnValue());
-    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN);
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_4K, NORMAL_SCAN, nullptr);
     EXPECT_EQ(0, ret);
 }
 
 TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_invalid_page)
 {
-    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_2M, NORMAL_SCAN);
+    int ret = scan_accessed_bit_forward_mm(1, PAGE_SIZE_2M, NORMAL_SCAN, nullptr);
     EXPECT_EQ(-EINVAL, ret);
 }

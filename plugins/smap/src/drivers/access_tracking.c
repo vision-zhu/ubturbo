@@ -445,19 +445,42 @@ static void work_func(struct work_struct *work)
 	struct delayed_work *scan_work;
 	ktime_t start_time, end_time;
 	s64 scan_time;
+	struct access_pid *ap_for_scan = NULL;
+	u64 nodes_page_count[SMAP_MAX_NUMNODES] = { 0 };
 
 	unsigned long scan_delay_ms;
 	start_time = ktime_get();
 	scan_work = to_delay_work(work);
 	ap = delay_work_to_ap(scan_work);
+
+	if (ap->type == NORMAL_SCAN && ap->cur_times + 1 == ap->ntimes) {
+		list_for_each_entry(adev, &access_dev, list) {
+			down_read(&adev->buffer_lock);
+			nodes_page_count[adev->node] = adev->page_count;
+			up_read(&adev->buffer_lock);
+		}
+		clean_last_ap_data(ap);
+		ret = init_ap_bm(SMAP_MAX_NUMNODES, nodes_page_count, ap);
+		if (ret) {
+			pr_err("unable to init access bitmap for pid: %d\n", ap->pid);
+		} else {
+			ret = init_vm_mapping(&ap->info);
+			if (ret) {
+				pr_err("unable to init vm mapping for pid: %d\n", ap->pid);
+			} else {
+				ap_for_scan = ap;
+			}
+		}
+	}
+
 	adev_buffer_down_read();
 	page_size = get_page_size(adev);
 	if (page_size == g_pagesize_huge) {
 		ret = scan_accessed_bit_forward_vm(ap->pid, page_size,
-						   ap->type);
+						   ap->type, ap_for_scan);
 	} else {
 		ret = scan_accessed_bit_forward_mm(ap->pid, page_size,
-						   ap->type);
+						   ap->type, ap_for_scan);
 	}
 	adev_buffer_up_read();
 	end_time = ktime_get();
@@ -479,10 +502,6 @@ static void work_func(struct work_struct *work)
 		queue_delayed_work(adev->scanq, &ap->scan_work, msecs_to_jiffies(scan_delay_ms));
 		ap->last_scan_end = ktime_get();
 	} else {
-		pr_debug("pid[%d] start to walk pagemap\n", ap->pid);
-		if (ap->type != STATISTIC_SCAN) {
-			access_walk_pagemap(ap);
-		}
 		complete(&ap->work_done);
 	}
 }

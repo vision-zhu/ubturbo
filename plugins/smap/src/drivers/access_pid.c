@@ -166,7 +166,7 @@ static inline void post_scan_kvm_gfn(struct kvm *kvm, int idx)
 	srcu_read_unlock(&kvm->srcu, idx);
 }
 
-static int init_vm_mapping(struct vm_mapping_info *info)
+int init_vm_mapping(struct vm_mapping_info *info)
 {
 	if (info->vm_size) {
 		info->mapping = vmalloc(info->vm_size * sizeof(u32));
@@ -1091,7 +1091,7 @@ static void free_ap_white_list_bm(struct access_pid *ap)
 	}
 }
 
-static int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
+int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
 {
 	size_t nr_bytes = sizeof(unsigned long);
 	int i;

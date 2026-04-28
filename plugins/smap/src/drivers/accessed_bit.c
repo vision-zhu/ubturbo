@@ -376,7 +376,8 @@ static void actc_data_add(phys_addr_t paddr, u32 page_size)
 		adev->access_bit_actc_data[pa_index]++;
 }
 
-static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)
+static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va,
+			      struct access_pid *ap)
 {
 	struct hstate *h;
 	unsigned long hmask;
@@ -407,6 +408,9 @@ static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va)
 
 	paddr = PFN_PHYS(pte_pfn(pte));
 	actc_data_add(paddr, g_pagesize_huge);
+
+	if (ap)
+		add_to_bm_huge(host_va, paddr, ap);
 
 	return 0;
 }
@@ -495,7 +499,8 @@ static struct vm_area_struct *get_vma_if_huge_page(struct kvm *kvm,
 	return vma;
 }
 
-static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid)
+static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid,
+		      struct access_pid *ap)
 {
 	int ret = 0;
 	struct vm_area_struct *vma;
@@ -511,7 +516,7 @@ static int hva_to_hpa(struct kvm *kvm, u64 host_va, scan_type type, pid_t pid)
 		if (type == HAM_SCAN) {
 			hva_to_hpa_ham(kvm, host_va, pid);
 		} else {
-			ret = hva_to_hpa_hugetlb(kvm, host_va);
+			ret = hva_to_hpa_hugetlb(kvm, host_va, ap);
 		}
 	}
 	return ret;
@@ -606,7 +611,7 @@ static bool memslot_is_mem(struct kvm_memory_slot *memslot)
 }
 
 static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
-			     scan_type type)
+			     scan_type type, struct access_pid *ap)
 {
 	struct kvm_memslots *slots;
 	struct kvm_memory_slot *memslot;
@@ -655,7 +660,7 @@ static int scan_kvm_memslots(struct kvm *kvm, pid_t pid, int page_size,
 				if (cur_index >= nr_pages)
 					break;
 			} else {
-				ret = hva_to_hpa(kvm, hva, type, pid);
+				ret = hva_to_hpa(kvm, hva, type, pid, ap);
 				if (ret)
 					continue;
 			}
@@ -1150,7 +1155,8 @@ static void release_resources(struct file *filp, struct task_struct *task,
 		put_pid(pid);
 }
 
-static int scan_forward_2M(pid_t pid, int page_size, scan_type type)
+static int scan_forward_2M(pid_t pid, int page_size, scan_type type,
+			   struct access_pid *ap)
 {
 	int srcu_idx;
 	struct file *filp;
@@ -1178,7 +1184,7 @@ static int scan_forward_2M(pid_t pid, int page_size, scan_type type)
 		return -EINVAL;
 	}
 	srcu_idx = pre_scan_kvm_memslots(kvm);
-	if (scan_kvm_memslots(kvm, pid, page_size, type))
+	if (scan_kvm_memslots(kvm, pid, page_size, type, ap))
 		pr_err("failed to scan kvm mem slots for pid: %d\n", pid);
 
 	post_scan_kvm_memslots(kvm, srcu_idx);
@@ -1213,6 +1219,8 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		if (pte_walk->type == STATISTIC_SCAN)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
 		actc_data_add(paddr, PAGE_SIZE);
+		if (pte_walk->ap)
+			add_to_bm_normal(paddr, pte_walk->ap);
 		pte_walk->flag = true;
 		__ptep_test_and_clear_young(NULL, 0, pte);
 	}
@@ -1348,14 +1356,15 @@ static void update_and_cleanup_statistic(int pid, struct pte_walk *pte_walk,
 	}
 }
 
-static int scan_forward_4k_mm(int pid, int page_size, scan_type type)
+static int scan_forward_4k_mm(int pid, int page_size, scan_type type,
+			      struct access_pid *ap)
 {
 	int ret;
 	int i = 0;
 	int vma_count = 0;
 	struct mm_struct *mm;
 	struct smap_vma_struct *vma_array = NULL;
-	struct pte_walk pte_walk = { .flag = false };
+	struct pte_walk pte_walk = { .flag = false, .ap = ap };
 	pte_walk.pid = pid;
 	pte_walk.type = type;
 
@@ -1463,19 +1472,21 @@ int pid_pte_mkold(struct access_pid *ap)
 	return 0;
 }
 
-int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type)
+int scan_accessed_bit_forward_vm(pid_t pid, int page_size, scan_type type,
+				  struct access_pid *ap)
 {
 	if (page_size == g_pagesize_huge) {
-		return scan_forward_2M(pid, page_size, type);
+		return scan_forward_2M(pid, page_size, type, ap);
 	} else {
 		return -EINVAL;
 	}
 }
 
-int scan_accessed_bit_forward_mm(pid_t pid, int page_size, scan_type type)
+int scan_accessed_bit_forward_mm(pid_t pid, int page_size, scan_type type,
+				  struct access_pid *ap)
 {
 	if (page_size == PAGE_SIZE) {
-		return scan_forward_4k_mm(pid, page_size, type);
+		return scan_forward_4k_mm(pid, page_size, type, ap);
 	}
 	return -EINVAL;
 }
