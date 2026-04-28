@@ -67,7 +67,7 @@ const char *MockVirDomainGetNameFunc(void *name)
     return nullptr;
 }
 
-int MockVirConnectListAllDomainsFunc(void *x, void ***y, VirConnectListAllDomainsFlags z)
+int MockVirConnectListAllDomainsFunc(void *x, void ***y, virConnectListAllDomainsFlags z)
 {
     return 0;
 }
@@ -625,7 +625,7 @@ TEST_F(TestRmrsLibvirtModule, VirConnectCloseShouldReturnErrorWhenDlsymReturnNul
     EXPECT_EQ(result, nullptr);
 }
 
-int VirConnectListAllDomainsMock(void *data, void ***ptr, VirConnectListAllDomainsFlags)
+int VirConnectListAllDomainsMock(void *data, void ***ptr, virConnectListAllDomainsFlags)
 {
     return 0;
 }
