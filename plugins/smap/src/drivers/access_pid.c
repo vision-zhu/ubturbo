@@ -166,7 +166,7 @@ static inline void post_scan_kvm_gfn(struct kvm *kvm, int idx)
 	srcu_read_unlock(&kvm->srcu, idx);
 }
 
-static int init_vm_mapping(struct vm_mapping_info *info)
+int init_vm_mapping(struct vm_mapping_info *info)
 {
 	if (info->vm_size) {
 		info->mapping = vmalloc(info->vm_size * sizeof(u32));
@@ -445,6 +445,11 @@ int init_access_pid(struct access_add_pid_payload *payload,
 			kfree(ap);
 			return -EINVAL;
 		}
+	}
+	ret = access_walk_pagemap_prepare(ap);
+	if (ret) {
+		kfree(ap);
+		return ret;
 	}
 	ret = create_procfs(ap);
 	if (ret) {
@@ -1091,7 +1096,7 @@ static void free_ap_white_list_bm(struct access_pid *ap)
 	}
 }
 
-static int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
+int init_ap_bm(int node_len, u64 *node_page_count, struct access_pid *ap)
 {
 	size_t nr_bytes = sizeof(unsigned long);
 	int i;
@@ -1154,12 +1159,11 @@ void clean_last_ap_data(struct access_pid *ap)
 	}
 }
 
-int access_walk_pagemap(struct access_pid *ap)
+int access_walk_pagemap_prepare(struct access_pid *ap)
 {
 	int ret;
 	struct access_tracking_dev *adev;
 	u64 nodes_page_count[SMAP_MAX_NUMNODES] = { 0 };
-	struct pagemapread pm = { 0 };
 	if (!ap) {
 		return -EINVAL;
 	}
@@ -1178,6 +1182,20 @@ int access_walk_pagemap(struct access_pid *ap)
 		return ret;
 	}
 	ret = init_vm_mapping(&ap->info);
+	return ret;
+}
+
+int access_walk_pagemap(struct access_pid *ap)
+{
+	int ret;
+	struct pagemapread pm = { 0 };
+	if (!ap) {
+		return -EINVAL;
+	}
+	if (ap->type != NORMAL_SCAN) {
+		return 0;
+	}
+	ret = access_walk_pagemap_prepare(ap);
 	if (ret)
 		return ret;
 	pm.ap = ap;
