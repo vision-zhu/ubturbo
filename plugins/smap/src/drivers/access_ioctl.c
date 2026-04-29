@@ -37,6 +37,11 @@ struct proc_dir_entry *smap_procfs_root = NULL;
 static char *smap_bitmap_buf = NULL;
 static size_t smap_buf_len = 0;
 
+/* Buffer for reading mapping data separately */
+static char *smap_mapping_buf = NULL;
+static size_t smap_mapping_buf_len = 0;
+static pid_t smap_mapping_pid = -1;
+
 static int check_msg_validity(struct access_add_pid_msg *msg)
 {
 	if (!msg) {
@@ -260,7 +265,7 @@ static size_t calc_bitmap_len(void)
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 		}
-		buf_len += sizeof(u32) * ap->info.vm_size;
+		/* mapping is no longer included in bitmap buffer */
 	}
 	up_read(&ap_data.lock);
 
@@ -406,7 +411,7 @@ static void write_bitmap_buffer(char **buffer)
 		write_bitmap_vmsize(buffer, ap);
 		write_bitmap_paddrbm(buffer, ap);
 		write_bitmap_white_list(buffer, ap);
-		write_bitmap_mappig(buffer, ap);
+		// mapping is now read separately via SMAP_READ_MAPPING_MAGIC
 	}
 	up_read(&ap_data.lock);
 }
@@ -585,10 +590,112 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 	return rc;
 }
 
+
+static ssize_t read_mapping(char __user *buf, size_t cnt, loff_t *loff)
+{
+	ssize_t len;
+	struct access_pid *ap;
+	struct mapping_read_msg msg;
+	size_t mapping_size;
+
+	pr_debug("reading mapping, cnt %zu, loff %lld\n", cnt, *loff);
+
+	if (cnt == 0)
+		return 0;
+
+	/* First read: get mapping_read_msg from user to specify which pid */
+	if (*loff == 0) {
+		if (cnt < sizeof(struct mapping_read_msg)) {
+			pr_err("read_mapping: buffer too small for mapping_read_msg\n");
+			return -EINVAL;
+		}
+		if (copy_from_user(&msg, buf, sizeof(msg))) {
+			pr_err("read_mapping: failed to copy mapping_read_msg from user\n");
+			return -EFAULT;
+		}
+
+		/* Find the process with the specified pid */
+		smap_mapping_pid = msg.pid;
+		smap_mapping_buf_len = 0;
+
+		down_read(&ap_data.lock);
+		list_for_each_entry(ap, &ap_data.list, node) {
+			if (ap->pid == msg.pid && ap->type == NORMAL_SCAN) {
+				mapping_size = sizeof(u32) * ap->info.vm_size;
+				if (mapping_size == 0 || !ap->info.mapping) {
+					pr_debug("pid %d has no mapping data\n", msg.pid);
+					break;
+				}
+				vfree(smap_mapping_buf);
+				smap_mapping_buf = vmalloc(mapping_size);
+				if (!smap_mapping_buf) {
+					pr_err("read_mapping: failed to alloc mapping buffer\n");
+					up_read(&ap_data.lock);
+					return -ENOMEM;
+				}
+				memcpy(smap_mapping_buf, ap->info.mapping, mapping_size);
+				smap_mapping_buf_len = mapping_size;
+				pr_debug("read_mapping: pid %d, vm_size %u, mapping_size %zu\n",
+					 msg.pid, ap->info.vm_size, mapping_size);
+				break;
+			}
+		}
+		up_read(&ap_data.lock);
+
+		/* Return mapping size to user */
+		msg.vm_size = smap_mapping_buf_len / sizeof(u32);
+		if (copy_to_user(buf, &msg, sizeof(msg))) {
+			pr_err("read_mapping: failed to copy mapping_read_msg to user\n");
+			vfree(smap_mapping_buf);
+			smap_mapping_buf = NULL;
+			smap_mapping_buf_len = 0;
+			return -EFAULT;
+		}
+
+		/* If no mapping data, return 0 */
+		if (smap_mapping_buf_len == 0) {
+			pr_debug("read_mapping: no mapping data for pid %d\n", msg.pid);
+			return sizeof(msg);
+		}
+
+		*loff = sizeof(msg);
+		return sizeof(msg);
+	}
+
+	/* Second read: copy actual mapping data */
+	if (smap_mapping_buf == NULL || smap_mapping_buf_len == 0) {
+		pr_err("read_mapping: no mapping buffer prepared\n");
+		return -EINVAL;
+	}
+
+	if (*loff < sizeof(struct mapping_read_msg)) {
+		*loff = sizeof(struct mapping_read_msg);
+	}
+
+	len = smap_mapping_buf_len;
+	if (copy_to_user(buf, smap_mapping_buf, len)) {
+		pr_err("read_mapping: failed to copy mapping data to user\n");
+		len = -EFAULT;
+	}
+
+	vfree(smap_mapping_buf);
+	smap_mapping_buf = NULL;
+	smap_mapping_buf_len = 0;
+	smap_mapping_pid = -1;
+
+	return len;
+}
 static ssize_t smap_access_read(struct file *file, char __user *buf, size_t cnt,
-				loff_t *loff)
+					loff_t *loff)
 {
 	ssize_t ret;
+
+	/* Check for special offset to read mapping data separately */
+	if (*loff == SMAP_READ_MAPPING_MAGIC) {
+		pr_debug("read with magic offset, switching to read_mapping\n");
+		*loff = 0;  /* Reset offset for read_mapping internal use */
+		return read_mapping(buf, cnt, loff);
+	}
 
 	if (!check_and_clear_ap_state(&ap_data, AP_STATE_READ)) {
 		pr_err("read bitmap of access pid is not allowed\n");
@@ -604,6 +711,7 @@ static ssize_t smap_access_read(struct file *file, char __user *buf, size_t cnt,
 		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ);
 	return ret;
 }
+
 
 static struct file_operations smap_access_fops = {
 	.owner = THIS_MODULE,

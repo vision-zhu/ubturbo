@@ -240,6 +240,8 @@ struct ProcessAttribute {
     StrategyAttribute strategyAttr;
     ScanAttribute scanAttr;
     VMPidAttribute vmPidAttr;
+    uint32_t *cachedMapping;   /* Cached mapping data from kernel */
+    uint32_t cachedVmSize;     /* vm_size corresponding to cached mapping */
     struct ProcessAttribute *next;
 };
 typedef struct ProcessAttribute ProcessAttr;
@@ -489,6 +491,7 @@ ProcessAttr *GetProcessAttrLocked(pid_t pid);
 
 bool MigOutIsDone(ProcessAttr *attr, bool *isMultiNumaPid);
 FILE *OpenNumaMaps(pid_t pid);
+int LoadMappingForProcess(ProcessAttr *attr);
 
 static inline uint64_t KBToHugePage(uint64_t memSize)
 {

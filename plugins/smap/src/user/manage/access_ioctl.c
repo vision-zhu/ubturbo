@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "smap_user_log.h"
 #include "thread.h"
@@ -146,5 +147,62 @@ int AccessRead(size_t len, char *buf)
         SMAP_LOGGER_ERROR("access ioctl read expect %zu, actual %zd.", len, totalRead);
         return -EIO;
     }
+    return 0;
+}
+
+int AccessReadMapping(pid_t pid, uint32_t **mapping, uint32_t *vmSize)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    struct MappingReadMsg msg = { .pid = pid, .vmSize = 0 };
+    ssize_t bytesRead;
+    char buf[sizeof(struct MappingReadMsg)];
+    loff_t offset = SMAP_READ_MAPPING_MAGIC;
+
+    /* First read with magic offset to get vmSize */
+    bytesRead = pread(manager->fds.access, buf, sizeof(msg), offset);
+    if (bytesRead < 0) {
+        SMAP_LOGGER_ERROR("AccessReadMapping: first read error: %zd.", bytesRead);
+        return -EIO;
+    }
+    if (bytesRead != sizeof(msg)) {
+        SMAP_LOGGER_ERROR("AccessReadMapping: first read got %zd, expected %zu.", bytesRead, sizeof(msg));
+        return -EIO;
+    }
+
+    /* Parse response */
+    memcpy(&msg, buf, sizeof(msg));
+    *vmSize = msg.vmSize;
+    SMAP_LOGGER_INFO("AccessReadMapping: pid %d, vmSize %u.", pid, msg.vmSize);
+
+    if (msg.vmSize == 0) {
+        SMAP_LOGGER_INFO("AccessReadMapping: no mapping data for pid %d.", pid);
+        *mapping = NULL;
+        return 0;
+    }
+
+    /* Allocate buffer for mapping data */
+    size_t mappingSize = sizeof(uint32_t) * msg.vmSize;
+    *mapping = malloc(mappingSize);
+    if (!*mapping) {
+        SMAP_LOGGER_ERROR("AccessReadMapping: malloc failed for size %zu.", mappingSize);
+        return -ENOMEM;
+    }
+
+    /* Second read to get actual mapping data */
+    bytesRead = read(manager->fds.access, *mapping, mappingSize);
+    if (bytesRead < 0) {
+        SMAP_LOGGER_ERROR("AccessReadMapping: second read error: %zd.", bytesRead);
+        free(*mapping);
+        *mapping = NULL;
+        return -EIO;
+    }
+    if (bytesRead != mappingSize) {
+        SMAP_LOGGER_ERROR("AccessReadMapping: second read got %zd, expected %zu.", bytesRead, mappingSize);
+        free(*mapping);
+        *mapping = NULL;
+        return -EIO;
+    }
+
+    SMAP_LOGGER_INFO("AccessReadMapping: successfully read %zu bytes mapping for pid %d.", mappingSize, pid);
     return 0;
 }

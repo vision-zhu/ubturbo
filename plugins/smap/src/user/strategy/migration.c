@@ -100,6 +100,19 @@ static int BuildMigrationMsg(ProcessAttr *process, struct MigrateMsg *mMsg, uint
     if (ret) {
         return ret;
     }
+
+    /* Load mapping data before first migration */
+    if (process->isFirstMigrate) {
+        ret = LoadMappingForProcess(process);
+        if (ret) {
+            SMAP_LOGGER_WARNING("Load mapping for pid %d failed: %d, migration continues without priority data.",
+                                process->pid, ret);
+        } else {
+            SMAP_LOGGER_INFO("Mapping loaded for pid %d before first migration, vmSize=%u.",
+                             process->pid, process->cachedVmSize);
+        }
+    }
+
     int l2Node = GetAttrL2(process);
     if (IsNodeForbidden(l2Node)) {
         SMAP_LOGGER_INFO("L2 node%d is forbiddened, pid %d stops migrate out.", l2Node, process->pid);

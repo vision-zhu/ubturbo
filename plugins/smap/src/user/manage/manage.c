@@ -224,6 +224,10 @@ static void FreeProceccesAttr(ProcessAttr *attr)
     if (attr->scanAttr.actcData) {
         ResetActcData(attr->scanAttr.actcData, MAX_NODES);
     }
+    if (attr->cachedMapping) {
+        free(attr->cachedMapping);
+        attr->cachedMapping = NULL;
+    }
     free(attr);
 }
 
@@ -423,8 +427,8 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
             continue;
         }
         nrBit++;
-        if (pmb->vmSize && pmb->mapping) {
-            actc[actcLen].prior = pmb->mapping[pmb->mappingOffset + actcLen] & 0xff;
+        if (attr->cachedVmSize && attr->cachedMapping) {
+            actc[actcLen].prior = attr->cachedMapping[pmb->mappingOffset + actcLen] & 0xff;
         } else {
             actc[actcLen].prior = 0;
         }
@@ -478,8 +482,8 @@ static int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, struct 
         SMAP_LOGGER_ERROR("FillActcData pmb is null.");
         return -EINVAL;
     }
-    if (pmb->mapping) {
-        qsort(pmb->mapping, pmb->vmSize, sizeof(*pmb->mapping), MappingAscFunc);
+    if (attr->cachedMapping) {
+        qsort(attr->cachedMapping, attr->cachedVmSize, sizeof(*attr->cachedMapping), MappingAscFunc);
     }
     for (int nid = 0; nid < MAX_NODES; nid++) {
         attr->scanAttr.actcLen[nid] = 0;
@@ -1113,6 +1117,38 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
     return 0;
 }
 
+/*
+ * Load mapping data for a process from kernel via AccessReadMapping
+ * This function should be called before first migration to cache mapping data
+ */
+int LoadMappingForProcess(ProcessAttr *attr)
+{
+    int ret;
+
+    if (!attr) {
+        SMAP_LOGGER_ERROR("LoadMappingForProcess: attr is NULL.");
+        return -EINVAL;
+    }
+
+    /* If mapping is already cached, no need to reload */
+    if (attr->cachedMapping) {
+        SMAP_LOGGER_DEBUG("Pid %d mapping already cached.", attr->pid);
+        return 0;
+    }
+
+    /* Read mapping from kernel using special offset */
+    ret = AccessReadMapping(attr->pid, &attr->cachedMapping, &attr->cachedVmSize);
+    if (ret) {
+        SMAP_LOGGER_ERROR("LoadMappingForProcess: failed for pid %d, ret %d.", attr->pid, ret);
+        attr->cachedMapping = NULL;
+        attr->cachedVmSize = 0;
+        return ret;
+    }
+
+    SMAP_LOGGER_INFO("LoadMappingForProcess: pid %d, cachedVmSize %u.", attr->pid, attr->cachedVmSize);
+    return 0;
+}
+
 static int BuildBitmapBuf(size_t *len, char **buf)
 {
     char *tmpBuf;
@@ -1295,7 +1331,6 @@ static int InitPmbData(struct ProcessMemBitmap *pmb)
 
 static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessMemBitmap *pmb)
 {
-    size_t mappingSize = sizeof(*pmb->mapping);
     int nid;
     size_t newOffset = *offset;
 
@@ -1343,10 +1378,7 @@ static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessM
         SMAP_LOGGER_ERROR("ParseWhiteListBitmap err: %d.", ret);
         return ret;
     }
-    if (pmb->vmSize) {
-        pmb->mapping = (uint32_t *)((char *)buf + newOffset);
-        newOffset += mappingSize * pmb->vmSize;
-    }
+    /* mapping is now read separately via AccessReadMapping */
     SMAP_LOGGER_INFO("read continue %zu %zu.", newOffset, bufLen);
 
     *offset = newOffset;

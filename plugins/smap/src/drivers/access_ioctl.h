@@ -85,6 +85,14 @@ extern struct proc_dir_entry *smap_procfs_root;
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct user_info)
 
+/* Special offset for reading mapping data via pread() */
+#define SMAP_READ_MAPPING_MAGIC 0xFFFFFFFFULL
+
+struct mapping_read_msg {
+	pid_t pid;
+	size_t vm_size;
+};
+
 void access_ioctl_exit(void);
 int access_ioctl_init(void);
 

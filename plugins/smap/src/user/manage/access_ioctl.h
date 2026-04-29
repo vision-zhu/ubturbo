@@ -69,11 +69,20 @@ struct UserInfo {
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct UserInfo)
 
+/* Special offset for reading mapping data via pread() */
+#define SMAP_READ_MAPPING_MAGIC 0xFFFFFFFFULL
+
+struct MappingReadMsg {
+    pid_t pid;
+    uint32_t vmSize;
+};
+
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(size_t *len);
 int AccessIoctlCreateProcfs(struct UserInfo *ui);
 int AccessRead(size_t len, char *buf);
+int AccessReadMapping(pid_t pid, uint32_t **mapping, uint32_t *vmSize);
 
 #endif /* __ACCESS_IOCTL_H__ */
