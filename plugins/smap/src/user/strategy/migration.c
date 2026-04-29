@@ -618,6 +618,38 @@ static void UpdateAllProcessScanTime(ThreadCtx *ctx)
     EnvMutexUnlock(&manager->lock);
 }
 
+static void RestoreNewPidScanTime(ThreadCtx *ctx)
+{
+    int ret;
+    struct ProcessManager *manager = ctx->processManager;
+    ProcessAttr *current;
+    uint32_t scanPeriod;
+    struct AccessAddPidPayload payload;
+
+    EnvMutexLock(&manager->lock);
+    for (current = manager->processes; current; current = current->next) {
+        if (!current->isFirstScan) {
+            continue;
+        }
+        scanPeriod = GetFileConfSwitchConfig() ?
+            GetScanPeriodConfig() : current->sceneInfo.cycles.scanCycle;
+        current->scanTime = scanPeriod;
+        payload.pid = current->pid;
+        payload.numaNodes = current->numaAttr.numaNodes;
+        payload.type = current->scanType;
+        payload.duration = current->duration;
+        payload.scanTime = scanPeriod;
+        ret = AccessIoctlAddPid(1, &payload);
+        if (ret) {
+            SMAP_LOGGER_WARNING("Restore pid %d scan cycle failed, ret=%d.", current->pid, ret);
+        } else {
+            SMAP_LOGGER_INFO("Restore pid %d scan cycle to %ums.", current->pid, scanPeriod);
+            current->isFirstScan = false;
+        }
+    }
+    EnvMutexUnlock(&manager->lock);
+}
+
 static void UpdatePeriodFromConfig(ThreadCtx *ctx)
 {
     if (!GetFileConfSwitchConfig()) {
@@ -679,6 +711,8 @@ int ScanMigrateWork(ThreadCtx *ctx)
     }
     ret = PerformMigration(manager);
     SMAP_LOGGER_INFO("Migration result: %d.", ret);
+    // 恢复新PID的扫描周期
+    RestoreNewPidScanTime(ctx);
 out:
     // 启动扫描
     EnableTracking(manager);
