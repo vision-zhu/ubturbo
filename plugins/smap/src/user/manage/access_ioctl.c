@@ -124,6 +124,23 @@ int AccessIoctlCreateProcfs(struct UserInfo *ui)
     return ret;
 }
 
+int AccessIoctlGetMapping(pid_t pid, uint32_t vmSize, uint32_t *mapping)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    struct MappingInfoPayload msg = {
+        .pid = pid,
+        .vmSize = vmSize,
+        .mapping = mapping,
+    };
+
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_MAPPING, &msg);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("access get mapping error: %d\n", -errno);
+        ret = -EBADF;
+    }
+    return ret;
+}
+
 int AccessRead(size_t len, char *buf)
 {
     struct ProcessManager *manager = GetProcessManager();

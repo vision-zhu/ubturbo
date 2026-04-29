@@ -727,6 +727,8 @@ TEST_F(ManageTest, TestFreeProceccesAttr)
 
     attr = (ProcessAttr *)malloc(sizeof(*attr));
     ASSERT_NE(nullptr, attr);
+    attr->cachedMapping = nullptr;
+    attr->cachedVmSize = 0;
     MOCKER(ResetActcData).stubs().will(ignoreReturnValue());
     FreeProceccesAttr(attr);
 }
@@ -868,7 +870,7 @@ extern "C" ssize_t read(int fd, void *buf, size_t count);
 extern "C" int open(const char *pathname, int flags);
 
 extern "C" int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb);
-extern "C" int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf);
+extern "C" int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf, uint32_t mappingOffset);
 TEST_F(ManageTest, TestFillActcData)
 {
     struct ProcessMemBitmap pmb = { 0 };
@@ -1030,8 +1032,10 @@ TEST_F(ManageTest, TestFillActcByBitmap)
     processes.numaAttr.numaNodes = 0b1;
     processes.walkPage.nrPages[0] = 4;
     processes.scanAttr.actcData[0] = (ActcData *)malloc(sizeof(ActcData) * 4);
+    processes.cachedMapping = NULL;
+    processes.cachedVmSize = 0;
 
-    ret = FillActcByBitmap(&processes, L1, &pmb, &apf);
+    ret = FillActcByBitmap(&processes, L1, &pmb, &apf, 0);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(0, processes.scanAttr.actcData[0][0].addr);
     EXPECT_EQ(14, processes.scanAttr.actcData[0][0].freq);

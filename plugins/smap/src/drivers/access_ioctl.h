@@ -59,6 +59,12 @@ struct tracking_info_payload {
 	actc_t *data;
 };
 
+struct mapping_info_payload {
+	pid_t pid;
+	u32 vm_size;
+	u32 *mapping;
+};
+
 struct access_pid_freq_msg {
 	pid_t pid;
 	size_t len[SMAP_MAX_NUMNODES];
@@ -84,6 +90,7 @@ extern struct proc_dir_entry *smap_procfs_root;
 #define SMAP_ACCESS_GET_TRACKING \
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct user_info)
+#define SMAP_ACCESS_GET_MAPPING _IOW(SMAP_ACCESS_MAGIC, 7, struct mapping_info_payload)
 
 void access_ioctl_exit(void);
 int access_ioctl_init(void);

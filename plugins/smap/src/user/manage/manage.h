@@ -229,6 +229,8 @@ struct ProcessAttribute {
     StrategyAttribute strategyAttr;
     ScanAttribute scanAttr;
     VMPidAttribute vmPidAttr;
+    uint32_t *cachedMapping; // 缓存的mapping数据
+    uint32_t cachedVmSize; // 缓存的vm_size
     struct ProcessAttribute *next;
 };
 typedef struct ProcessAttribute ProcessAttr;

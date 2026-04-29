@@ -260,7 +260,6 @@ static size_t calc_bitmap_len(void)
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 		}
-		buf_len += sizeof(u32) * ap->info.vm_size;
 	}
 	up_read(&ap_data.lock);
 
@@ -406,7 +405,6 @@ static void write_bitmap_buffer(char **buffer)
 		write_bitmap_vmsize(buffer, ap);
 		write_bitmap_paddrbm(buffer, ap);
 		write_bitmap_white_list(buffer, ap);
-		write_bitmap_mappig(buffer, ap);
 	}
 	up_read(&ap_data.lock);
 }
@@ -554,6 +552,68 @@ out_free_payload:
 	return ret;
 }
 
+static long ioctl_get_mapping(void __user *argp)
+{
+	int ret = 0;
+	struct mapping_info_payload msg;
+	struct access_pid *ap;
+	u32 *mapping_data = NULL;
+	size_t mapping_size;
+
+	pr_info("Receive ioctl get mapping\n");
+	if (copy_from_user(&msg, argp, sizeof(msg)))
+		return -EFAULT;
+
+	if (msg.vm_size == 0) {
+		pr_err("invalid vm_size passed to get mapping\n");
+		return -EINVAL;
+	}
+
+	if (!msg.mapping) {
+		pr_err("null buffer passed to get mapping\n");
+		return -EINVAL;
+	}
+
+	down_read(&ap_data.lock);
+	list_for_each_entry(ap, &ap_data.list, node) {
+		if (ap->pid == msg.pid && ap->type == NORMAL_SCAN && ap->info.mapping) {
+			mapping_size = sizeof(u32) * ap->info.vm_size;
+			if (ap->info.vm_size != msg.vm_size) {
+				pr_err("vm_size mismatch: kernel %u, user %u\n",
+				       ap->info.vm_size, msg.vm_size);
+				ret = -EINVAL;
+				goto out_unlock;
+			}
+			mapping_data = vmalloc(mapping_size);
+			if (!mapping_data) {
+				pr_err("unable to allocate memory for mapping data\n");
+				ret = -ENOMEM;
+				goto out_unlock;
+			}
+			memcpy(mapping_data, ap->info.mapping, mapping_size);
+			break;
+		}
+	}
+out_unlock:
+	up_read(&ap_data.lock);
+
+	if (ret)
+		return ret;
+
+	if (!mapping_data) {
+		pr_info("pid %d has no mapping data\n", msg.pid);
+		return 0;
+	}
+
+	if (copy_to_user(msg.mapping, mapping_data, mapping_size)) {
+		pr_err("failed to copy mapping data to user space\n");
+		ret = -EFAULT;
+	}
+	vfree(mapping_data);
+	pr_info("Exit ioctl get mapping, ret: %d, vm_size: %u\n", ret, msg.vm_size);
+	return ret;
+}
+
 static long smap_access_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
@@ -577,6 +637,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_get_tracking(argp);
 	case SMAP_ACCESS_CREATE_PROCFS:
 		return ioctl_create_smap_procfs(argp);
+	case SMAP_ACCESS_GET_MAPPING:
+		return ioctl_get_mapping(argp);
 	default:
 		rc = -ENOTTY;
 	}

@@ -224,6 +224,11 @@ static void FreeProceccesAttr(ProcessAttr *attr)
     if (attr->scanAttr.actcData) {
         ResetActcData(attr->scanAttr.actcData, MAX_NODES);
     }
+    if (attr->cachedMapping) {
+        free(attr->cachedMapping);
+        attr->cachedMapping = NULL;
+    }
+    attr->cachedVmSize = 0;
     free(attr);
 }
 
@@ -399,7 +404,7 @@ static inline void ClearActcInfo(ProcessAttr *attr, int nid)
     (void)memset_s(&attr->scanAttr.actCount[nid], sizeof(ActCount), 0, sizeof(ActCount));
 }
 
-static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
+static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf, uint32_t mappingOffset)
 {
     size_t i, nrFreq, nrBit, acidx = 0;
     uint16_t freqMax = 0, freqMin = UINT16_MAX;
@@ -423,8 +428,9 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
             continue;
         }
         nrBit++;
-        if (pmb->vmSize && pmb->mapping) {
-            actc[actcLen].prior = pmb->mapping[pmb->mappingOffset + actcLen] & 0xff;
+        // 使用缓存的mapping数据
+        if (attr->cachedVmSize && attr->cachedMapping && (mappingOffset + actcLen) < attr->cachedVmSize) {
+            actc[actcLen].prior = attr->cachedMapping[mappingOffset + actcLen] & 0xff;
         } else {
             actc[actcLen].prior = 0;
         }
@@ -474,21 +480,60 @@ static int MappingAscFunc(const void *map1, const void *map2)
 static int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
 {
     int ret;
+    uint32_t mappingOffset = 0;
     if (!pmb) {
         SMAP_LOGGER_ERROR("FillActcData pmb is null.");
         return -EINVAL;
     }
-    if (pmb->mapping) {
-        qsort(pmb->mapping, pmb->vmSize, sizeof(*pmb->mapping), MappingAscFunc);
+    // 使用缓存的mapping数据进行排序
+    if (attr->cachedVmSize && attr->cachedMapping) {
+        qsort(attr->cachedMapping, attr->cachedVmSize, sizeof(*attr->cachedMapping), MappingAscFunc);
     }
     for (int nid = 0; nid < MAX_NODES; nid++) {
         attr->scanAttr.actcLen[nid] = 0;
-        ret = FillActcByBitmap(attr, nid, pmb, apf);
+        ret = FillActcByBitmap(attr, nid, pmb, apf, mappingOffset);
         if (ret) {
             return ret;
         }
-        pmb->mappingOffset += attr->scanAttr.actcLen[nid];
+        mappingOffset += attr->scanAttr.actcLen[nid];
     }
+    return 0;
+}
+
+static int LoadMappingForProcess(ProcessAttr *attr, uint32_t vmSize)
+{
+    int ret;
+    if (vmSize == 0) {
+        SMAP_LOGGER_INFO("pid %d vmSize is 0, skip loading mapping.", attr->pid);
+        return 0;
+    }
+    // 如果已经缓存了mapping数据且vmSize匹配，直接返回
+    if (attr->cachedMapping && attr->cachedVmSize == vmSize) {
+        SMAP_LOGGER_INFO("pid %d mapping already cached.", attr->pid);
+        return 0;
+    }
+    // 释放旧的缓存
+    if (attr->cachedMapping) {
+        free(attr->cachedMapping);
+        attr->cachedMapping = NULL;
+    }
+    // 分配新的缓存空间
+    attr->cachedMapping = calloc(vmSize, sizeof(uint32_t));
+    if (!attr->cachedMapping) {
+        SMAP_LOGGER_ERROR("pid %d failed to allocate mapping cache.", attr->pid);
+        return -ENOMEM;
+    }
+    attr->cachedVmSize = vmSize;
+    // 通过ioctl获取mapping数据
+    ret = AccessIoctlGetMapping(attr->pid, vmSize, attr->cachedMapping);
+    if (ret) {
+        SMAP_LOGGER_ERROR("pid %d failed to get mapping from kernel: %d.", attr->pid, ret);
+        free(attr->cachedMapping);
+        attr->cachedMapping = NULL;
+        attr->cachedVmSize = 0;
+        return ret;
+    }
+    SMAP_LOGGER_INFO("pid %d mapping loaded, vmSize %u.", attr->pid, vmSize);
     return 0;
 }
 
@@ -1282,7 +1327,6 @@ static int InitPmbData(struct ProcessMemBitmap *pmb)
 
 static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessMemBitmap *pmb)
 {
-    size_t mappingSize = sizeof(*pmb->mapping);
     int nid;
     size_t newOffset = *offset;
 
@@ -1329,10 +1373,6 @@ static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessM
     if (ret) {
         SMAP_LOGGER_ERROR("ParseWhiteListBitmap err: %d.", ret);
         return ret;
-    }
-    if (pmb->vmSize) {
-        pmb->mapping = (uint32_t *)((char *)buf + newOffset);
-        newOffset += mappingSize * pmb->vmSize;
     }
     SMAP_LOGGER_INFO("read continue %zu %zu.", newOffset, bufLen);
 
@@ -1758,6 +1798,13 @@ int BuildAllPidData(void)
             SMAP_LOGGER_INFO("Pid %d, numaNodes %#x, nrLocalNuma %u.", current->pid, current->numaAttr.numaNodes,
                              g_processManager.nrLocalNuma);
             SetPidNrPages(current, pmb.nrPages, MAX_NODES);
+            // 在首次处理或vmSize变化时加载mapping数据
+            if (pmb.vmSize && (!current->cachedMapping || current->cachedVmSize != pmb.vmSize)) {
+                ret = LoadMappingForProcess(current, pmb.vmSize);
+                if (ret) {
+                    SMAP_LOGGER_WARNING("pid %d load mapping failed: %d, proceed without mapping.", current->pid, ret);
+                }
+            }
             ret = FillPidData(current, &pmb);
             if (ret) {
                 SMAP_LOGGER_ERROR("Fill pid %d actc data failed.", current->pid);
