@@ -895,32 +895,8 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 	}
 	/* move all new pids to ap_data.list */
 	list_for_each_entry_safe(ap, tmp, tmp_head, node) {
-		/*
-		 * A new pid may be attached during scan period or migrate period,
-		 * if in migrate period, no need to call submit_one_work;
-		 * if in scan period, set ap->cur_times refer to ap_head->cur_times and ap_head->ntimes,
-		 * if cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID < ap->ntimes, no need to call submit_one_work
-		 */
-		if (list_empty(&ap_data.list)) {
-			ap->cur_times = ap->ntimes;
-		} else {
-			struct access_pid *ap_head = list_first_entry(
-				&ap_data.list, struct access_pid, node);
-			if (ap_head->ntimes != 0) {
-				ap->cur_times = ap_head->cur_times *
-						ap->ntimes / ap_head->ntimes;
-			} else {
-				pr_warn("scan times of the first entry in access pid list had been setted to 0\n");
-				ap->cur_times = ap->ntimes;
-			}
-		}
 		pid_pte_mkold(ap);
-		if ((ap->cur_times + SCAN_TIMES_NEEDED_BY_NEW_PID) <=
-		    ap->ntimes) {
-			submit_one_work(ap);
-		} else {
-			complete(&ap->work_done);
-		}
+		submit_one_work(ap);
 		list_move_tail(&ap->node, &ap_data.list);
 	}
 	up_write(&ap_data.lock);
