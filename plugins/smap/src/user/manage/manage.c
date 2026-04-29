@@ -440,7 +440,6 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         if (actc[actcLen].freq >= remoteHotThreshold) {
             remoteHotNum++;
         }
-        actc[actcLen].addr = actcLen;
         freqMax = MAX(freqMax, actc[actcLen].freq);
         freqMin = MIN(freqMin, actc[actcLen].freq);
         actcLen++;

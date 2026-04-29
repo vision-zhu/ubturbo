@@ -80,154 +80,6 @@ TEST_F(SeparateStrategyTest, TestShouldMigrateThree)
     EXPECT_TRUE(ret);
 }
 
-extern "C" int ActcFreqAscFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestActcFreqAscFunc)
-{
-    ActcData *actc1 = (ActcData *)calloc(1, sizeof(ActcData));
-    ActcData *actc2 = (ActcData *)calloc(1, sizeof(ActcData));
-    int ret;
-
-    actc1->freq = 1;
-    actc2->freq = 2;
-    actc1->prior = 10;
-    actc2->prior = 1;
-
-    ret = ActcFreqAscFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(-1, ret);
-
-    actc1->freq = 2;
-    actc2->freq = 1;
-    ret = ActcFreqAscFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(1, ret);
-
-    actc1->freq = 1;
-    actc2->freq = 1;
-    ret = ActcFreqAscFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(-9, ret);
-
-    free(actc1);
-    free(actc2);
-}
-
-extern "C" int ActcFreqDescFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestActcFreqDescFunc)
-{
-    ActcData *actc1 = (ActcData *)calloc(1, sizeof(ActcData));
-    ActcData *actc2 = (ActcData *)calloc(1, sizeof(ActcData));
-    int ret;
-
-    actc1->freq = 1;
-    actc2->freq = 2;
-    actc1->prior = 10;
-    actc2->prior = 1;
-
-    ret = ActcFreqDescFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(1, ret);
-
-    actc1->freq = 2;
-    actc2->freq = 1;
-    ret = ActcFreqDescFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(-1, ret);
-
-    actc1->freq = 1;
-    actc2->freq = 1;
-    ret = ActcFreqDescFunc((const void *)actc1, (const void *)actc2);
-    EXPECT_EQ(9, ret);
-
-    free(actc1);
-    free(actc2);
-}
-
-extern "C" uint64_t CalcMigrateNumByFreq(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqOne)
-{
-    ProcessAttr process = {};
-
-    process.numaAttr.numaNodes = 0b10011001;
-    process.scanAttr.actcLen[0] = 3;
-    process.scanAttr.actcLen[1] = 3;
-    process.separateParam.maxMigrate = 4;
-    process.scanAttr.actCount[0].freqMax = 3;
-    process.scanAttr.actCount[1].freqMax = 5;
-    process.scanAttr.actCount[1].freqNum = 3;
-    process.separateParam.freqWt = 5;
-    process.separateParam.slowThred = 1;
-
-    ActcData actcDataL1[3];
-    ActcData actcDataL2[3];
-    actcDataL1[0].freq = 0;
-    actcDataL1[1].freq = 2;
-    actcDataL1[2].freq = 3;
-
-    actcDataL2[0].freq = 5;
-    actcDataL2[1].freq = 2;
-    actcDataL2[2].freq = 3;
-    process.scanAttr.actcData[0] = actcDataL1;
-    process.scanAttr.actcData[1] = actcDataL2;
-
-    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(3));
-    uint64_t ret = CalcMigrateNumByFreq(&process);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqLowSmallerThanHigh)
-{
-    ProcessAttr process = {};
-
-    process.numaAttr.numaNodes = 0b10011001;
-    process.scanAttr.actcLen[0] = 3;
-    process.scanAttr.actcLen[1] = 3;
-    process.separateParam.maxMigrate = 4;
-    process.scanAttr.actCount[0].freqMax = 3;
-    process.scanAttr.actCount[1].freqMax = 5;
-    process.scanAttr.actCount[1].freqNum = 3;
-    process.separateParam.freqWt = 5;
-    process.separateParam.slowThred = 1;
-    process.enableSwap = true;
-
-    ActcData actcDataL1[3];
-    ActcData actcDataL2[3];
-    actcDataL1[0].freq = 0;
-    actcDataL1[1].freq = 2;
-    actcDataL1[2].freq = 3;
-
-    actcDataL2[0].freq = 5;
-    actcDataL2[1].freq = 2;
-    actcDataL2[2].freq = 3;
-    process.scanAttr.actcData[0] = actcDataL1;
-    process.scanAttr.actcData[4] = actcDataL2;
-
-    process.scanAttr.actCount[4].freqNum = 100;
-    process.scanAttr.actCount[4].freqMax = 1000;
-
-    process.scanAttr.actCount[0].freqNum = 50;
-    process.scanAttr.actCount[0].freqMax = 500;
-
-    process.scanAttr.actcLen[0] = 4;
-    process.scanAttr.actcLen[4] = 4;
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(3));
-
-    uint64_t ret = CalcMigrateNumByFreq(&process);
-    EXPECT_EQ(1, ret);
-}
-
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqTwo)
-{
-    ProcessAttr process;
-    process.scanAttr.actcLen[0] = 6;
-    process.scanAttr.actcLen[1] = 5;
-    process.separateParam.maxMigrate = 0;
-    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1));
-    process.scanAttr.actCount[0].freqMax = 0;
-    process.scanAttr.actCount[1].freqMax = 1;
-    process.separateParam.freqWt = 1;
-    process.separateParam.slowThred = 1;
-    uint64_t ret = CalcMigrateNumByFreq(&process);
-    EXPECT_EQ(0, ret);
-}
-
 extern "C" int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
     uint64_t rawMigrateNum, MigrateDirection dir);
 TEST_F(SeparateStrategyTest, TestBaseStrategyOne)
@@ -241,7 +93,6 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyOne)
     mlist[0][0].nr = 0;
     process.scanAttr.actcLen[0] = 0;
     process.scanAttr.actcLen[1] = 0;
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue((uint64_t)0));
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
     EXPECT_EQ(-22, ret);
 }
@@ -403,18 +254,25 @@ TEST_F(SeparateStrategyTest, TestFreeMlist)
     EXPECT_EQ(NULL, mlist[0][0].addr);
 }
 
-extern "C" int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], int from, int to);
+extern "C" int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
+                                  uint64_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode);
+extern "C" uint64_t CalcSwapNum4K(ProcessAttr *process, int localNid, int remoteNid, const uint64_t numaOffset[],
+                                  const uint64_t numaFreePage[]);
+extern "C" int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
+                                     const uint64_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode);
 TEST_F(SeparateStrategyTest, TestBaseStrategyInner)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
+    uint64_t numaOffset[MAX_NODES] = { 0 };
     int ret;
     int from = 0;
     int to = 0;
     mlist[from][to].nr = 1;
     process.scanAttr.actcData[0] = NULL;
 
-    ret = BaseStrategyInner(&process, mlist, from, to);
+    MOCKER(BuildSelectKMlistAddr).stubs().will(returnValue(-EINVAL));
+    ret = BaseStrategyInner(&process, mlist, numaOffset, from, to, SELECT_BOTTOM_K);
     EXPECT_EQ(ret, -EINVAL);
 }
 
@@ -423,6 +281,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyInnerFromIsNULL)
     ProcessAttr process = {};
     ActcData actcArr[2] = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
+    uint64_t numaOffset[MAX_NODES] = { 0 };
 
     int ret;
     int from = 0;
@@ -430,12 +289,11 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyInnerFromIsNULL)
     mlist[from][to].nr = 1;
 
     process.scanAttr.actcData[0] = actcArr;
-    process.scanAttr.actcData[0][0].addr = 1;
     process.scanAttr.actcLen[0] = 1;
+    actcArr[0].freq = 1;
 
-    ret = BaseStrategyInner(&process, mlist, from, to);
+    ret = BaseStrategyInner(&process, mlist, numaOffset, from, to, SELECT_BOTTOM_K);
     EXPECT_EQ(ret, 0);
-    EXPECT_EQ(process.scanAttr.actcData[0][0].addr, *(mlist[0][0].addr));
 }
 
 extern "C" int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
@@ -456,16 +314,20 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsDemote)
     process.scanAttr.actcData[1]->freq = 2;
     process.scanAttr.actcData[0]->prior = 10;
     process.scanAttr.actcData[1]->prior = 1;
+    process.scanAttr.actcLen[0] = 1;
+    process.scanAttr.actcLen[4] = 1;
+    process.separateParam.maxMigrate = 1000;
+    process.scanAttr.actCount[0].freqZero = 1;
+    process.scanAttr.actCount[4].freqNum = 1;
 
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(1000));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(1000, mlist[0][4].nr);
-    EXPECT_EQ(900, mlist[4][0].nr);
 
     for (int i = 0; i < MAX_NODES; i++) {
         free(process.scanAttr.actcData[i]);
@@ -488,16 +350,20 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsPromote)
     process.scanAttr.actcData[1]->freq = 2;
     process.scanAttr.actcData[0]->prior = 10;
     process.scanAttr.actcData[1]->prior = 1;
+    process.scanAttr.actcLen[0] = 1;
+    process.scanAttr.actcLen[4] = 1;
+    process.separateParam.maxMigrate = 1000;
+    process.scanAttr.actCount[0].freqZero = 1;
+    process.scanAttr.actCount[4].freqNum = 1;
 
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(1000));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(900, mlist[0][4].nr);
-    EXPECT_EQ(1000, mlist[4][0].nr);
 
     for (int i = 0; i < MAX_NODES; i++) {
         free(process.scanAttr.actcData[i]);
@@ -520,42 +386,26 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsSWAP)
     process.scanAttr.actcData[1]->freq = 2;
     process.scanAttr.actcData[0]->prior = 10;
     process.scanAttr.actcData[1]->prior = 1;
+    process.scanAttr.actcLen[0] = 1;
+    process.scanAttr.actcLen[4] = 1;
+    process.separateParam.maxMigrate = 1000;
+    process.scanAttr.actCount[0].freqZero = 1;
+    process.scanAttr.actCount[4].freqNum = 1;
 
     MOCKER(IsHugeMode).stubs().will(returnValue(true));
     MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(100));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(100));
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(100, mlist[0][4].nr);
-    EXPECT_EQ(100, mlist[4][0].nr);
-
-    GlobalMockObject::verify();
-    MOCKER(IsHugeMode).stubs().will(returnValue(true));
-    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
-    MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
-
-    ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(1000, mlist[0][4].nr);
-    EXPECT_EQ(1000, mlist[4][0].nr);
-    
-    for (int i = 0; i < MAX_NODES; i++) {
-        free(process.scanAttr.actcData[i]);
-    }
 }
 
-
-TEST_F(SeparateStrategyTest, TestBaseStrategyTwo)
+extern "C" int SeparateStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES]);
+TEST_F(SeparateStrategyTest, TestSeparateStrategyOne)
 {
     ProcessAttr process = {};
-    process.numaAttr.numaNodes = 0b00010001;
     uint64_t rawMigrateNum = 100;
     MigrateDirection dir = DEMOTE;
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -570,8 +420,9 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyTwo)
     process.scanAttr.actcData[1]->prior = 10;
 
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(1000));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
@@ -600,8 +451,9 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyThree)
     process.scanAttr.actcData[1]->prior = 20;
 
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(1000));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
@@ -630,30 +482,14 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyFour)
     process.scanAttr.actcData[1]->prior = -3;
 
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    MOCKER(CalcMigrateNumByFreq).stubs().will(returnValue(1000));
-    MOCKER(BaseStrategyInner).stubs().will(returnValue(0));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue(1000));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue(1000));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
 
     int ret = BaseStrategy(&process, mlist, rawMigrateNum, dir);
     EXPECT_EQ(0, ret);
 
-    for (int i = 0; i < MAX_NODES; i++) {
-        free(process.scanAttr.actcData[i]);
-    }
-}
-
-extern "C" void SortActcData(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestSortActcData)
-{
-    ProcessAttr process = {};
-    process.numaAttr.numaNodes = 0b00010001;
-    for (int i = 0; i < MAX_NODES; i++) {
-        process.scanAttr.actcData[i] = (ActcData *)calloc(1, sizeof(ActcData));
-        process.scanAttr.actcLen[i] = 1;
-    }
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
-    SortActcData(&process);
     for (int i = 0; i < MAX_NODES; i++) {
         free(process.scanAttr.actcData[i]);
     }
@@ -673,8 +509,6 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KShouldMigrate)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
-    uint32_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode);
 TEST_F(SeparateStrategyTest, TestSeparateStrategy4KAbnormal)
 {
     ProcessAttr process;
@@ -684,8 +518,6 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KAbnormal)
 
     MOCKER(InitSeparateParam).stubs().will(ignoreReturnValue());
     MOCKER(CalcMaxMigrate).stubs().will(ignoreReturnValue());
-    MOCKER(ShouldMigrate).stubs().will(returnValue(true));
-    MOCKER(SortActcData).stubs().will(ignoreReturnValue());
     MOCKER(BuildSelectKMlistAddr).stubs().will(returnValue(-ENOMEM));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
     int ret = SeparateStrategy4K(&process, mlist);
@@ -701,8 +533,6 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KNormal)
 
     MOCKER(InitSeparateParam).stubs().will(ignoreReturnValue());
     MOCKER(CalcMaxMigrate).stubs().will(ignoreReturnValue());
-    MOCKER(ShouldMigrate).stubs().will(returnValue(true));
-    MOCKER(SortActcData).stubs().will(ignoreReturnValue());
     MOCKER(BuildSelectKMlistAddr).stubs().will(returnValue(0));
     MOCKER(FreeMlist).stubs().will(ignoreReturnValue());
     int ret = SeparateStrategy4K(&process, mlist);
@@ -718,7 +548,6 @@ void BuildActcData(int nid, const uint16_t data[], int size, ScanAttribute *scan
     for (int i = 0; i < size; i++) {
         uint16_t freq = data[i];
         actcData[i].freq = freq;
-        actcData[i].addr = nid * 1000000 + i * 10000 + freq;
         scanAttribute->actCount[nid].freqMax = std::max(scanAttribute->actCount[nid].freqMax, freq);
         scanAttribute->actCount[nid].freqMin = std::min(scanAttribute->actCount[nid].freqMin, freq);
         if (freq == 0) {

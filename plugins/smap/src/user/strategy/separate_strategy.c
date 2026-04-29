@@ -26,6 +26,12 @@
 #define MAX_MIGRATE_DIVISOR_2M 1
 #define MULTI_NUMA_VM_OOM 66
 
+// Forward declarations for functions used before definition
+static uint64_t CalcSwapNum4K(ProcessAttr *process, int localNid, int remoteNid, const uint64_t numaOffset[],
+                              const uint64_t numaFreePage[]);
+static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
+                                 const uint64_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode);
+
 typedef struct NumaInfo {
     int localNid;
     int remoteNid;
@@ -52,119 +58,6 @@ static bool ShouldMigrate(ProcessAttr *process)
     return true;
 }
 
-static int ActcFreqAscFunc(const void *actc1, const void *actc2)
-{
-    ActcData *a1 = (ActcData *)actc1, *a2 = (ActcData *)actc2;
-    if (a1->isWhiteListPage != a2->isWhiteListPage) {
-        return a1->isWhiteListPage ? 1 : -1;
-    }
-    if (a1->freq < a2->freq) {
-        return -1;
-    } else if (a1->freq > a2->freq) {
-        return 1;
-    } else {
-        return (int)a2->prior - (int)a1->prior;
-    }
-}
-
-static int ActcFreqDescFunc(const void *actc1, const void *actc2)
-{
-    ActcData *a1 = (ActcData *)actc1, *a2 = (ActcData *)actc2;
-    if (a1->isWhiteListPage != a2->isWhiteListPage) {
-        return a1->isWhiteListPage ? 1 : -1;
-    }
-    if (a1->freq < a2->freq) {
-        return 1;
-    } else if (a1->freq > a2->freq) {
-        return -1;
-    } else {
-        return (int)a1->prior - (int)a2->prior;
-    }
-}
-
-static uint64_t CalLowMigrateNum(uint64_t migrateNum, uint64_t freqWt, uint32_t slowThred, ProcessAttr *process)
-{
-    uint64_t low = 0, high = migrateNum;
-    int l1Node = GetAttrL1(process);
-    int l2Node = GetAttrL2(process);
-    if (l1Node < 0 || l2Node < 0) {
-        SMAP_LOGGER_ERROR("CalcMigrateNumByFreq pid %d L1 %d or L2 %d is invalid.", process->pid, l1Node, l2Node);
-        return 0;
-    }
-    // calculate migrate num based on freq
-    while (low < high) {
-        uint64_t mid = low + (high - low + 1) / 2;
-        if (mid < 1) {
-            return 0;
-        }
-        uint64_t freqL1 = freqWt * process->scanAttr.actcData[l1Node][mid - 1].freq;
-        uint64_t freqL2 = process->scanAttr.actcData[l2Node][mid - 1].freq;
-        if (((freqL1 == 0) && (freqL2 > 0)) || (freqL1 + slowThred < freqL2)) {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    return low;
-}
-
-/*
- * Calculate migrate num by frequency
- *
- * Before call this function, make sure process->actcData[L1] is in ascending order
- * and process->actcData[L2] is in descending order
- */
-static uint64_t CalcMigrateNumByFreq(ProcessAttr *process)
-{
-    uint64_t migrateNum, low = 0, high;
-    uint64_t freqWt;
-    uint64_t freqNum;
-    uint32_t slowThred;
-    uint16_t l1FreqMax, l2FreqMax;
-    ActCount *l1Act = GetL1ActCount(process);
-    ActCount *l2Act = GetL2ActCount(process);
-    int l2Node = GetAttrL2(process);
-    int l1Len = GetL1ActcLen(process);
-    int l2Len = GetL2ActcLen(process);
-    int remoteFreePages = GetNrFreeHugePagesByNode(l2Node);
-
-    // calculate migrate num based on actc length, max migrate num and free page num
-    migrateNum = MIN(l1Len, l2Len);
-    migrateNum = MIN(migrateNum, process->separateParam.maxMigrate);
-    migrateNum = MIN(migrateNum, remoteFreePages);
-    migrateNum = MIN(migrateNum, (l2Act ? l2Act->freqNum : 0));
-
-    if (!process->enableSwap) {
-        SMAP_LOGGER_INFO("Pid %d not enable swap.", process->pid);
-        return 0;
-    }
-
-    // calculate freq weight
-    l1FreqMax = (l1Act ? l1Act->freqMax : 0);
-    l2FreqMax = (l2Act ? l2Act->freqMax : 0);
-    // removing excessively large outliers
-    if (l2Len > 0 && l2Act && l2Act->freqMax > 0) {
-        int percentile = GetRemoteFreqPercentileConfig();
-        double numToSkip = ((double)(PERCENTAGE_BASE_INT - percentile) / PERCENTAGE_BASE_DOUBLE) * l2Len;
-        size_t maxIndex = (size_t)floor(numToSkip);
-        l2FreqMax = process->scanAttr.actcData[l2Node][maxIndex].freq;
-    } else {
-        l2FreqMax = 0;
-    }
-    if (l1FreqMax) {
-        freqWt = (uint64_t)((double)l2FreqMax / l1FreqMax);
-    } else {
-        freqWt = l2FreqMax;
-    }
-    freqWt = MAX(freqWt, process->separateParam.freqWt);
-    freqWt = GetFreqWtConfig() == 0 ? freqWt : GetFreqWtConfig();
-    slowThred = process->separateParam.slowThred * freqWt;
-    SMAP_LOGGER_DEBUG("Pid %d freqWt %lu, slowThred: %u.", process->pid, freqWt, slowThred);
-
-    migrateNum = CalLowMigrateNum(migrateNum, freqWt, slowThred, process);
-    return migrateNum;
-}
-
 static void FreeMlist(struct MigList mlist[MAX_NODES][MAX_NODES])
 {
     for (int from = 0; from < MAX_NODES; from++) {
@@ -178,23 +71,10 @@ static void FreeMlist(struct MigList mlist[MAX_NODES][MAX_NODES])
     }
 }
 
-static int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], int from, int to)
+static int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
+                              uint64_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode)
 {
-    uint32_t nrMig = mlist[from][to].nr;
-    if (nrMig > 0) {
-        mlist[from][to].nr = nrMig;
-        mlist[from][to].addr = calloc(nrMig, sizeof(uint64_t));
-        if (!mlist[from][to].addr) {
-            return -ENOMEM;
-        }
-        if (!process->scanAttr.actcData[from]) {
-            return -EINVAL;
-        }
-        for (uint32_t idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from]; idx++) {
-            mlist[from][to].addr[idx] = process->scanAttr.actcData[from][idx].addr;
-        }
-    }
-    return 0;
+    return BuildSelectKMlistAddr(process, mlist, numaOffset, from, to, mode);
 }
 
 static int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], uint64_t rawMigrateNum,
@@ -202,7 +82,7 @@ static int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MA
 {
     int ret = 0;
     uint64_t freePageNum;
-    NodeLevel level;
+    uint64_t numaOffset[MAX_NODES] = { 0 };
     int l1Node = GetAttrL1(process);
     int l2Node = GetAttrL2(process);
 
@@ -214,10 +94,9 @@ static int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MA
         return -EINVAL;
     }
 
-    // 1. calculate migrate num based on raw migrate num
-    qsort(process->scanAttr.actcData[l1Node], GetL1ActcLen(process), sizeof(ActcData), ActcFreqAscFunc);
-    qsort(process->scanAttr.actcData[l2Node], GetL2ActcLen(process), sizeof(ActcData), ActcFreqDescFunc);
-    uint64_t SwapMigrateNum = CalcMigrateNumByFreq(process);
+    // calculate migrate num using topk algorithm (no sorting required)
+    uint64_t SwapMigrateNum = CalcSwapNum4K(process, l1Node, l2Node, numaOffset,
+                                             (uint64_t[MAX_NODES]){ IsHugeMode() ? GetNrFreeHugePagesByNode(l2Node) : GetNrFreePagesByNode(l2Node) });
     mlist[l1Node][l2Node].nr = mlist[l2Node][l1Node].nr = SwapMigrateNum;
     if (dir == DEMOTE) {
         mlist[l1Node][l2Node].nr = MAX(SwapMigrateNum, rawMigrateNum);
@@ -230,15 +109,18 @@ static int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MA
         mlist[l1Node][l2Node].nr = mlist[l2Node][l1Node].nr = MIN(freePageNum, SwapMigrateNum);
     }
 
-    for (int from = 0; from < MAX_NODES; from++) {
-        for (int to = 0; to < MAX_NODES; to++) {
-            ret = BaseStrategyInner(process, mlist, from, to);
-            if (ret) {
-                SMAP_LOGGER_ERROR("BaseStrategy pid %d from %d to %d failed %d.", process->pid, from, to, ret);
-                FreeMlist(mlist);
-                return ret;
-            }
-        }
+    // use BuildSelectKMlistAddr for topk selection (no sorting)
+    ret = BaseStrategyInner(process, mlist, numaOffset, l1Node, l2Node, SELECT_BOTTOM_K);
+    if (ret) {
+        SMAP_LOGGER_ERROR("BaseStrategy pid %d from %d to %d failed %d.", process->pid, l1Node, l2Node, ret);
+        FreeMlist(mlist);
+        return ret;
+    }
+    ret = BaseStrategyInner(process, mlist, numaOffset, l2Node, l1Node, SELECT_TOP_K);
+    if (ret) {
+        SMAP_LOGGER_ERROR("BaseStrategy pid %d from %d to %d failed %d.", process->pid, l2Node, l1Node, ret);
+        FreeMlist(mlist);
+        return ret;
     }
     process->strategyAttr.dir[l1Node] = dir;
     process->strategyAttr.dir[l2Node] = dir;
@@ -291,43 +173,6 @@ int SeparateStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_N
     }
 
     return SwapStrategy(process, mlist);
-}
-
-static void SortActcData(ProcessAttr *process)
-{
-    ScanAttribute *scan = &process->scanAttr;
-    for (int n = 0; n < GetNrLocalNuma(); n++) {
-        if (NotInAttrL1(process, n)) {
-            continue;
-        }
-        qsort(scan->actcData[n], scan->actcLen[n], sizeof(ActcData), ActcFreqAscFunc);
-    }
-    for (int n = GetNrLocalNuma(); n < MAX_NODES; n++) {
-        if (NotInAttrL2(process, n)) {
-            continue;
-        }
-        qsort(scan->actcData[n], scan->actcLen[n], sizeof(ActcData), ActcFreqDescFunc);
-    }
-}
-
-static int BuildMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
-                          uint64_t numaOffset[MAX_NODES], int from, int to)
-{
-    uint32_t nrMig = mlist[from][to].nr;
-    if (nrMig > 0) {
-        mlist[from][to].nr = nrMig;
-        mlist[from][to].addr = calloc(nrMig, sizeof(uint64_t));
-        if (!mlist[from][to].addr) {
-            return -ENOMEM;
-        }
-        if (!process->scanAttr.actcData[from]) {
-            return -EINVAL;
-        }
-        for (int idx = 0; idx < nrMig && idx < process->scanAttr.actcLen[from] - numaOffset[from]; idx++) {
-            mlist[from][to].addr[idx] = process->scanAttr.actcData[from][idx + numaOffset[from]].addr;
-        }
-    }
-    return 0;
 }
 
 static uint64_t CalcSwapNum4K(ProcessAttr *process, int localNid, int remoteNid, const uint64_t numaOffset[],
@@ -414,7 +259,7 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
         }
 
         if (shouldTake && !currentData[i].isWhiteListPage) {
-            currMlist->addr[collected_count++] = currentData[i].addr;
+            currMlist->addr[collected_count++] = i;
             if (i != write_idx) {
                 ActcData temp = currentData[i];
                 currentData[i] = currentData[write_idx];
@@ -878,7 +723,7 @@ static int BuildLevelActcData(ProcessAttr *process, LevelActcData *levelActcData
             if (actcIdx >= nrPages) {
                 break;
             }
-            levelActcData[actcIdx].addr = process->scanAttr.actcData[i][idx].addr;
+            levelActcData[actcIdx].addr = idx;
             levelActcData[actcIdx].node = i;
             levelActcData[actcIdx].freq = process->scanAttr.actcData[i][idx].freq;
             levelActcData[actcIdx].prior = process->scanAttr.actcData[i][idx].prior;
@@ -903,6 +748,7 @@ static int PromoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList mlist
                                       RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM], int nrLocalNuma)
 {
     uint64_t localFreeHugePages[LOCAL_NUMA_NUM] = { 0 };
+    uint64_t numaOffset[MAX_NODES] = { 0 };
     for (int nid = 0; nid < nrLocalNuma; nid++) {
         if (InAttrL1(process, nid)) {
             localFreeHugePages[nid] = GetNrFreeHugePagesByNode(nid);
@@ -914,20 +760,23 @@ static int PromoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList mlist
             continue;
         }
         int from = i + nrLocalNuma;
-        qsort(process->scanAttr.actcData[from], process->scanAttr.actcLen[from], sizeof(ActcData), ActcFreqDescFunc);
+        // use topk algorithm instead of qsort
         for (int to = 0; to < nrLocalNuma; to++) {
             if (!InAttrL1(process, to)) {
                 continue;
             }
             mlist[from][to].nr = MIN(remoteMigInfo[i].nrMig, localFreeHugePages[to]);
-            mlist[from][to].addr = calloc(mlist[from][to].nr, sizeof(uint64_t));
+        }
+        int ret = BuildSelectKMlistAddr(process, mlist, numaOffset, from, 0, SELECT_TOP_K);
+        if (ret) {
+            SMAP_LOGGER_ERROR("PromoteMultiNumaVmStrategy build mlist addr failed %d.", ret);
+            return ret;
+        }
+        for (int to = 0; to < nrLocalNuma; to++) {
+            if (!InAttrL1(process, to) || mlist[from][to].nr == 0) {
+                continue;
+            }
             SMAP_LOGGER_INFO("migrate %lu pages from NUMA %d to NUMA %d", mlist[from][to].nr, from, to);
-            if (!mlist[from][to].addr) {
-                return -ENOMEM;
-            }
-            for (int index = 0; index < mlist[from][to].nr && index < process->scanAttr.actcLen[from]; index++) {
-                mlist[from][to].addr[index] = process->scanAttr.actcData[from][index].addr;
-            }
             localFreeHugePages[to] -= mlist[from][to].nr;
             remoteMigInfo[i].nrMig -= mlist[from][to].nr;
         }

@@ -1033,13 +1033,9 @@ TEST_F(ManageTest, TestFillActcByBitmap)
 
     ret = FillActcByBitmap(&processes, L1, &pmb, &apf);
     EXPECT_EQ(0, ret);
-    EXPECT_EQ(0, processes.scanAttr.actcData[0][0].addr);
     EXPECT_EQ(14, processes.scanAttr.actcData[0][0].freq);
-    EXPECT_EQ(1, processes.scanAttr.actcData[0][1].addr);
     EXPECT_EQ(13, processes.scanAttr.actcData[0][1].freq);
-    EXPECT_EQ(2, processes.scanAttr.actcData[0][2].addr);
     EXPECT_EQ(12, processes.scanAttr.actcData[0][2].freq);
-    EXPECT_EQ(3, processes.scanAttr.actcData[0][3].addr);
     EXPECT_EQ(11, processes.scanAttr.actcData[0][3].freq);
     free(processes.scanAttr.actcData[0]);
 }

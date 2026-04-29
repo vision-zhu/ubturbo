@@ -1518,13 +1518,13 @@ TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalOne)
     };
     EnvAtomicSet(&g_status, 1);
     ActcData actcData1[3] = {
-        { .addr = 0, .freq = 0 },
-        { .addr = 0, .freq = 1 },
-        { .addr = 0, .freq = 2 }
+        { .freq = 0 },
+        { .freq = 1 },
+        { .freq = 2 }
     };
     ActcData actcData2[2] = {
-        { .addr = 0, .freq = 3 },
-        { .addr = 0, .freq = 4 }
+        { .freq = 3 },
+        { .freq = 4 }
     };
     int len1 = sizeof(actcData1) / sizeof(ActcData);
     int len2 = sizeof(actcData2) / sizeof(ActcData);
@@ -1556,11 +1556,11 @@ TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalTwo)
         .next = nullptr
     };
     ActcData actcData1[5] = {
-        { .addr = 0, .freq = 0 },
-        { .addr = 0, .freq = 1 },
-        { .addr = 0, .freq = 2 },
-        { .addr = 0, .freq = 3 },
-        { .addr = 0, .freq = 4 }
+        { .freq = 0 },
+        { .freq = 1 },
+        { .freq = 2 },
+        { .freq = 3 },
+        { .freq = 4 }
     };
     int len1 = sizeof(actcData1) / sizeof(ActcData);
     EnvAtomicSet(&g_status, 1);
@@ -1593,12 +1593,12 @@ TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalThree)
         .next = nullptr
     };
     ActcData actcData1[2] = {
-        { .addr = 0, .freq = 0 },
-        { .addr = 0, .freq = 1 }
+        { .freq = 0 },
+        { .freq = 1 }
     };
     ActcData actcData2[2] = {
-        { .addr = 0, .freq = 2 },
-        { .addr = 0, .freq = 3 }
+        { .freq = 2 },
+        { .freq = 3 }
     };
     int len1 = sizeof(actcData1) / sizeof(ActcData);
     int len2 = sizeof(actcData2) / sizeof(ActcData);

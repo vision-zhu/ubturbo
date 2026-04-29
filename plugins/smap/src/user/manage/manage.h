@@ -106,7 +106,6 @@ enum {
 };
 
 typedef struct {
-    uint64_t addr;
     actc_t freq;
     uint8_t prior;
     bool isWhiteListPage;
