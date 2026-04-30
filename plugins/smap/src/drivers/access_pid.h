@@ -75,6 +75,9 @@ struct access_pid {
 	unsigned long last_scan_delay_ms;
 	struct proc_dir_entry *proc_root;
 	struct proc_dir_entry *proc_freq;
+	void *shm_area;         /* 共享内存指针 */
+	size_t shm_size;        /* 共享内存大小 */
+	struct actc_data *actc_ptr[SMAP_MAX_NUMNODES]; /* 各node的actc_data指针 */
 };
 
 typedef struct {

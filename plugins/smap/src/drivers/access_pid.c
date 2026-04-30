@@ -7,6 +7,8 @@
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <linux/mm.h>
+#include <linux/string.h>
 #include <linux/rwlock.h>
 #include <linux/limits.h>
 #include <linux/kernel.h>
@@ -40,6 +42,53 @@ struct access_pid_struct ap_data = {
 	.state_flag = AP_STATE_WALK,
 };
 
+/**
+ * alloc_shm_area - 分配共享内存区域
+ * @ap: access_pid结构体指针
+ *
+ * 计算并分配共享内存大小，用于存储actc_data结构体数组。
+ * 共享内存布局: actc_data数组(各node)
+ */
+static int alloc_shm_area(struct access_pid *ap)
+{
+	int nid;
+	size_t total_actc = 0;
+
+	/* 计算总actc_data数量 */
+	for (nid = 0; nid < SMAP_MAX_NUMNODES; nid++) {
+		total_actc += ap->page_num[nid];
+	}
+
+	if (total_actc == 0) {
+		pr_debug("pid %d has no pages, skip shm allocation\n", ap->pid);
+		return 0;
+	}
+
+	/* 计算共享内存总大小 */
+	ap->shm_size = total_actc * sizeof(struct actc_data);
+
+	/* 使用vmalloc_user分配用户态可映射的内存 */
+	ap->shm_area = vmalloc_user(ap->shm_size);
+	if (!ap->shm_area) {
+		pr_err("unable to allocate shm area for pid %d, size %zu\n",
+		       ap->pid, ap->shm_size);
+		return -ENOMEM;
+	}
+
+	/* 设置各node的actc_ptr指针位置 */
+	total_actc = 0;
+	for (nid = 0; nid < SMAP_MAX_NUMNODES; nid++) {
+		ap->actc_ptr[nid] = (struct actc_data *)
+			((char *)ap->shm_area +
+			 total_actc * sizeof(struct actc_data));
+		total_actc += ap->page_num[nid];
+	}
+
+	pr_debug("allocated shm for pid %d, size %zu, total_actc %zu\n",
+		 ap->pid, ap->shm_size, total_actc);
+	return 0;
+}
+
 void destroy_access_pid(struct access_pid *elem)
 {
 	int i;
@@ -55,10 +104,16 @@ void destroy_access_pid(struct access_pid *elem)
 		elem->bm_len[i] = 0;
 		elem->scan_count[i] = 0;
 		elem->page_num[i] = 0;
+		elem->actc_ptr[i] = NULL;
 	}
 	if (elem->info.mapping) {
 		vfree(elem->info.mapping);
 		elem->info.mapping = NULL;
+	}
+	if (elem->shm_area) {
+		vfree(elem->shm_area);
+		elem->shm_area = NULL;
+		elem->shm_size = 0;
 	}
 	proc_remove(elem->proc_root);
 	kfree(elem);
@@ -401,10 +456,65 @@ out:
 	return len;
 }
 
+/**
+ * mem_freq_mmap - 实现procfs mmap操作
+ * @file: 文件指针
+ * @vma: 用户态虚拟内存区域描述
+ *
+ * 将内核态共享内存映射到用户态地址空间，实现零拷贝数据传输。
+ * 用户态mmap后直接获取actc_data结构体数组指针。
+ */
+static int mem_freq_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct access_pid *ap = pde_data(file_inode(file));
+	u32 actc_len[SMAP_MAX_NUMNODES];
+	size_t expected_size;
+	int ret;
+
+	if (!ap) {
+		pr_err("null access_pid in mem_freq_mmap\n");
+		return -EINVAL;
+	}
+
+	/* 如果共享内存尚未分配，则分配 */
+	if (!ap->shm_area) {
+		ret = alloc_shm_area(ap);
+		if (ret) {
+			pr_err("failed to alloc shm area for pid %d: %d\n",
+			       ap->pid, ret);
+			return ret;
+		}
+	}
+
+	/* 检查共享内存是否有效 */
+	if (ap->shm_size == 0) {
+		pr_debug("pid %d has zero shm_size, no data to mmap\n", ap->pid);
+		return -EINVAL;
+	}
+
+	/* 检查mmap大小是否匹配 */
+	expected_size = ap->shm_size;
+	if (vma->vm_end - vma->vm_start > expected_size) {
+		pr_warn("mmap size %lu exceeds shm size %zu for pid %d\n",
+			vma->vm_end - vma->vm_start, expected_size, ap->pid);
+	}
+
+	/* 填充actc_data数据到共享内存 */
+	fill_pid_actc_data(ap, ap->shm_area, actc_len);
+
+	pr_debug("mmap pid %d, shm_size %zu, actc_len[0]=%u, actc_len[1]=%u\n",
+		 ap->pid, ap->shm_size, actc_len[0], actc_len[1]);
+
+	/* 映射共享内存到用户态 */
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
+	return remap_vmalloc_range(vma, ap->shm_area, 0);
+}
+
 static const struct proc_ops ap_mem_freq_fops = {
 	.proc_open = mem_freq_open,
 	.proc_release = mem_freq_release,
 	.proc_read = mem_freq_read,
+	.proc_mmap = mem_freq_mmap,
 };
 
 static int create_procfs_freq(struct access_pid *ap)
@@ -494,7 +604,11 @@ int init_access_pid(struct access_add_pid_payload *payload,
 		ap->bm_len[i] = 0;
 		ap->paddr_bm[i] = NULL;
 		ap->white_list_bm[i] = NULL;
+		ap->actc_ptr[i] = NULL;
 	}
+	/* 初始化共享内存字段 */
+	ap->shm_area = NULL;
+	ap->shm_size = 0;
 	if (is_access_hugepage()) {
 		if (init_vm_mapping_info(ap->pid, &ap->info)) {
 			kfree(ap);

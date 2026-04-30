@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/param.h>
+#include <sys/mman.h>
 
 #include "smap_user_log.h"
 #include "securec.h"
@@ -206,6 +207,10 @@ static void LinkedListAddSafe(ProcessAttr **head, ProcessAttr **add, EnvMutex *l
     EnvMutexUnlock(lock);
 }
 
+static void ResetActcData(ActcData *actcData[], int len);
+
+static void MunmapPidFreq(ProcessAttr *attr);
+
 static void ResetActcData(ActcData *actcData[], int len)
 {
     for (int i = 0; i < len; i++) {
@@ -221,6 +226,8 @@ static void FreeProceccesAttr(ProcessAttr *attr)
     if (attr == NULL) {
         return;
     }
+    /* 释放mmap的共享内存 */
+    MunmapPidFreq(attr);
     if (attr->scanAttr.actcData) {
         ResetActcData(attr->scanAttr.actcData, MAX_NODES);
     }
@@ -1023,6 +1030,23 @@ static int ReadPidFreqInner(struct AccessPidFreq *apf, int numaNum, FILE *file)
 #define FREQ_FILE_RETRY_DELAY 10000
 
 /**
+ * MunmapPidFreq - 释放mmap的共享内存
+ * @attr: ProcessAttr结构体指针
+ */
+static void MunmapPidFreq(ProcessAttr *attr)
+{
+    if (attr->scanAttr.shmPtr && attr->scanAttr.shmPtr != MAP_FAILED) {
+        munmap(attr->scanAttr.shmPtr, attr->scanAttr.shmSize);
+        attr->scanAttr.shmPtr = NULL;
+        attr->scanAttr.shmSize = 0;
+    }
+    for (int nid = 0; nid < MAX_NODES; nid++) {
+        attr->scanAttr.actcData[nid] = NULL;
+        attr->scanAttr.actcLen[nid] = 0;
+    }
+}
+
+/**
  * CalcActcStats - 从actc_data数组计算统计数据
  * @attr: ProcessAttr结构体指针
  *
@@ -1072,6 +1096,70 @@ static void CalcActcStats(ProcessAttr *attr)
         SMAP_LOGGER_INFO("Node%d actcLen %llu, freqMax %u, freqMin %u, freqNum %llu, freqSum %llu, remoteHotNum %llu, whiteNum %llu",
                          nid, actcLen, count->freqMax, count->freqMin, count->freqNum, count->freqSum, count->remoteHotNum, count->whiteNum);
     }
+}
+
+/**
+ * MmapPidFreq - 通过mmap获取共享内存中的actc_data
+ * @attr: ProcessAttr结构体指针
+ * @nrPages: 各node的页面数量数组
+ *
+ * 使用mmap映射/proc/smap/<pid>/mem_freq获取共享内存，
+ * 直接使用共享内存中的actc_data指针，实现零拷贝。
+ */
+static int MmapPidFreq(ProcessAttr *attr, size_t nrPages[MAX_NODES])
+{
+    char path[FREQ_FILE_PATH_LEN];
+    int fd;
+    size_t shm_size;
+    void *shm;
+    size_t total_actc = 0;
+    size_t actc_offset = 0;
+
+    snprintf(path, sizeof(path), "/proc/smap/%d/mem_freq", attr->pid);
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        SMAP_LOGGER_ERROR("open mem_freq file failed for pid %d: %d", attr->pid, errno);
+        return -ENODEV;
+    }
+
+    /* 计算共享内存大小 */
+    for (int nid = 0; nid < MAX_NODES; nid++) {
+        total_actc += nrPages[nid];
+    }
+
+    if (total_actc == 0) {
+        SMAP_LOGGER_INFO("pid %d has no pages, skip mmap", attr->pid);
+        close(fd);
+        return 0;
+    }
+
+    shm_size = total_actc * sizeof(ActcData);
+
+    /* mmap共享内存 */
+    shm = mmap(NULL, shm_size, PROT_READ, MAP_SHARED, fd, 0);
+    close(fd);
+
+    if (shm == MAP_FAILED) {
+        SMAP_LOGGER_ERROR("mmap failed for pid %d, size %zu: %d", attr->pid, shm_size, errno);
+        return -ENOMEM;
+    }
+
+    /* 设置actcData指针直接指向共享内存中的数据区域 */
+    for (int nid = 0; nid < MAX_NODES; nid++) {
+        attr->scanAttr.actcLen[nid] = nrPages[nid];
+        attr->scanAttr.actcData[nid] = (ActcData *)
+            ((char *)shm + actc_offset * sizeof(ActcData));
+        actc_offset += nrPages[nid];
+    }
+
+    /* 保存mmap指针用于后续munmap */
+    attr->scanAttr.shmPtr = shm;
+    attr->scanAttr.shmSize = shm_size;
+
+    SMAP_LOGGER_INFO("mmap pid %d success, shm_size %zu, actc_len[0]=%zu, actc_len[1]=%zu",
+                     attr->pid, shm_size, nrPages[0], nrPages[1]);
+    return 0;
 }
 
 /**
@@ -1202,9 +1290,13 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
 {
     int ret;
 
-    ret = ReadPidActcData(attr, pmb);
+    /* 释放之前的mmap内存 */
+    MunmapPidFreq(attr);
+
+    /* 使用mmap获取共享内存中的actc_data（零拷贝） */
+    ret = MmapPidFreq(attr, pmb->nrPages);
     if (ret) {
-        SMAP_LOGGER_ERROR("Read pid %d actc data failed: %d", attr->pid, ret);
+        SMAP_LOGGER_ERROR("Mmap pid %d freq failed: %d", attr->pid, ret);
         return ret;
     }
 

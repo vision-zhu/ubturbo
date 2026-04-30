@@ -197,6 +197,8 @@ typedef struct {
     uint64_t actcLen[MAX_NODES];
     ActcData *actcData[MAX_NODES]; // actc数据
     ActCount actCount[MAX_NODES]; // 统计数据
+    void *shmPtr; // mmap共享内存指针，用于后续munmap
+    size_t shmSize; // mmap共享内存大小
 } ScanAttribute;
 
 typedef struct {
