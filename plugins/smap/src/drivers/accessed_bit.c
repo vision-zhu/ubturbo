@@ -352,28 +352,79 @@ pte_t *huge_pte_offset(struct mm_struct *mm, unsigned long addr,
 	return NULL;
 }
 
-static void actc_data_add(phys_addr_t paddr, u32 page_size)
+static inline int get_numa_id_by_paddr(phys_addr_t paddr)
+{
+	unsigned long pfn = PHYS_PFN(paddr);
+	struct page *page;
+
+	if (!pfn_valid(pfn))
+		return NUMA_NO_NODE;
+
+	page = pfn_to_online_page(pfn);
+	if (!page)
+		return NUMA_NO_NODE;
+
+	return page_to_nid(page);
+}
+
+static void actc_data_add_fast(phys_addr_t paddr, u32 page_size)
 {
 	struct access_tracking_dev *adev;
-	int ret = 0, node_id;
+	int ret, nid;
 	u64 pa_index;
-	if (calc_paddr_acidx_acpi(paddr, &node_id, &pa_index, page_size)) {
-		ret = calc_paddr_acidx_iomem(paddr, &node_id, &pa_index,
-					     page_size);
-	}
-	if (unlikely(ret)) {
+
+	nid = get_numa_id_by_paddr(paddr);
+	if (unlikely(nid == NUMA_NO_NODE))
 		return;
+
+	if (nid < nr_local_numa) {
+		ret = calc_paddr_acidx_acpi(paddr, &nid, &pa_index, page_size);
+	} else {
+		ret = calc_paddr_acidx_iomem(paddr, &nid, &pa_index, page_size);
 	}
 
-	adev = get_access_tracking_dev(node_id);
-	if (unlikely(!adev)) {
+	if (unlikely(ret))
 		return;
-	}
-	if (unlikely(pa_index >= adev->page_count)) {
+
+	adev = get_access_tracking_dev(nid);
+	if (unlikely(!adev || pa_index >= adev->page_count))
 		return;
-	}
+
 	if (!adev->is_hist)
 		adev->access_bit_actc_data[pa_index]++;
+}
+
+static int actc_data_add_with_info(phys_addr_t paddr, u32 page_size,
+				   int *out_nid, bool *out_is_hist)
+{
+	struct access_tracking_dev *adev;
+	int ret, nid;
+	u64 pa_index;
+
+	nid = get_numa_id_by_paddr(paddr);
+	if (unlikely(nid == NUMA_NO_NODE))
+		return -ERANGE;
+
+	if (nid < nr_local_numa) {
+		ret = calc_paddr_acidx_acpi(paddr, &nid, &pa_index, page_size);
+	} else {
+		ret = calc_paddr_acidx_iomem(paddr, &nid, &pa_index, page_size);
+	}
+
+	if (unlikely(ret))
+		return ret;
+
+	adev = get_access_tracking_dev(nid);
+	if (unlikely(!adev || pa_index >= adev->page_count))
+		return -ERANGE;
+
+	*out_nid = nid;
+	*out_is_hist = adev->is_hist;
+
+	if (!adev->is_hist)
+		adev->access_bit_actc_data[pa_index]++;
+
+	return 0;
 }
 
 static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va,
@@ -407,7 +458,7 @@ static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va,
 	}
 
 	paddr = PFN_PHYS(pte_pfn(pte));
-	actc_data_add(paddr, g_pagesize_huge);
+	actc_data_add_fast(paddr, g_pagesize_huge);
 
 	if (access_pid_cur_last_scanning(ap))
 		add_to_bm_huge(host_va, paddr, ap);
@@ -419,20 +470,26 @@ static void ham_actc_data_add(int pid, phys_addr_t paddr, u32 page_size)
 {
 	struct access_tracking_dev *adev;
 	struct ham_tracking_info *tmp;
-	int ret = 0, node_id;
+	int ret, node_id;
 	u64 pa_index;
-	if (calc_paddr_acidx_acpi(paddr, &node_id, &pa_index, page_size)) {
-		ret = calc_paddr_acidx_iomem(paddr, &node_id, &pa_index,
-					     page_size);
-	}
-	if (unlikely(ret)) {
+
+	node_id = get_numa_id_by_paddr(paddr);
+	if (unlikely(node_id == NUMA_NO_NODE))
 		return;
+
+	if (node_id < nr_local_numa) {
+		ret = calc_paddr_acidx_acpi(paddr, &node_id, &pa_index, page_size);
+	} else {
+		ret = calc_paddr_acidx_iomem(paddr, &node_id, &pa_index, page_size);
 	}
 
-	adev = get_access_tracking_dev(node_id);
-	if (unlikely(!adev || pa_index >= adev->page_count)) {
+	if (unlikely(ret))
 		return;
-	}
+
+	adev = get_access_tracking_dev(node_id);
+	if (unlikely(!adev || pa_index >= adev->page_count))
+		return;
+
 	spin_lock(&ham_lock);
 	list_for_each_entry(tmp, &ham_pid_list, node) {
 		if (tmp->pid == pid && tmp->l1_node == node_id) {
@@ -1202,6 +1259,8 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 {
 	struct pte_walk *pte_walk = walk->private;
 	pte_t ptent = ptep_get(pte);
+	int node_id;
+	bool is_hist;
 
 	if (is_swap_pte(ptent)) {
 		return 0;
@@ -1213,11 +1272,16 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		}
 		if (pte_walk->type == STATISTIC_SCAN)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
-		actc_data_add(paddr, PAGE_SIZE);
+		if (actc_data_add_with_info(paddr, PAGE_SIZE, &node_id, &is_hist) == 0) {
+			// STATISTIC_SCAN 类型必须执行 __ptep_test_and_clear_young
+			// 非 STATISTIC_SCAN 且远端 NUMA is_hist=true 时，硬件 histogram 自动统计，不执行
+			if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
+				__ptep_test_and_clear_young(NULL, 0, pte);
+				pte_walk->flag = true;
+			}
+		}
 		if (access_pid_cur_last_scanning(pte_walk->ap))
 			add_to_bm_normal(paddr, pte_walk->ap);
-		pte_walk->flag = true;
-		__ptep_test_and_clear_young(NULL, 0, pte);
 	}
 	return 0;
 }
