@@ -1860,16 +1860,8 @@ TEST_F(ManageTest, TestMigOutIsDoneSuccess)
     EXPECT_EQ(true, ret);
 }
 
-extern "C" int MappingAscFunc(const void *map1, const void *map2);
-TEST_F(ManageTest, TestMappingAscFunc)
+TEST_F(ManageTest, TestMappingAscFuncRemoved)
 {
-    int ret;
-    uint32_t *map1 = (uint32_t *)malloc(sizeof(uint32_t));
-    uint32_t *map2 = (uint32_t *)malloc(sizeof(uint32_t));
-    *map1 = 2;
-    *map2 = 1;
-    ret = MappingAscFunc(map1, map2);
-    EXPECT_EQ(1, ret);
-    free(map1);
-    free(map2);
+    // MappingAscFunc has been removed as part of Issue #35
+    // vm_size and mapping fields have been deleted from ProcessMemBitmap
 }

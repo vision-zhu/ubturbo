@@ -423,11 +423,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
             continue;
         }
         nrBit++;
-        if (pmb->vmSize && pmb->mapping) {
-            actc[actcLen].prior = pmb->mapping[pmb->mappingOffset + actcLen] & 0xff;
-        } else {
-            actc[actcLen].prior = 0;
-        }
+        actc[actcLen].prior = 0;
         if (TestBit(acidx, whiteListBitmap)) {
             actc[actcLen].isWhiteListPage = true;
             white++;
@@ -460,17 +456,6 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
     return 0;
 }
 
-static int MappingAscFunc(const void *map1, const void *map2)
-{
-    uint32_t m1 = *(uint32_t *)map1;
-    uint32_t m2 = *(uint32_t *)map2;
-
-    if (m1 == m2) {
-        return 0;
-    }
-    return m1 < m2 ? -1 : 1;
-}
-
 static int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
 {
     int ret;
@@ -478,16 +463,12 @@ static int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, struct 
         SMAP_LOGGER_ERROR("FillActcData pmb is null.");
         return -EINVAL;
     }
-    if (pmb->mapping) {
-        qsort(pmb->mapping, pmb->vmSize, sizeof(*pmb->mapping), MappingAscFunc);
-    }
     for (int nid = 0; nid < MAX_NODES; nid++) {
         attr->scanAttr.actcLen[nid] = 0;
         ret = FillActcByBitmap(attr, nid, pmb, apf);
         if (ret) {
             return ret;
         }
-        pmb->mappingOffset += attr->scanAttr.actcLen[nid];
     }
     return 0;
 }
@@ -1195,19 +1176,6 @@ static int ParseBitmapLen(struct ProcessMemBitmap *pmb, char *buf, size_t *offse
     return 0;
 }
 
-static int ParseBitmapVmSize(struct ProcessMemBitmap *pmb, char *buf, size_t *offset)
-{
-    int ret;
-    size_t vmSize = sizeof(pmb->vmSize);
-
-    ret = memcpy_s(&pmb->vmSize, vmSize, buf, vmSize);
-    if (ret) {
-        return -ret;
-    }
-    *offset += vmSize;
-    return 0;
-}
-
 static int ParseBitmapData(struct ProcessMemBitmap *pmb, char *buf, size_t *offset)
 {
     int ret;
@@ -1282,7 +1250,6 @@ static int InitPmbData(struct ProcessMemBitmap *pmb)
 
 static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessMemBitmap *pmb)
 {
-    size_t mappingSize = sizeof(*pmb->mapping);
     int nid;
     size_t newOffset = *offset;
 
@@ -1304,15 +1271,6 @@ static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessM
         return ret;
     }
 
-    ret = ParseBitmapVmSize(pmb, buf + newOffset, &newOffset);
-    if (ret) {
-        SMAP_LOGGER_ERROR("ParseBitmapVmSize err: %d.", ret);
-        return ret;
-    }
-    if (pmb->vmSize) {
-        SMAP_LOGGER_INFO("pid %d vm size %u.", pmb->pid, pmb->vmSize);
-    }
-
     ret = InitPmbData(pmb);
     if (ret) {
         SMAP_LOGGER_ERROR("InitPmbData err: %d.", ret);
@@ -1329,10 +1287,6 @@ static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessM
     if (ret) {
         SMAP_LOGGER_ERROR("ParseWhiteListBitmap err: %d.", ret);
         return ret;
-    }
-    if (pmb->vmSize) {
-        pmb->mapping = (uint32_t *)((char *)buf + newOffset);
-        newOffset += mappingSize * pmb->vmSize;
     }
     SMAP_LOGGER_INFO("read continue %zu %zu.", newOffset, bufLen);
 

@@ -688,19 +688,10 @@ TEST_F(DriversAccessPidTest, CleanLastApData)
     EXPECT_EQ(0, ap.page_num[0]);
 }
 
-extern "C" int init_vm_mapping(struct vm_mapping_info *info);
-TEST_F(DriversAccessPidTest, InitVmMapping)
+TEST_F(DriversAccessPidTest, InitVmMappingRemoved)
 {
-    struct vm_mapping_info info;
-    info.vm_size = 1;
-    MOCKER(vmalloc).stubs().will(returnValue((void *)nullptr));
-    int ret = init_vm_mapping(&info);
-    EXPECT_EQ(-ENOMEM, ret);
-
-    GlobalMockObject::verify();
-    ret = init_vm_mapping(&info);
-    EXPECT_EQ(0, ret);
-    vfree(info.mapping);
+    // init_vm_mapping() has been removed as part of Issue #35
+    // vm_size and mapping fields have been deleted from vm_mapping_info
 }
 
 TEST_F(DriversAccessPidTest, AccessWalkPagemap)

@@ -44,9 +44,7 @@ struct va_segment {
 
 struct vm_mapping_info {
 	u8 nr_segs;
-	u32 vm_size;
 	struct va_segment segs[MAX_NODE_NUM];
-	u32 *mapping;
 };
 
 typedef enum {
@@ -131,8 +129,6 @@ static inline bool access_pid_is_scanning(pid_t pid)
 
 static inline void clear_vm_mapping(u32 *mapping, u32 len)
 {
-	if (mapping)
-		memset(mapping, 0xff, len * sizeof(u32));
 }
 
 static inline void set_ap_whole_state(struct access_pid_struct *aps,

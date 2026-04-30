@@ -140,37 +140,10 @@ static int calc_vaddr_acidx(u64 vaddr, struct vm_mapping_info *info, u64 *acidx)
 
 static inline void set_mapping_numa(u32 *map, int nid)
 {
-	*map &= ~MAPPING_NODES_MASK;
-	*map |= ((u32)nid << MAPPING_NODES_SHIFT);
 }
 
 static void set_pa_prior(struct access_pid *ap, u64 vaddr, u64 pa_idx, int nid)
 {
-	u8 prior;
-	int prior_bits;
-	u32 map = 0;
-	u64 va_idx;
-	int shift = __builtin_ctz(g_pagesize_huge);
-	int ret = calc_vaddr_acidx(vaddr, &ap->info, &va_idx);
-	if (ret != 0 || va_idx >= ap->info.vm_size) {
-		pr_debug("set pa prior out of range\n");
-		return;
-	}
-	if (va_idx & (1 << (shift - 1))) {
-		pr_debug("va_idx is not aligned\n");
-		return;
-	}
-	set_mapping_numa(&map, nid);
-	map |= pa_idx << MAPPING_PRIOR_BIT;
-
-	prior_bits = MAPPING_U32_BITS - __builtin_clz(ap->info.vm_size);
-	if (prior_bits > MAPPING_PRIOR_BIT) {
-		prior = va_idx >> (prior_bits - MAPPING_PRIOR_BIT);
-	} else {
-		prior = va_idx;
-	}
-	map |= prior;
-	ap->info.mapping[va_idx] = map;
 }
 
 static int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap)

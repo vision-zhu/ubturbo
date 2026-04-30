@@ -239,11 +239,9 @@ static size_t calc_bitmap_len(void)
 	 * +----------+------------------------------------------------------+
 	 * | PID (4B) |        NR_NODE0_PAGE-NR_NODEn_PAGE (n * 8B)          |
 	 * +----------------------------------------------+------------------+
-	 * | NODE0_BITMAP_LEN-NODEn_BITMAP_LEN (n * 8B) |   VM_SIZE (4B)     |
+	 * | NODE0_BITMAP_LEN-NODEn_BITMAP_LEN (n * 8B)                       |
 	 * +-----------------------------------------------------------------+
 	 * | NODE0_BITMAP-NODEn_BITMAP (size is dependent on bitmap length)  |
-	 * +-----------------------------------------------------------------+
-	 * |         MAPPING (size is dependent on process vm size)          |
 	 * +-----------------------------------------------------------------+
 	 */
 	struct access_pid *ap;
@@ -255,12 +253,10 @@ static size_t calc_bitmap_len(void)
 		buf_len += sizeof(pid_t);
 		buf_len += sizeof(size_t) * SMAP_MAX_NUMNODES;
 		buf_len += sizeof(size_t) * SMAP_MAX_NUMNODES;
-		buf_len += sizeof(u32);
 		for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 			buf_len += sizeof(unsigned long) * ap->bm_len[i];
 		}
-		buf_len += sizeof(u32) * ap->info.vm_size;
 	}
 	up_read(&ap_data.lock);
 
@@ -323,16 +319,6 @@ static inline void write_bitmap_bmlen(char **buffer, struct access_pid *ap)
 	}
 }
 
-static inline void write_bitmap_vmsize(char **buffer, struct access_pid *ap)
-{
-	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("invalid buffer or access pid passed to write VM size\n");
-		return;
-	}
-	memcpy(*buffer, &ap->info.vm_size, sizeof(ap->info.vm_size));
-	*buffer += sizeof(ap->info.vm_size);
-}
-
 static void write_bitmap_paddrbm(char **buffer, struct access_pid *ap)
 {
 	int i;
@@ -371,22 +357,6 @@ static void write_bitmap_white_list(char **buffer, struct access_pid *ap)
 	}
 }
 
-static void write_bitmap_mappig(char **buffer, struct access_pid *ap)
-{
-	size_t length;
-	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("invalid buffer or access pid passed to write VM mapping info\n");
-		return;
-	}
-	if (!ap->info.mapping) {
-		pr_debug("no need to write pid %d mapping\n", ap->pid);
-		return;
-	}
-	length = sizeof(u32) * ap->info.vm_size;
-	memcpy(*buffer, ap->info.mapping, length);
-	*buffer += length;
-}
-
 static void write_bitmap_buffer(char **buffer)
 {
 	struct access_pid *ap;
@@ -403,10 +373,8 @@ static void write_bitmap_buffer(char **buffer)
 		write_bitmap_pid(buffer, ap);
 		write_bitmap_nrpage(buffer, ap);
 		write_bitmap_bmlen(buffer, ap);
-		write_bitmap_vmsize(buffer, ap);
 		write_bitmap_paddrbm(buffer, ap);
 		write_bitmap_white_list(buffer, ap);
-		write_bitmap_mappig(buffer, ap);
 	}
 	up_read(&ap_data.lock);
 }

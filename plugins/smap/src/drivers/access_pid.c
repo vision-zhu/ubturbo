@@ -56,10 +56,6 @@ void destroy_access_pid(struct access_pid *elem)
 		elem->scan_count[i] = 0;
 		elem->page_num[i] = 0;
 	}
-	if (elem->info.mapping) {
-		vfree(elem->info.mapping);
-		elem->info.mapping = NULL;
-	}
 	proc_remove(elem->proc_root);
 	kfree(elem);
 	return;
@@ -144,7 +140,6 @@ static int scan_kvm_gfn(struct kvm *kvm, struct vm_mapping_info *info)
 		} else {
 			add_kvm_seg(info, memslot, 0, memslot->npages);
 		}
-		info->vm_size += (memslot->npages >> HUGE_TO_4K_SHIFT);
 	}
 	if (tmp_slot) {
 		u64 gfn = MIN(gfn_thre, tmp_slot->npages);
@@ -164,21 +159,6 @@ static inline void post_scan_kvm_gfn(struct kvm *kvm, int idx)
 {
 	read_unlock(&kvm->mmu_lock);
 	srcu_read_unlock(&kvm->srcu, idx);
-}
-
-static int init_vm_mapping(struct vm_mapping_info *info)
-{
-	if (info->vm_size) {
-		info->mapping = vmalloc(info->vm_size * sizeof(u32));
-		if (!info->mapping) {
-			pr_err("unable to allocate memory for VM mapping\n");
-			return -ENOMEM;
-		}
-		clear_vm_mapping(info->mapping, info->vm_size);
-		return 0;
-	}
-	info->mapping = NULL;
-	return 0;
 }
 
 static int init_vm_mapping_info(pid_t pid, struct vm_mapping_info *info)
@@ -220,9 +200,6 @@ static int init_vm_mapping_info(pid_t pid, struct vm_mapping_info *info)
 	fput(filp);
 	put_task_struct(task);
 	put_pid(pid_s);
-	if (!ret) {
-		ret = init_vm_mapping(info);
-	}
 	return ret;
 }
 
@@ -1151,10 +1128,6 @@ void clean_last_ap_data(struct access_pid *ap)
 		ap->bm_len[i] = 0;
 		ap->page_num[i] = 0;
 	}
-	if (ap->info.mapping) {
-		vfree(ap->info.mapping);
-		ap->info.mapping = NULL;
-	}
 }
 
 int access_walk_pagemap(struct access_pid *ap)
@@ -1180,9 +1153,6 @@ int access_walk_pagemap(struct access_pid *ap)
 		pr_err("unable to init access bitmap for pid: %d\n", ap->pid);
 		return ret;
 	}
-	ret = init_vm_mapping(&ap->info);
-	if (ret)
-		return ret;
 	pm.ap = ap;
 	pm.mig_info.pid = ap->pid;
 	pm.mig_type = NORMAL_MIGRATE;

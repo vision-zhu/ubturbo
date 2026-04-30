@@ -444,29 +444,17 @@ TEST_F(AccessMMUTest, FillAPPAddrBM)
 
 TEST_F(AccessMMUTest, SetPaPrior)
 {
+    // set_pa_prior() has been simplified as part of Issue #35
+    // It no longer writes to mapping array as vm_size and mapping fields were removed
     access_pid ap;
     memset(&ap, 0, sizeof(ap));
-
-    ap.info.vm_size = 1;
-
-    ap.info.mapping = (u32 *)malloc(sizeof(u32) * ap.info.vm_size);
-    ASSERT_NE(ap.info.mapping, nullptr);
-    memset(ap.info.mapping, 0xFF, sizeof(u32) * ap.info.vm_size);
-
-    ap.info.nr_segs = 1;
-    ap.info.segs[0].start = 0x0;
-    ap.info.segs[0].end = 0x200000;
-    ap.info.segs[0].hugepages = 1;
 
     u64 vaddr = 0x0;
     u64 pa_idx = 0;
     int nid = 0;
 
     set_pa_prior(&ap, vaddr, pa_idx, nid);
-
-    EXPECT_EQ(0u, ap.info.mapping[0]);
-
-    free(ap.info.mapping);
+    // Function now does nothing, test passes
 }
 
 TEST_F(AccessMMUTest, PosToAddr)
