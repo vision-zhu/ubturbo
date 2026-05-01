@@ -337,9 +337,6 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 			break;
 		}
 
-		/* 填充addr - 使用相对索引 */
-		actc[len_cnt].addr = len_cnt;
-
 		/* 填充freq */
 		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
 

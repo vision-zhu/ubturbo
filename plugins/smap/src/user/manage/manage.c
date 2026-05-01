@@ -447,7 +447,6 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         if (actc[actcLen].freq >= remoteHotThreshold) {
             remoteHotNum++;
         }
-        actc[actcLen].addr = actcLen;
         freqMax = MAX(freqMax, actc[actcLen].freq);
         freqMin = MIN(freqMin, actc[actcLen].freq);
         actcLen++;
@@ -1299,7 +1298,7 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
         SMAP_LOGGER_ERROR("Mmap pid %d freq failed: %d", attr->pid, ret);
         return ret;
     }
-
+    
     CalcActcStats(attr);
     return 0;
 }
