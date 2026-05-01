@@ -356,6 +356,104 @@ int IsHugePageRange(const char *line)
     return strstr(line, "hugepage") != NULL;
 }
 
+static inline void ClearActcInfo(ProcessAttr *attr, int nid)
+{
+    attr->scanAttr.actcLen[nid] = 0;
+    (void)memset_s(&attr->scanAttr.actCount[nid], sizeof(ActCount), 0, sizeof(ActCount));
+}
+
+static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
+{
+    size_t i, nrFreq, nrBit, acidx = 0;
+    uint16_t freqMax = 0, freqMin = UINT16_MAX;
+    uint64_t actcLen, paddr, freqSum = 0, remoteHotNum = 0, white = 0;
+    uint32_t remoteHotThreshold = GetRemoteHotThreshold();
+    size_t len = pmb->len[nid];
+    unsigned long *bitmap = pmb->data[nid];
+    unsigned long *whiteListBitmap = pmb->whiteListBm[nid];
+    if (attr->walkPage.nrPages[nid] == 0) {
+        ClearActcInfo(attr, nid);
+        return 0;
+    }
+    ActcData *actc = attr->scanAttr.actcData[nid];
+
+    nrFreq = nrBit = actcLen = remoteHotNum = 0;
+    for (acidx = 0; acidx < BITS_PER_LONG * len; acidx++) {
+        if (actcLen >= attr->walkPage.nrPages[nid] || actcLen >= apf->len[nid]) {
+            break;
+        }
+        if (!TestBit(acidx, bitmap)) {
+            continue;
+        }
+        nrBit++;
+        if (pmb->vmSize && pmb->mapping) {
+            actc[actcLen].prior = pmb->mapping[pmb->mappingOffset + actcLen] & 0xff;
+        } else {
+            actc[actcLen].prior = 0;
+        }
+        if (TestBit(acidx, whiteListBitmap)) {
+            actc[actcLen].isWhiteListPage = true;
+            white++;
+        }
+        actc[actcLen].freq = apf->freq[nid][actcLen];
+        if (actc[actcLen].freq != 0) {
+            nrFreq++;
+            freqSum += actc[actcLen].freq;
+        }
+        if (actc[actcLen].freq >= remoteHotThreshold) {
+            remoteHotNum++;
+        }
+        freqMax = MAX(freqMax, actc[actcLen].freq);
+        freqMin = MIN(freqMin, actc[actcLen].freq);
+        actcLen++;
+    }
+    attr->scanAttr.actcLen[nid] = actcLen;
+    attr->scanAttr.actCount[nid].freqMax = freqMax;
+    attr->scanAttr.actCount[nid].freqMin = freqMin;
+    attr->scanAttr.actCount[nid].freqNum = nrFreq;
+    attr->scanAttr.actCount[nid].freqSum = freqSum;
+    attr->scanAttr.actCount[nid].remoteHotNum = remoteHotNum;
+    attr->scanAttr.actCount[nid].whiteNum = white;
+    attr->scanAttr.actCount[nid].pageNum = attr->scanAttr.actcLen[nid];
+    attr->scanAttr.actCount[nid].freqZero = attr->scanAttr.actcLen[nid] - nrFreq;
+    SMAP_LOGGER_INFO(
+        "Node%d actcLen %llu, nrFreq %zu, nrBit %zu, freqMax %d, freqMin %d, freqSum %lu, remoteHotNum %lu, white %lu",
+                      nid, actcLen, nrFreq, nrBit, freqMax, freqMin, freqSum, remoteHotNum, white);
+    return 0;
+}
+
+static int MappingAscFunc(const void *map1, const void *map2)
+{
+    uint32_t m1 = *(uint32_t *)map1;
+    uint32_t m2 = *(uint32_t *)map2;
+
+    if (m1 == m2) {
+        return 0;
+    }
+    return m1 < m2 ? -1 : 1;
+}
+
+static int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
+{
+    int ret;
+    if (!pmb) {
+        SMAP_LOGGER_ERROR("FillActcData pmb is null.");
+        return -EINVAL;
+    }
+    if (pmb->mapping) {
+        qsort(pmb->mapping, pmb->vmSize, sizeof(*pmb->mapping), MappingAscFunc);
+    }
+    for (int nid = 0; nid < MAX_NODES; nid++) {
+        attr->scanAttr.actcLen[nid] = 0;
+        ret = FillActcByBitmap(attr, nid, pmb, apf);
+        if (ret) {
+            return ret;
+        }
+        pmb->mappingOffset += attr->scanAttr.actcLen[nid];
+    }
+    return 0;
+}
+
 static int CheckPid(pid_t pid)
 {
     PidType type = GetPidType(&g_processManager);
