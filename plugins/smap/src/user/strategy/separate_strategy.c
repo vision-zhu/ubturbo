@@ -12,6 +12,7 @@
 
 #include <stdlib.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/param.h>
 #include <math.h>
 #include "securec.h"
@@ -97,29 +98,6 @@ static actc_t FindKthFreqDesc(const uint32_t *buckets, uint64_t k)
     return 0;
 }
 
-static uint64_t BuildFreqBucketsForNode(ProcessAttr *process, int nid, uint64_t offset, uint32_t *buckets)
-{
-    uint64_t count = 0;
-    uint64_t actcLen = process->scanAttr.actcLen[nid];
-    ActcData *actcData = process->scanAttr.actcData[nid];
-
-    if (!actcData || offset >= actcLen) {
-        return 0;
-    }
-
-    for (uint64_t i = offset; i < actcLen; i++) {
-        if (actcData[i].isWhiteListPage) {
-            continue;  // 白名单页面不计入迁移统计
-        }
-        int freq = actcData[i].freq;
-        freq = MIN(freq, STRATEGY_ACTC_MAX_FREQ - 1);
-        buckets[freq]++;
-        count++;
-    }
-
-    return count;
-}
-
 static uint64_t CalcFreqWeightForVm(ProcessAttr *process, int localNid, int remoteNid,
                                      const uint32_t *l2Buckets, uint64_t l2ActcLen)
 {
@@ -198,12 +176,14 @@ static uint64_t CalcSwapNum4KForVm(ProcessAttr *process, int localNid, int remot
         return 0;
     }
 
-    // 构建频率桶
-    uint32_t l1Buckets[STRATEGY_ACTC_MAX_FREQ] = {0};
-    uint32_t l2Buckets[STRATEGY_ACTC_MAX_FREQ] = {0};
+    const uint32_t *l1Buckets = process->scanAttr.freqBuckets[localNid];
+    const uint32_t *l2Buckets = process->scanAttr.freqBuckets[remoteNid];
 
-    uint64_t l1Count = BuildFreqBucketsForNode(process, localNid, localOffset, l1Buckets);
-    uint64_t l2Count = BuildFreqBucketsForNode(process, remoteNid, remoteOffset, l2Buckets);
+    uint64_t l1Count = 0, l2Count = 0;
+    for (int freq = 0; freq < STRATEGY_ACTC_MAX_FREQ; freq++) {
+        l1Count += l1Buckets[freq];
+        l2Count += l2Buckets[freq];
+    }
 
     if (l1Count == 0 || l2Count == 0) {
         return 0;
@@ -367,25 +347,12 @@ static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_
     if (!currentMig->addr) {
         return -ENOMEM;
     }
-    uint32_t *buckets = (uint32_t *)calloc(STRATEGY_ACTC_MAX_FREQ, sizeof(uint32_t));
-    if (buckets == NULL) {
-        free(currentMig->addr);
-        currentMig->addr = NULL;
-        return -ENOMEM;
-    }
-    for (uint64_t i = offset; i < n; ++i) {
-        if (currentData[i].isWhiteListPage) {
-            continue;
-        }
-        int freq = currentData[i].freq;
-        freq = MIN(freq, STRATEGY_ACTC_MAX_FREQ - 1);
-        buckets[freq]++;
-    }
+
+    const uint32_t *buckets = process->scanAttr.freqBuckets[from];
     int thresholdFreq;
     uint32_t takeAtThreshold;
     FindThreshold(mode, nrMig, buckets, &thresholdFreq, &takeAtThreshold);
     CollectPages(mode, offset, n, currentData, currentMig, nrMig, thresholdFreq, takeAtThreshold);
-    free(buckets);
     return 0;
 }
 

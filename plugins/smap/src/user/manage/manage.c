@@ -404,6 +404,7 @@ static inline void ClearActcInfo(ProcessAttr *attr, int nid)
 {
     attr->scanAttr.actcLen[nid] = 0;
     (void)memset_s(&attr->scanAttr.actCount[nid], sizeof(ActCount), 0, sizeof(ActCount));
+    memset(attr->scanAttr.freqBuckets[nid], 0, FREQ_BUCKETS_SIZE * sizeof(uint32_t));
 }
 
 static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf)
@@ -420,6 +421,7 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         return 0;
     }
     ActcData *actc = attr->scanAttr.actcData[nid];
+    memset(attr->scanAttr.freqBuckets[nid], 0, FREQ_BUCKETS_SIZE * sizeof(uint32_t));
 
     nrFreq = nrBit = actcLen = remoteHotNum = 0;
     for (acidx = 0; acidx < BITS_PER_LONG * len; acidx++) {
@@ -449,6 +451,13 @@ static int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap 
         }
         freqMax = MAX(freqMax, actc[actcLen].freq);
         freqMin = MIN(freqMin, actc[actcLen].freq);
+
+        /* 更新频率桶统计（排除白名单页面） */
+        if (!actc[actcLen].isWhiteListPage) {
+            actc_t freqBucket = MIN(actc[actcLen].freq, FREQ_BUCKETS_SIZE - 1);
+            attr->scanAttr.freqBuckets[nid][freqBucket]++;
+        }
+
         actcLen++;
     }
     attr->scanAttr.actcLen[nid] = actcLen;

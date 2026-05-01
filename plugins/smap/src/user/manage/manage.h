@@ -28,6 +28,7 @@
 #define PAGE_SHIFT 12
 #define PAGE_SIZE (1UL << PAGE_SHIFT)
 #define DEFAULT_FD (-1)
+#define FREQ_BUCKETS_SIZE 256
 
 #define RSS_LINE_PREFIX "Rss:"
 #define RSS_LINE_PREFIX_LENGTH 4
@@ -196,6 +197,7 @@ typedef struct {
     uint64_t actcLen[MAX_NODES];
     ActcData *actcData[MAX_NODES]; // actc数据
     ActCount actCount[MAX_NODES]; // 统计数据
+    uint32_t freqBuckets[MAX_NODES][FREQ_BUCKETS_SIZE]; // 频率桶统计
     void *shmPtr; // mmap共享内存指针，用于后续munmap
     size_t shmSize; // mmap共享内存大小
 } ScanAttribute;
