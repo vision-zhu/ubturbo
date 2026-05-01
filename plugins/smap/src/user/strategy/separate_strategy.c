@@ -65,37 +65,214 @@ static void FreeMlist(struct MigList mlist[MAX_NODES][MAX_NODES])
     }
 }
 
-static uint64_t CalcSwapNum(ProcessAttr *process, int localNid, int remoteNid, const uint64_t numaOffset[],
-                              const uint64_t numaFreePage[])
+static actc_t FindKthFreqAsc(const uint32_t *buckets, uint64_t k)
+{
+    if (k == 0) {
+        return 0;
+    }
+
+    uint64_t countSoFar = 0;
+    for (actc_t freq = 0; freq < STRATEGY_ACTC_MAX_FREQ; freq++) {
+        countSoFar += buckets[freq];
+        if (countSoFar >= k) {
+            return freq;
+        }
+    }
+    return STRATEGY_ACTC_MAX_FREQ - 1;
+}
+
+static actc_t FindKthFreqDesc(const uint32_t *buckets, uint64_t k)
+{
+    if (k == 0) {
+        return 0;
+    }
+
+    uint64_t countSoFar = 0;
+    for (actc_t freq = STRATEGY_ACTC_MAX_FREQ - 1; freq >= 0; freq--) {
+        countSoFar += buckets[freq];
+        if (countSoFar >= k) {
+            return freq;
+        }
+    }
+    return 0;
+}
+
+static uint64_t BuildFreqBucketsForNode(ProcessAttr *process, int nid, uint64_t offset, uint32_t *buckets)
+{
+    uint64_t count = 0;
+    uint64_t actcLen = process->scanAttr.actcLen[nid];
+    ActcData *actcData = process->scanAttr.actcData[nid];
+
+    if (!actcData || offset >= actcLen) {
+        return 0;
+    }
+
+    for (uint64_t i = offset; i < actcLen; i++) {
+        if (actcData[i].isWhiteListPage) {
+            continue;  // 白名单页面不计入迁移统计
+        }
+        int freq = actcData[i].freq;
+        freq = MIN(freq, STRATEGY_ACTC_MAX_FREQ - 1);
+        buckets[freq]++;
+        count++;
+    }
+
+    return count;
+}
+
+static uint64_t CalcFreqWeightForVm(ProcessAttr *process, int localNid, int remoteNid,
+                                     const uint32_t *l2Buckets, uint64_t l2ActcLen)
+{
+    uint64_t freqWt;
+    actc_t l1FreqMax = process->scanAttr.actCount[localNid].freqMax;
+    actc_t l2FreqMax = process->scanAttr.actCount[remoteNid].freqMax;
+
+    if (l2ActcLen > 0 && l2FreqMax > 0) {
+        int percentile = GetRemoteFreqPercentileConfig();
+        double numToSkip = ((double)(PERCENTAGE_BASE_INT - percentile) / PERCENTAGE_BASE_DOUBLE) * l2ActcLen;
+        uint64_t skipCount = (uint64_t)floor(numToSkip);
+
+        if (skipCount > 0 && skipCount < l2ActcLen) {
+            l2FreqMax = FindKthFreqDesc(l2Buckets, l2ActcLen - skipCount);
+        }
+    }
+
+    if (l1FreqMax > 0) {
+        freqWt = (uint64_t)((double)l2FreqMax / l1FreqMax);
+    } else {
+        freqWt = l2FreqMax;
+    }
+
+    freqWt = MAX(freqWt, process->separateParam.freqWt);
+    freqWt = MAX(freqWt, 1);
+
+    if (GetFreqWtConfig() > 0) {
+        freqWt = GetFreqWtConfig();
+    }
+
+    return freqWt;
+}
+
+static uint64_t CalLowMigrateNumByBuckets(uint64_t migrateNum, uint64_t freqWt, uint32_t slowThred,
+                                           const uint32_t *l1Buckets, const uint32_t *l2Buckets,
+                                           uint64_t l1Count, uint64_t l2Count)
+{
+    uint64_t low = 0;
+    uint64_t high = MIN(migrateNum, MIN(l1Count, l2Count));
+    if (high == 0) {
+        return 0;
+    }
+    while (low < high) {
+        uint64_t mid = low + (high - low + 1) / 2;
+        
+        uint64_t freqL1 = freqWt * FindKthFreqAsc(l1Buckets, mid);
+        uint64_t freqL2 = FindKthFreqDesc(l2Buckets, mid);
+        
+        if (((freqL1 == 0) && (freqL2 > 0)) || (freqL1 + slowThred < freqL2)) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return low;
+}
+
+static uint64_t CalcSwapNum4KForVm(ProcessAttr *process, int localNid, int remoteNid,
+                                    const uint64_t numaOffset[], const uint64_t numaFreePage[])
 {
     uint64_t migrateNum;
-    uint64_t lastFreqNum;
-    uint64_t lastZeroNum;
+    uint64_t freqWt;
+    uint32_t slowThred;
+
+    // 获取统计数据
     ActCount *localActCount = &process->scanAttr.actCount[localNid];
     ActCount *remoteActCount = &process->scanAttr.actCount[remoteNid];
-    uint64_t localLen = process->scanAttr.actcLen[localNid] - numaOffset[localNid];
-    uint64_t remoteLen = process->scanAttr.actcLen[remoteNid] - numaOffset[remoteNid];
-    uint64_t localFree = localActCount->pageNum - localActCount->whiteNum;
-    uint64_t remoteFree = remoteActCount->pageNum - remoteActCount->whiteNum;
-    if (localActCount->freqZero > numaOffset[localNid]) {
-        lastZeroNum = localActCount->freqZero - numaOffset[localNid];
-    } else {
-        lastZeroNum = 0;
+
+    // 计算有效范围
+    uint64_t localOffset = numaOffset[localNid];
+    uint64_t remoteOffset = numaOffset[remoteNid];
+    uint64_t localLen = process->scanAttr.actcLen[localNid];
+    uint64_t remoteLen = process->scanAttr.actcLen[remoteNid];
+
+    if (localOffset >= localLen || remoteOffset >= remoteLen) {
+        return 0;
     }
-    if (remoteActCount->freqNum > numaOffset[remoteNid]) {
-        lastFreqNum = remoteActCount->freqNum - numaOffset[remoteNid];
-    } else {
-        lastFreqNum = 0;
+
+    // 构建频率桶
+    uint32_t l1Buckets[STRATEGY_ACTC_MAX_FREQ] = {0};
+    uint32_t l2Buckets[STRATEGY_ACTC_MAX_FREQ] = {0};
+
+    uint64_t l1Count = BuildFreqBucketsForNode(process, localNid, localOffset, l1Buckets);
+    uint64_t l2Count = BuildFreqBucketsForNode(process, remoteNid, remoteOffset, l2Buckets);
+
+    if (l1Count == 0 || l2Count == 0) {
+        return 0;
     }
-    migrateNum = MIN(localLen, remoteLen);
+
+    // 计算基础迁移数量（复用原有 MIN 链逻辑）
+    migrateNum = MIN(localLen - localOffset, remoteLen - remoteOffset);
     migrateNum = MIN(migrateNum, process->separateParam.maxMigrate);
     migrateNum = MIN(migrateNum, numaFreePage[localNid]);
     migrateNum = MIN(migrateNum, numaFreePage[remoteNid]);
-    migrateNum = MIN(migrateNum, lastZeroNum);
-    migrateNum = MIN(migrateNum, lastFreqNum);
-    migrateNum = MIN(migrateNum, localFree);
-    migrateNum = MIN(migrateNum, remoteFree);
+    migrateNum = MIN(migrateNum, remoteActCount->freqNum);  // 远端有频次的页面数
+
+    // 检查是否开启 swap
+    if (!process->enableSwap) {
+        SMAP_LOGGER_INFO("Pid %d not enable swap.", process->pid);
+        return 0;
+    }
+
+    // 计算频率权重和阈值
+    freqWt = CalcFreqWeightForVm(process, localNid, remoteNid, l2Buckets, remoteLen - remoteOffset);
+    slowThred = process->separateParam.slowThred * freqWt;
+
+    SMAP_LOGGER_INFO("Pid %d VM swap: freqWt %lu, slowThred: %u, localNid: %d, remoteNid: %d.",
+                      process->pid, freqWt, slowThred, localNid, remoteNid);
+
+    // 使用桶统计 + 二分查找计算迁移数量
+    migrateNum = CalLowMigrateNumByBuckets(migrateNum, freqWt, slowThred,
+                                            l1Buckets, l2Buckets, l1Count, l2Count);
+
     return migrateNum;
+}
+
+static uint64_t CalcSwapNum(ProcessAttr *process, int localNid, int remoteNid,
+                              const uint64_t numaOffset[], const uint64_t numaFreePage[])
+{
+    if (process->type == PROCESS_TYPE) {
+        uint64_t migrateNum;
+        uint64_t lastFreqNum;
+        uint64_t lastZeroNum;
+        ActCount *localActCount = &process->scanAttr.actCount[localNid];
+        ActCount *remoteActCount = &process->scanAttr.actCount[remoteNid];
+        uint64_t localLen = process->scanAttr.actcLen[localNid] - numaOffset[localNid];
+        uint64_t remoteLen = process->scanAttr.actcLen[remoteNid] - numaOffset[remoteNid];
+        uint64_t localFree = localActCount->pageNum - localActCount->whiteNum;
+        uint64_t remoteFree = remoteActCount->pageNum - remoteActCount->whiteNum;
+        if (localActCount->freqZero > numaOffset[localNid]) {
+            lastZeroNum = localActCount->freqZero - numaOffset[localNid];
+        } else {
+            lastZeroNum = 0;
+        }
+        if (remoteActCount->freqNum > numaOffset[remoteNid]) {
+            lastFreqNum = remoteActCount->freqNum - numaOffset[remoteNid];
+        } else {
+            lastFreqNum = 0;
+        }
+        migrateNum = MIN(localLen, remoteLen);
+        migrateNum = MIN(migrateNum, process->separateParam.maxMigrate);
+        migrateNum = MIN(migrateNum, numaFreePage[localNid]);
+        migrateNum = MIN(migrateNum, numaFreePage[remoteNid]);
+        migrateNum = MIN(migrateNum, lastZeroNum);
+        migrateNum = MIN(migrateNum, lastFreqNum);
+        migrateNum = MIN(migrateNum, localFree);
+        migrateNum = MIN(migrateNum, remoteFree);
+        return migrateNum;
+    } else if (process->type == VM_TYPE) {
+        return CalcSwapNum4KForVm(process, localNid, remoteNid, numaOffset, numaFreePage);
+    }
+
+    return 0;
 }
 
 static void FindThreshold(const SelectionMode mode, uint64_t nrMig, const uint32_t *buckets, int *thresholdFreq,
