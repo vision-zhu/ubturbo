@@ -126,6 +126,7 @@ list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/manage.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/thread.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/device.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/user_log/smap_user_log/smap_user_log.c)
+list(APPEND TEST_SRC ${SMAP_SRC}/src/user/user_log/smap_log_core.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/access_ioctl.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/oom_migrate.c)
 list(APPEND TEST_SRC ${SMAP_SRC}/src/user/manage/virt.c)
@@ -146,6 +147,7 @@ TARGET_GTEST(smap_dt)
 target_include_directories(smap_dt PUBLIC
     ${SMAP_SRC}/src
     ${SMAP_SRC}/src/user
+    ${SMAP_SRC}/src/user/user_log
     ${SMAP_SRC}/src/user/user_log/smap_user_log
     ${SMAP_SRC}/src/tiering
     ${SMAP_SRC}/src/drivers
