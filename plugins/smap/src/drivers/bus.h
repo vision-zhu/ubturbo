@@ -20,6 +20,7 @@ struct tracking_operations {
 	int (*tracking_set_sample_rate)(struct device *ldev, u32 sample_rate);
 	int (*tracking_read)(struct device *ldev, void *buffer, u32 length);
 	int (*tracking_ram_change)(struct device *ldev, void __user *argp);
+	void (*tracking_set_reinit_pending)(struct device *ldev);
 };
 
 struct tracking_dev {
@@ -69,5 +70,6 @@ struct tracking_dev *tracking_dev_add(struct device *ldev,
 				      u8 target_node);
 void tracking_dev_remove(struct tracking_dev *trk_dev);
 int tracking_core_reinit_actc_buffer(int nid);
+void set_reinit_pending_flag(int nid);
 
 #endif /* __TRACKING_BUS_H__ */

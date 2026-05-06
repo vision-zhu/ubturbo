@@ -164,6 +164,11 @@ static void access_tracking_enable(struct device *ldev)
 	if (adev->is_hist)
 		return;
 	down_write(&adev->buffer_lock);
+	/* check delayed reinit flag and execute reinit before enabling scan */
+	if (adev->need_reinit_actc) {
+		adev->need_reinit_actc = false;
+		(void)actc_buffer_reinit(adev);
+	}
 	init_actc_data(adev);
 	up_write(&adev->buffer_lock);
 	submit_scan_works(adev);
@@ -295,6 +300,17 @@ static int access_tracking_ram_change(struct device *ldev, void __user *argp)
 	return 0;
 }
 
+static void access_tracking_set_reinit_pending(struct device *ldev)
+{
+	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
+	if (adev->is_hist)
+		return;
+	down_write(&adev->buffer_lock);
+	adev->need_reinit_actc = true;
+	up_write(&adev->buffer_lock);
+	pr_debug("set reinit pending flag for node %d\n", adev->node);
+}
+
 static struct tracking_operations access_tracking_ops = {
 	.tracking_enable = access_tracking_enable,
 	.tracking_disable = access_tracking_disable,
@@ -302,6 +318,7 @@ static struct tracking_operations access_tracking_ops = {
 	.tracking_reinit_actc_buffer = access_tracking_reinit_actc_buffer,
 	.tracking_set_page_size = access_tracking_set_page_size,
 	.tracking_mode_set = access_tracking_mode_set,
+	.tracking_set_reinit_pending = access_tracking_set_reinit_pending,
 };
 
 int calc_access_len(struct access_tracking_dev *adev)

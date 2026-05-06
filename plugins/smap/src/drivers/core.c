@@ -341,6 +341,30 @@ int tracking_core_reinit_actc_buffer(int nid)
 
 EXPORT_SYMBOL(tracking_core_reinit_actc_buffer);
 
+static void node_tracking_set_reinit_pending(struct tracking_node_dev *node_dev,
+					      int nid)
+{
+	struct tracking_dev *trk_dev;
+	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
+		if (trk_dev->target_node != nid)
+			continue;
+		if (trk_dev->ops && trk_dev->ops->tracking_set_reinit_pending)
+			trk_dev->ops->tracking_set_reinit_pending(trk_dev->dev);
+	}
+}
+
+void set_reinit_pending_flag(int nid)
+{
+	struct tracking_node_dev *node_device;
+
+	list_for_each_entry(node_device, &trk_core_ctrl->node_cdev, list) {
+		if (node_device->target_node == nid) {
+			node_tracking_set_reinit_pending(node_device, nid);
+		}
+	}
+}
+EXPORT_SYMBOL(set_reinit_pending_flag);
+
 static void tracking_device_remove(struct tracking_dev *dev)
 {
 	struct tracking_node_dev *node_dev = dev->trk_node_device;

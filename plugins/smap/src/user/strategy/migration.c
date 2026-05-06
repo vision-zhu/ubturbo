@@ -270,17 +270,13 @@ static int CleanStrategyAttribute(struct ProcessManager *manager)
 static int PerformMigrationPreparation(struct ProcessManager *manager)
 {
     int ret = 0;
-    int isRamChanged = 0;
     ProcessAttr *current = manager->processes;
 
-    ret = GetRamIsChange(manager, &isRamChanged);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Get ram change failed! ret: %d.", ret);
-        return ret;
-    }
-    if (isRamChanged) {
-        return -EBUSY;
-    }
+    /*
+     * RAM change check removed: ACTC buffer reinit is now deferred to
+     * EnableTracking, so current cycle's data is reliable and migration
+     * can proceed normally.
+     */
     if (!current) {
         return -EINVAL;
     }
