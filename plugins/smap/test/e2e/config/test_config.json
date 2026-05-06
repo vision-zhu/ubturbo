@@ -1,0 +1,36 @@
+{
+    "environment": {
+        "host": "127.0.0.1",
+        "port": 22,
+        "username": "root",
+        "password": "",
+        "ssh_key_path": ""
+    },
+    "smap": {
+        "ko_path": "/home/zds/ubturbo_dev/plugins/smap/src/drivers",
+        "ko_tiering_path": "/home/zds/ubturbo_dev/plugins/smap/src/tiering",
+        "lib_path": "/home/zds/ubturbo_dev/build/lib/libubturbo_client.so",
+        "smap_lib_path": "/home/zds/ubturbo_dev/plugins/smap/output/smap/lib/libsmap.so",
+        "service_name": "ubturbo"
+    },
+    "numa": {
+        "local_numa_ids": [0, 1],
+        "remote_numa_config": [
+            {
+                "local_nid": 0,
+                "remote_nid": 10,
+                "size_mb": 10240
+            }
+        ],
+        "default_remote_nid": 10,
+        "default_size_mb": 10240
+    },
+    "test": {
+        "mode": "process",
+        "test_process_memory_mb": 256,
+        "migrate_ratio": 25,
+        "wait_time_sec": 5,
+        "verbose": true,
+        "log_path": "/tmp/smap_test.log"
+    }
+}
