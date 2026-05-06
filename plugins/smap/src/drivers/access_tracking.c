@@ -39,6 +39,7 @@
 
 static void work_func(struct work_struct *work);
 int calc_access_len(struct access_tracking_dev *adev);
+static int actc_buffer_reinit(struct access_tracking_dev *adev);
 
 #define to_accessbit_dev(n) container_of(n, struct access_tracking_dev, ldev)
 #define to_delay_work(n) container_of(n, struct delayed_work, work)
