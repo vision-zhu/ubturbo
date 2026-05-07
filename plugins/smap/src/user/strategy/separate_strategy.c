@@ -309,13 +309,12 @@ static void FindThreshold(const SelectionMode mode, uint64_t nrMig, const uint32
     }
 }
 
-static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t actcLen, ActcData *currentData,
+static void CollectPages(const SelectionMode mode, uint64_t skipCount, uint64_t actcLen, ActcData *currentData,
                          struct MigList *currMlist, uint64_t nrMig, int thresholdFreq, uint32_t takeAtThreshold)
 {
     uint32_t tmp = takeAtThreshold;
     size_t collected_count = 0;
-    size_t write_idx = offset;
-    for (size_t i = offset; i < actcLen && collected_count < nrMig; ++i) {
+    for (size_t i = 0; i < actcLen && collected_count < nrMig; ++i) {
         int freq = currentData[i].freq;
         bool shouldTake = false;
 
@@ -326,13 +325,11 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
         }
 
         if (shouldTake && !currentData[i].isWhiteListPage) {
-            currMlist->addr[collected_count++] = i;
-            if (i != write_idx) {
-                ActcData temp = currentData[i];
-                currentData[i] = currentData[write_idx];
-                currentData[write_idx] = temp;
+            if (skipCount > 0) {
+                skipCount--;
+                continue;
             }
-            write_idx++;
+            currMlist->addr[collected_count++] = i;
             if (freq == thresholdFreq) {
                 tmp--;
             }
@@ -343,17 +340,19 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
 static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
                                  const uint64_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode)
 {
-    uint64_t offset = numaOffset[from];
+    uint64_t skipCount = numaOffset[from];
     uint64_t n = process->scanAttr.actcLen[from];
     ActcData *currentData = process->scanAttr.actcData[from];
     struct MigList *currentMig = &mlist[from][to];
-    if (offset >= n) {
+
+    // 计算剩余可迁移的数量（总数 - 已迁移数量）
+    if (skipCount >= n) {
         currentMig->nr = 0;
         return 0;
     }
-    uint64_t rangeLen = n - offset;
+    uint64_t remainLen = n - skipCount;
     uint64_t nrMig = mlist[from][to].nr;
-    nrMig = MIN(nrMig, rangeLen);
+    nrMig = MIN(nrMig, remainLen);
     currentMig->nr = nrMig;
     if (nrMig == 0) {
         return 0;
@@ -373,7 +372,8 @@ static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_
         currentMig->addr = NULL;
         return -ENOMEM;
     }
-    for (uint64_t i = offset; i < n; ++i) {
+    // 桶统计从全部数据开始（i=0），用于计算全局阈值
+    for (uint64_t i = 0; i < n; ++i) {
         if (currentData[i].isWhiteListPage) {
             continue;
         }
@@ -383,8 +383,9 @@ static int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_
     }
     int thresholdFreq;
     uint32_t takeAtThreshold;
-    FindThreshold(mode, nrMig, buckets, &thresholdFreq, &takeAtThreshold);
-    CollectPages(mode, offset, n, currentData, currentMig, nrMig, thresholdFreq, takeAtThreshold);
+    // 阈值基于"选择 nrMig + skipCount 个"来计算，这样 CollectPages 跳过 skipCount 后还能选 nrMig 个
+    FindThreshold(mode, nrMig + skipCount, buckets, &thresholdFreq, &takeAtThreshold);
+    CollectPages(mode, skipCount, n, currentData, currentMig, nrMig, thresholdFreq, takeAtThreshold);
     free(buckets);
     return 0;
 }
@@ -543,6 +544,16 @@ static int FreqAscFunc(const void *actc1, const void *actc2)
     } else {
         return (int)a2->prior - (int)a1->prior;
     }
+}
+
+static int AddrAscFunc(const void *a, const void *b)
+{
+    uint64_t addr1 = *(uint64_t *)a;
+    uint64_t addr2 = *(uint64_t *)b;
+    if (addr1 == addr2) {
+        return 0;
+    }
+    return addr1 < addr2 ? -1 : 1;
 }
 
 static int FreqDescFunc(const void *actc1, const void *actc2)
@@ -704,6 +715,11 @@ static int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray
 
             for (uint64_t i = 0; i < pagesToThisDest; i++) {
                 mlist[from][to].addr[i] = migAddrArray[from][curMigIndex + i];
+            }
+
+            // 地址升序排序，确保 convert_pos_to_paddr_sorted 正确工作
+            if (pagesToThisDest > 1) {
+                qsort(mlist[from][to].addr, pagesToThisDest, sizeof(uint64_t), AddrAscFunc);
             }
 
             destFreeList[to] -= pagesToThisDest;
