@@ -58,11 +58,7 @@ static int acpi_table_build_mem(struct acpi_subtable_header *header)
 		return -EINVAL;
 	}
 	mem->node = node;
-	/* Calculate number of local NUMA node which is presented on SRAT table */
-	if (mem->node >= nr_local_numa) {
-		nr_local_numa = mem->node + 1;
-		pr_info("local NUMA nodes amount: %u\n", nr_local_numa);
-	}
+	/* nr_local_numa will be set from user space via ioctl */
 
 	/* Add to list and ensure the ascending order of acpi_mem.mem */
 	if (list_empty(&acpi_mem.mem)) {

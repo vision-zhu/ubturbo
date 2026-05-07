@@ -225,6 +225,24 @@ static long ioctl_create_smap_procfs(void __user *argp)
 	return 0;
 }
 
+static long ioctl_set_nr_local_numa(void __user *argp)
+{
+	int nr_local_numa_user;
+
+	if (copy_from_user(&nr_local_numa_user, argp, sizeof(int)))
+		return -EFAULT;
+
+	if (nr_local_numa_user <= 0 || nr_local_numa_user > SMAP_MAX_NUMNODES) {
+		pr_err("invalid nr_local_numa: %d passed from user space\n",
+		       nr_local_numa_user);
+		return -EINVAL;
+	}
+
+	nr_local_numa = nr_local_numa_user;
+	pr_info("set nr_local_numa to %d from user space\n", nr_local_numa);
+	return 0;
+}
+
 #ifndef BYTES_PER_LONG
 #define BYTES_PER_LONG 8
 #endif
@@ -577,6 +595,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_get_tracking(argp);
 	case SMAP_ACCESS_CREATE_PROCFS:
 		return ioctl_create_smap_procfs(argp);
+	case SMAP_ACCESS_SET_NR_LOCAL_NUMA:
+		return ioctl_set_nr_local_numa(argp);
 	default:
 		rc = -ENOTTY;
 	}

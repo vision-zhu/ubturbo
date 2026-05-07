@@ -475,6 +475,24 @@ static int __ioctl_check_pagesize(void __user *argp)
 	return pageType == smap_pgsize ? 0 : -EINVAL;
 }
 
+static int __ioctl_set_nr_local_numa(void __user *argp)
+{
+	int nr_local_numa_user;
+
+	if (copy_from_user(&nr_local_numa_user, argp, sizeof(int)))
+		return -EFAULT;
+
+	if (nr_local_numa_user <= 0 || nr_local_numa_user > SMAP_MAX_NUMNODES) {
+		pr_err("invalid nr_local_numa: %d passed from user space\n",
+		       nr_local_numa_user);
+		return -EINVAL;
+	}
+
+	nr_local_numa = nr_local_numa_user;
+	pr_info("set nr_local_numa to %d from user space\n", nr_local_numa);
+	return 0;
+}
+
 static long smu_mig_ioctl(struct file *file, unsigned int cmd,
 			  unsigned long arg)
 {
@@ -497,6 +515,10 @@ static long smu_mig_ioctl(struct file *file, unsigned int cmd,
 	}
 	case SMAP_MIG_PID_REMOTE_NUMA: {
 		rc = __ioctl_migrate_pid_remote_numa(argp);
+		break;
+	}
+	case SMAP_MIG_SET_NR_LOCAL_NUMA: {
+		rc = __ioctl_set_nr_local_numa(argp);
 		break;
 	}
 	default:

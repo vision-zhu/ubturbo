@@ -197,11 +197,7 @@ int init_acpi_mem(void)
 		}
 		pr_info("node: %d PXM: %d [%#llx-%#llx]\n", mem->node, mem->pxm,
 			mem->start, mem->end);
-		if (mem->node >= nr_local_numa) {
-			nr_local_numa = mem->node + 1;
-			pr_info("number of local NUMA node: %u\n",
-				nr_local_numa);
-		}
+		/* nr_local_numa will be set from user space via ioctl */
 	}
 	calc_node_distance();
 

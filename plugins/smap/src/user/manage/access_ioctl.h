@@ -68,12 +68,14 @@ struct UserInfo {
 #define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct UserInfo)
+#define SMAP_ACCESS_SET_NR_LOCAL_NUMA _IOW(SMAP_ACCESS_MAGIC, 7, int)
 
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(size_t *len);
 int AccessIoctlCreateProcfs(struct UserInfo *ui);
+int AccessIoctlSetNrLocalNuma(int nrLocalNuma);
 int AccessRead(size_t len, char *buf);
 
 #endif /* __ACCESS_IOCTL_H__ */

@@ -174,6 +174,20 @@ int ConfigureTrackingDevices(struct ProcessManager *manager)
         return ret;
     }
 
+    SMAP_LOGGER_INFO("Local NUMA count: %d, syncing to kernel.", manager->nrLocalNuma);
+
+    ret = ioctl(manager->fds.access, SMAP_ACCESS_SET_NR_LOCAL_NUMA, manager->nrLocalNuma);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("Failed to set nr_local_numa to access module: %d.", -errno);
+        return -EBADF;
+    }
+
+    ret = ioctl(manager->fds.migrate, SMAP_MIG_SET_NR_LOCAL_NUMA, manager->nrLocalNuma);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("Failed to set nr_local_numa to migrate module: %d.", -errno);
+        return -EBADF;
+    }
+
     ret = ConfigTrackingDev(manager->fds.nodes, manager->tracking.pageSize);
     if (ret) {
         SMAP_LOGGER_ERROR("Error when config tracking-node devices.");
