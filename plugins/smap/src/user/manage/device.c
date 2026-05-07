@@ -105,83 +105,34 @@ static int ConfigTrackingDev(int *trackingFds, uint32_t pageSize)
     return ret;
 }
 
-static bool IsLocalNuma(unsigned long nid)
+static int GetNrLocalNumaFromKernel(struct ProcessManager *manager)
 {
-#define SYS_NODE_REMOTE_LEN 50
-    char path[SYS_NODE_REMOTE_LEN] = { 0 };
-#undef SYS_NODE_REMOTE_LEN
-
-    if (nid >= LOCAL_NUMA_NUM) {
-        return false;
+    int nrLocalNuma = 0;
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_NR_LOCAL_NUMA, &nrLocalNuma);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("Failed to get nr_local_numa from access module: %d.", -errno);
+        return -EBADF;
     }
 
-    int ret = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/node%lu/remote", SYS_NODE_PATH, nid);
-    if (ret == -1) {
-        SMAP_LOGGER_ERROR("Failed to build node%lu remote path.", nid);
-        return false;
+    if (nrLocalNuma <= 0 || nrLocalNuma > MAX_NODES) {
+        SMAP_LOGGER_ERROR("Invalid nr_local_numa from kernel: %d.", nrLocalNuma);
+        return -EINVAL;
     }
 
-    FILE *file = fopen(path, "r");
-    if (!file) {
-        SMAP_LOGGER_ERROR("Failed to open node%lu remote file.", nid);
-        return false;
-    }
-
-    int c = fgetc(file);
-    if (fclose(file) != 0) {
-        SMAP_LOGGER_WARNING("Failed to close node%lu remote file: %d.", nid, errno);
-    }
-    if (c == EOF) {
-        SMAP_LOGGER_ERROR("Failed to read node%lu remote file.", nid);
-        return false;
-    }
-
-    return c == '0';
-}
-
-static int SetNrLocalNuma(struct ProcessManager *manager)
-{
-    DIR *dir = opendir(SYS_NODE_PATH);
-    if (!dir) {
-        SMAP_LOGGER_ERROR("Failed to open node directory: %d.", -errno);
-        return -ENODEV;
-    }
-
-#define NODE_LITERAL_LEN 4
-    struct dirent *entry;
-    manager->nrLocalNuma = 0;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strncmp(entry->d_name, "node", NODE_LITERAL_LEN) == 0) {
-            char *numStr = entry->d_name + NODE_LITERAL_LEN;
-            char *endPtr;
-            unsigned long num = strtoul(numStr, &endPtr, DECIMAL);
-            if (*numStr != '\0' && *endPtr == '\0' && IsLocalNuma(num) && num >= manager->nrLocalNuma) {
-                manager->nrLocalNuma = num + 1;
-            }
-        }
-    }
-    closedir(dir);
-#undef NODE_LITERAL_LEN
-
+    manager->nrLocalNuma = nrLocalNuma;
+    SMAP_LOGGER_INFO("Got nr_local_numa from kernel: %d.", manager->nrLocalNuma);
     return 0;
 }
 
 int ConfigureTrackingDevices(struct ProcessManager *manager)
 {
-    int ret = SetNrLocalNuma(manager);
+    int ret = GetNrLocalNumaFromKernel(manager);
     if (ret) {
-        SMAP_LOGGER_ERROR("Unable to set local NUMA num: %d.", ret);
+        SMAP_LOGGER_ERROR("Unable to get local NUMA num from kernel: %d.", ret);
         return ret;
     }
 
-    SMAP_LOGGER_INFO("Local NUMA count: %d, syncing to kernel.", manager->nrLocalNuma);
-
-    ret = ioctl(manager->fds.access, SMAP_ACCESS_SET_NR_LOCAL_NUMA, manager->nrLocalNuma);
-    if (ret < 0) {
-        SMAP_LOGGER_ERROR("Failed to set nr_local_numa to access module: %d.", -errno);
-        return -EBADF;
-    }
-
+    /* Sync nr_local_numa to migrate module */
     ret = ioctl(manager->fds.migrate, SMAP_MIG_SET_NR_LOCAL_NUMA, manager->nrLocalNuma);
     if (ret < 0) {
         SMAP_LOGGER_ERROR("Failed to set nr_local_numa to migrate module: %d.", -errno);

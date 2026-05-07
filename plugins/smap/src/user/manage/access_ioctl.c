@@ -124,13 +124,13 @@ int AccessIoctlCreateProcfs(struct UserInfo *ui)
     return ret;
 }
 
-int AccessIoctlSetNrLocalNuma(int nrLocalNuma)
+int AccessIoctlGetNrLocalNuma(int *nrLocalNuma)
 {
     struct ProcessManager *manager = GetProcessManager();
 
-    int ret = ioctl(manager->fds.access, SMAP_ACCESS_SET_NR_LOCAL_NUMA, nrLocalNuma);
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_NR_LOCAL_NUMA, nrLocalNuma);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("access set nr_local_numa error: %d\n", -errno);
+        SMAP_LOGGER_ERROR("access get nr_local_numa error: %d\n", -errno);
         ret = -EBADF;
     }
     return ret;
