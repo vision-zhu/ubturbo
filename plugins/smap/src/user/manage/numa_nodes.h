@@ -37,17 +37,6 @@ static inline int GetL1(uint32_t nodes)
     return (nid >= 0 && nid < LOCAL_NUMA_BITS) ? nid : NUMA_NO_NODE;
 }
 
-static inline void ClearL1(uint32_t *nodes)
-{
-    *nodes &= ~LOCAL_NUMA_MASK;
-}
-
-static inline void SetL1(uint32_t *nodes, int nid)
-{
-    ClearL1(nodes);
-    *nodes |= (1 << nid);
-}
-
 static inline void AddL1(uint32_t *nodes, int nid)
 {
     *nodes |= (1 << nid);

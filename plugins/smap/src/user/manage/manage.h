@@ -503,11 +503,6 @@ static inline int GetAttrL1(ProcessAttr *attr)
     return GetL1(attr->numaAttr.numaNodes);
 }
 
-static inline void SetAttrL1(ProcessAttr *attr, int nid)
-{
-    SetL1(&attr->numaAttr.numaNodes, nid);
-}
-
 static inline bool EqualToAttrL1(ProcessAttr *attr, int nid)
 {
     return EqualToL1(attr->numaAttr.numaNodes, nid);
@@ -528,22 +523,10 @@ static inline bool NotInAttrL1(ProcessAttr *attr, int nid)
     return !InAttrL1(attr, nid);
 }
 
-static inline uint64_t GetL1ActcLen(ProcessAttr *attr)
-{
-    int nid = GetAttrL1(attr);
-    return (nid == NUMA_NO_NODE) ? 0 : attr->scanAttr.actcLen[nid];
-}
-
 static inline ActCount *GetL1ActCount(ProcessAttr *attr)
 {
     int nid = GetAttrL1(attr);
     return (nid == NUMA_NO_NODE) ? NULL : &attr->scanAttr.actCount[nid];
-}
-
-static inline ActcData *GetL1ActcData(ProcessAttr *attr)
-{
-    int nid = GetAttrL1(attr);
-    return (nid == NUMA_NO_NODE) ? NULL : attr->scanAttr.actcData[nid];
 }
 
 /* L2 numaNodes helper functions */
@@ -599,22 +582,10 @@ static inline bool NotInAttrL2(ProcessAttr *attr, int nid)
     return !InAttrL2(attr, nid);
 }
 
-static inline uint64_t GetL2ActcLen(ProcessAttr *attr)
-{
-    int nid = GetAttrL2(attr);
-    return (nid == NUMA_NO_NODE) ? 0 : attr->scanAttr.actcLen[nid];
-}
-
 static inline ActCount *GetL2ActCount(ProcessAttr *attr)
 {
     int nid = GetAttrL2(attr);
     return (nid == NUMA_NO_NODE) ? NULL : &attr->scanAttr.actCount[nid];
-}
-
-static inline ActcData *GetL2ActcData(ProcessAttr *attr)
-{
-    int nid = GetAttrL2(attr);
-    return (nid == NUMA_NO_NODE) ? NULL : attr->scanAttr.actcData[nid];
 }
 
 static inline bool IsNumaMapLineHuge(char *line)
