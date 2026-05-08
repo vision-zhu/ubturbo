@@ -224,3 +224,234 @@ TEST_F(DriversAcpiMemTest, CalcAcidxPaddrAcpi)
     EXPECT_EQ(0, ret);
     list_del(&mem.segment);
 }
+
+extern "C" int drivers_max_node_id;
+extern "C" int drivers_nr_local_numa;
+
+/* Test max_node_id update in acpi_table_build_mem */
+TEST_F(DriversAcpiMemTest, AcpiTableBuildMemMaxNodeId)
+{
+    struct acpi_srat_mem_affinity tmp;
+    struct acpi_mem_segment *am;
+    struct acpi_mem_segment *tmp1;
+    drivers_max_node_id = -1;
+    tmp.flags = 1;
+    tmp.base_address = 0;
+    tmp.length = 10;
+    MOCKER(pxm_to_node).stubs().will(returnValue(3));
+    int ret = drivers_acpi_table_build_mem(&tmp.header);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(3, drivers_max_node_id);
+
+    list_for_each_entry_safe(am, tmp1, &drivers_acpi_mem.mem, segment)
+    {
+        list_del(&am->segment);
+        kfree(am);
+    }
+    drivers_max_node_id = -1;
+}
+
+/* Test GICC affinity parsing (ARM64) */
+extern "C" int drivers_acpi_parse_gicc_affinity(union acpi_subtable_headers *header, const unsigned long end);
+TEST_F(DriversAcpiMemTest, AcpiParseGiccAffinityEnabled)
+{
+    struct acpi_srat_gicc_affinity gicc;
+    drivers_max_node_id = -1;
+    gicc.flags = ACPI_SRAT_GICC_ENABLED;
+    gicc.proximity_domain = 5;
+    MOCKER(pxm_to_node).stubs().will(returnValue(5));
+    int ret = drivers_acpi_parse_gicc_affinity((union acpi_subtable_headers *)&gicc, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(5, drivers_max_node_id);
+    drivers_max_node_id = -1;
+}
+
+TEST_F(DriversAcpiMemTest, AcpiParseGiccAffinityDisabled)
+{
+    struct acpi_srat_gicc_affinity gicc;
+    drivers_max_node_id = -1;
+    gicc.flags = 0; /* Not enabled */
+    int ret = drivers_acpi_parse_gicc_affinity((union acpi_subtable_headers *)&gicc, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(-1, drivers_max_node_id);
+}
+
+TEST_F(DriversAcpiMemTest, AcpiParseGiccAffinityNoNode)
+{
+    struct acpi_srat_gicc_affinity gicc;
+    drivers_max_node_id = 2;
+    gicc.flags = ACPI_SRAT_GICC_ENABLED;
+    gicc.proximity_domain = 10;
+    MOCKER(pxm_to_node).stubs().will(returnValue(NUMA_NO_NODE));
+    int ret = drivers_acpi_parse_gicc_affinity((union acpi_subtable_headers *)&gicc, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(2, drivers_max_node_id); /* Should not update */
+    drivers_max_node_id = -1;
+}
+
+/* Test CPU affinity parsing (x86) */
+extern "C" int drivers_acpi_parse_cpu_affinity(union acpi_subtable_headers *header, const unsigned long end);
+TEST_F(DriversAcpiMemTest, AcpiParseCpuAffinityEnabled)
+{
+    struct acpi_srat_cpu_affinity cpu;
+    drivers_max_node_id = -1;
+    cpu.flags = ACPI_SRAT_CPU_ENABLED;
+    cpu.proximity_domain_lo = 4;
+    cpu.proximity_domain_hi[0] = 0;
+    cpu.proximity_domain_hi[1] = 0;
+    cpu.proximity_domain_hi[2] = 0;
+    MOCKER(pxm_to_node).stubs().will(returnValue(4));
+    int ret = drivers_acpi_parse_cpu_affinity((union acpi_subtable_headers *)&cpu, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(4, drivers_max_node_id);
+    drivers_max_node_id = -1;
+}
+
+TEST_F(DriversAcpiMemTest, AcpiParseCpuAffinityDisabled)
+{
+    struct acpi_srat_cpu_affinity cpu;
+    drivers_max_node_id = -1;
+    cpu.flags = 0; /* Not enabled */
+    int ret = drivers_acpi_parse_cpu_affinity((union acpi_subtable_headers *)&cpu, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(-1, drivers_max_node_id);
+}
+
+/* Test X2APIC affinity parsing (x86) */
+extern "C" int drivers_acpi_parse_x2apic_affinity(union acpi_subtable_headers *header, const unsigned long end);
+TEST_F(DriversAcpiMemTest, AcpiParseX2apicAffinityEnabled)
+{
+    struct acpi_srat_x2apic_cpu_affinity x2apic;
+    drivers_max_node_id = -1;
+    x2apic.flags = ACPI_SRAT_CPU_ENABLED;
+    x2apic.proximity_domain = 7;
+    MOCKER(pxm_to_node).stubs().will(returnValue(7));
+    int ret = drivers_acpi_parse_x2apic_affinity((union acpi_subtable_headers *)&x2apic, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(7, drivers_max_node_id);
+    drivers_max_node_id = -1;
+}
+
+TEST_F(DriversAcpiMemTest, AcpiParseX2apicAffinityDisabled)
+{
+    struct acpi_srat_x2apic_cpu_affinity x2apic;
+    drivers_max_node_id = -1;
+    x2apic.flags = 0; /* Not enabled */
+    int ret = drivers_acpi_parse_x2apic_affinity((union acpi_subtable_headers *)&x2apic, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(-1, drivers_max_node_id);
+}
+
+TEST_F(DriversAcpiMemTest, AcpiParseX2apicAffinityNoNode)
+{
+    struct acpi_srat_x2apic_cpu_affinity x2apic;
+    drivers_max_node_id = 3;
+    x2apic.flags = ACPI_SRAT_CPU_ENABLED;
+    x2apic.proximity_domain = 100;
+    MOCKER(pxm_to_node).stubs().will(returnValue(NUMA_NO_NODE));
+    int ret = drivers_acpi_parse_x2apic_affinity((union acpi_subtable_headers *)&x2apic, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(3, drivers_max_node_id); /* Should not update */
+    drivers_max_node_id = -1;
+}
+
+/* Test nr_local_numa calculation in init_acpi_mem */
+extern "C" acpi_status acpi_get_table(char *signature, u32 instance, struct acpi_table_header **out_table);
+extern "C" void acpi_put_table(struct acpi_table_header *table);
+TEST_F(DriversAcpiMemTest, InitAcpiMemNrLocalNuma)
+{
+    struct acpi_mem_segment *am;
+    struct acpi_mem_segment *tmp1;
+
+    /* Clean up existing list */
+    list_for_each_entry_safe(am, tmp1, &drivers_acpi_mem.mem, segment)
+    {
+        list_del(&am->segment);
+        kfree(am);
+    }
+    drivers_acpi_mem.len = 0;
+    drivers_max_node_id = 5;
+    drivers_nr_local_numa = 0;
+
+    acpi_disabled = 0;
+    MOCKER(acpi_get_table).stubs().will(returnValue(ACPI_OK));
+    MOCKER(acpi_parse_entries_array).stubs().will(returnValue(1));
+    MOCKER(acpi_put_table).stubs();
+
+    int ret = drivers_init_acpi_mem();
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(6, drivers_nr_local_numa); /* max_node_id + 1 */
+
+    drivers_max_node_id = -1;
+    drivers_nr_local_numa = 0;
+}
+
+TEST_F(DriversAcpiMemTest, InitAcpiMemNoValidNode)
+{
+    struct acpi_mem_segment *am;
+    struct acpi_mem_segment *tmp1;
+
+    /* Clean up existing list */
+    list_for_each_entry_safe(am, tmp1, &drivers_acpi_mem.mem, segment)
+    {
+        list_del(&am->segment);
+        kfree(am);
+    }
+    drivers_acpi_mem.len = 0;
+    drivers_max_node_id = -1; /* No valid node */
+    drivers_nr_local_numa = 0;
+
+    acpi_disabled = 0;
+    MOCKER(acpi_get_table).stubs().will(returnValue(ACPI_OK));
+    MOCKER(acpi_parse_entries_array).stubs().will(returnValue(0));
+    MOCKER(acpi_put_table).stubs();
+
+    int ret = drivers_init_acpi_mem();
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, drivers_nr_local_numa); /* Should remain 0 */
+}
+
+/* Test reset_acpi_mem resets max_node_id and nr_local_numa */
+TEST_F(DriversAcpiMemTest, ResetAcpiMemMaxNodeId)
+{
+    struct acpi_mem_segment *mem_temp = (struct acpi_mem_segment *)kzalloc(sizeof(struct acpi_mem_segment), GFP_KERNEL);
+    ASSERT_NE(nullptr, mem_temp);
+    INIT_LIST_HEAD(&drivers_acpi_mem.mem);
+    list_add_tail(&mem_temp->segment, &drivers_acpi_mem.mem);
+    drivers_acpi_mem.len = 1;
+    drivers_max_node_id = 10;
+    drivers_nr_local_numa = 11;
+
+    drivers_reset_acpi_mem();
+    EXPECT_EQ(0, drivers_acpi_mem.len);
+    EXPECT_EQ(-1, drivers_max_node_id);
+    EXPECT_EQ(0, drivers_nr_local_numa);
+}
+
+/* Test max_node_id update when node > existing max */
+TEST_F(DriversAcpiMemTest, MaxNodeIdUpdateGreater)
+{
+    drivers_max_node_id = 3;
+    struct acpi_srat_gicc_affinity gicc;
+    gicc.flags = ACPI_SRAT_GICC_ENABLED;
+    gicc.proximity_domain = 8;
+    MOCKER(pxm_to_node).stubs().will(returnValue(8));
+    int ret = drivers_acpi_parse_gicc_affinity((union acpi_subtable_headers *)&gicc, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(8, drivers_max_node_id);
+    drivers_max_node_id = -1;
+}
+
+/* Test max_node_id not updated when node <= existing max */
+TEST_F(DriversAcpiMemTest, MaxNodeIdNoUpdateLesser)
+{
+    drivers_max_node_id = 10;
+    struct acpi_srat_gicc_affinity gicc;
+    gicc.flags = ACPI_SRAT_GICC_ENABLED;
+    gicc.proximity_domain = 5;
+    MOCKER(pxm_to_node).stubs().will(returnValue(5));
+    int ret = drivers_acpi_parse_gicc_affinity((union acpi_subtable_headers *)&gicc, 0);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(10, drivers_max_node_id); /* Should remain 10 */
+    drivers_max_node_id = -1;
+}

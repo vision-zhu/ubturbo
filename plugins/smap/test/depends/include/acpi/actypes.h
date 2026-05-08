@@ -11,4 +11,9 @@ typedef u32 acpi_name;		/* 4-byte ACPI name */
 typedef char *acpi_string;	/* Null terminated ASCII string */
 typedef void *acpi_handle;	/* Actually a ptr to a NS Node */
 
+/* ACPI Status Values */
+#define ACPI_OK                 (0)  /* Success */
+
+#define ACPI_FAILURE(a)         (a)  /* Failure */
+
 #endif				/* __ACTYPES_H__ */

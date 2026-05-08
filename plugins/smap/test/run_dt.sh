@@ -155,6 +155,10 @@ replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "reset_acpi_mem" "dri
 replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "get_node_actc_len" "drivers_get_node_actc_len"
 replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "is_paddr_local" "drivers_is_paddr_local"
 replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "acpi_table_build_mem" "drivers_acpi_table_build_mem"
+replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "acpi_parse_gicc_affinity" "drivers_acpi_parse_gicc_affinity"
+replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "acpi_parse_cpu_affinity" "drivers_acpi_parse_cpu_affinity"
+replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "acpi_parse_x2apic_affinity" "drivers_acpi_parse_x2apic_affinity"
+replace_string "${code_dir}/src/drivers/access_acpi_mem.c" "max_node_id" "drivers_max_node_id"
 
 replace_string "${code_dir}/src/drivers/access_acpi_mem.h" "nr_local_numa" "drivers_nr_local_numa"
 replace_string "${code_dir}/src/drivers/access_acpi_mem.h" "is_paddr_local" "drivers_is_paddr_local"
