@@ -43,6 +43,7 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
+#define SCAN_GROUP_SIZE (64UL * 1024)  /* 64KiB分组扫描优化 */
 
 LIST_HEAD(ham_pid_list);
 LIST_HEAD(statistic_pid_list);
@@ -1274,6 +1275,18 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 	if (is_swap_pte(ptent)) {
 		return 0;
 	}
+
+	/* 64KiB分组优化：非STATISTIC_SCAN时，首页young则跳过后续页 */
+	if (pte_walk->type != STATISTIC_SCAN) {
+		bool is_first = (addr & (SCAN_GROUP_SIZE - 1)) == 0;
+		if (is_first)
+			pte_walk->group_hot = pte_present(ptent) && pte_young(ptent);
+		else if (pte_walk->group_hot) {
+			actc_data_add_fast(paddr, PAGE_SIZE);
+			goto skip_scan;
+		}
+	}
+
 	if (pte_present(ptent) && pte_young(ptent)) {
 		if (pte_walk->type == STATISTIC_SCAN)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
@@ -1286,6 +1299,7 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			}
 		}
 	}
+skip_scan:
 	if (access_pid_cur_last_scanning(pte_walk->ap))
 		add_to_bm_normal(paddr, pte_walk->ap);
 	return 0;
