@@ -637,3 +637,68 @@ TEST_F(MigInitTest, __IoctlMigrateE2ETest)
     }
     vfree(msg.mig_list);
 }
+
+TEST_F(MigInitTest, CheckMigMsg4KMultipleRemoteNumaSameNode)
+{
+    struct mig_payload payloads[2];
+    nr_local_numa = 4;
+    smap_pgsize = NORMAL_PAGE;
+
+    payloads[0].src_nid = 4;
+    payloads[0].dest_nid = 5;
+    payloads[0].keep_ratio = 50;
+    payloads[1].src_nid = 4;
+    payloads[1].dest_nid = 6;
+    payloads[1].keep_ratio = 50;
+
+    int ret = check_mig_msg(payloads, 2);
+    EXPECT_EQ(0, ret);
+}
+
+TEST_F(MigInitTest, CheckMigMsg4KMultipleRemoteNumaDifferentNodes)
+{
+    struct mig_payload payloads[2];
+    nr_local_numa = 4;
+    smap_pgsize = NORMAL_PAGE;
+
+    payloads[0].src_nid = 4;
+    payloads[0].dest_nid = 5;
+    payloads[0].keep_ratio = 50;
+    payloads[1].src_nid = 6;
+    payloads[1].dest_nid = 7;
+    payloads[1].keep_ratio = 50;
+
+    int ret = check_mig_msg(payloads, 2);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(MigInitTest, CheckMigMsg2MMultipleRemoteNumaDifferentNodes)
+{
+    struct mig_payload payloads[2];
+    nr_local_numa = 4;
+    smap_pgsize = HUGE_PAGE;
+
+    payloads[0].src_nid = 4;
+    payloads[0].dest_nid = 5;
+    payloads[0].keep_ratio = 50;
+    payloads[1].src_nid = 6;
+    payloads[1].dest_nid = 7;
+    payloads[1].keep_ratio = 50;
+
+    int ret = check_mig_msg(payloads, 2);
+    EXPECT_EQ(0, ret);
+}
+
+TEST_F(MigInitTest, CheckMigMsg4KSingleRemoteNuma)
+{
+    struct mig_payload payloads[1];
+    nr_local_numa = 4;
+    smap_pgsize = NORMAL_PAGE;
+
+    payloads[0].src_nid = 4;
+    payloads[0].dest_nid = 5;
+    payloads[0].keep_ratio = 50;
+
+    int ret = check_mig_msg(payloads, 1);
+    EXPECT_EQ(0, ret);
+}

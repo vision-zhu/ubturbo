@@ -299,7 +299,10 @@ static int __ioctl_migrate_numa(void __user *argp)
 
 static int check_mig_msg(struct mig_payload *payloads, int len)
 {
-	for (int i = 0; i < len; i++) {
+	int first_src_nid;
+	int i;
+
+	for (i = 0; i < len; i++) {
 		if (!is_numa_remote(payloads[i].src_nid)) {
 			pr_err("invalid source node id: %d passed to check params\n",
 				   payloads[i].src_nid);
@@ -319,6 +322,17 @@ static int check_mig_msg(struct mig_payload *payloads, int len)
 			return -EINVAL;
 		}
 	}
+
+	if (smap_pgsize != HUGE_PAGE && len > 1) {
+		first_src_nid = payloads[0].src_nid;
+		for (i = 1; i < len; i++) {
+			if (payloads[i].src_nid != first_src_nid) {
+				pr_err("4K process migration does not support multiple remote NUMA nodes\n");
+				return -EINVAL;
+			}
+		}
+	}
+
 	return 0;
 }
 
