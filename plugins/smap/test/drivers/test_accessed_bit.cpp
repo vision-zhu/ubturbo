@@ -29,6 +29,7 @@
 #include "accessed_bit.h"
 #include "access_tracking_wrapper.h"
 #include "access_iomem.h"
+#include "hist_tracking.h"
 
 using namespace std;
 
@@ -728,4 +729,203 @@ TEST_F(AccessedBitTest, scan_accessed_bit_forward_mm_invalid_page)
     ap.type = NORMAL_SCAN;
     int ret = scan_accessed_bit_forward_mm(&ap, PAGE_SIZE_2M);
     EXPECT_EQ(-EINVAL, ret);
+}
+
+extern "C" int get_numa_id_by_paddr(phys_addr_t paddr);
+extern "C" bool pfn_valid(unsigned long pfn);
+extern "C" int page_to_nid(const struct page *page);
+TEST_F(AccessedBitTest, GetNumaIdByPaddrNormal)
+{
+    struct page page;
+    phys_addr_t paddr = 4096;
+
+    MOCKER(pfn_valid).stubs().will(returnValue(true));
+    MOCKER(pfn_to_online_page).stubs().will(returnValue(&page));
+    MOCKER(page_to_nid).stubs().will(returnValue(1));
+    int ret = get_numa_id_by_paddr(paddr);
+    EXPECT_EQ(1, ret);
+}
+
+TEST_F(AccessedBitTest, GetNumaIdByPaddrInvalidPfn)
+{
+    phys_addr_t paddr = 4096;
+
+    MOCKER(pfn_valid).stubs().will(returnValue(false));
+    int ret = get_numa_id_by_paddr(paddr);
+    EXPECT_EQ(NUMA_NO_NODE, ret);
+}
+
+TEST_F(AccessedBitTest, GetNumaIdByPaddrOfflinePage)
+{
+    phys_addr_t paddr = 4096;
+
+    MOCKER(pfn_valid).stubs().will(returnValue(true));
+    MOCKER(pfn_to_online_page).stubs().will(returnValue((struct page *)nullptr));
+    int ret = get_numa_id_by_paddr(paddr);
+    EXPECT_EQ(NUMA_NO_NODE, ret);
+}
+
+extern "C" int calc_paddr_nid_idx(u64 paddr, int page_size, int *nid, u64 *pa_idx, bool *is_hist);
+extern "C" int calc_paddr_acidx_acpi_known_nid(u64 paddr, int nid, u64 *index, int page_size);
+extern "C" int calc_paddr_acidx_iomem_known_nid(u64 pa, int nid, u64 *index, int page_size);
+extern "C" struct list_head access_dev;
+extern "C" int nr_local_numa;
+TEST_F(AccessedBitTest, CalcPaddrNidIdxNormal)
+{
+    int nid = 0;
+    u64 pa_idx = 0;
+    bool is_hist = false;
+    struct access_tracking_dev adev;
+
+    memset(&adev, 0, sizeof(adev));
+    adev.node = 1;
+    adev.page_count = 1024;
+    adev.is_hist = false;
+
+    INIT_LIST_HEAD(&access_dev);
+    list_add_tail(&adev.list, &access_dev);
+
+    nr_local_numa = 4;
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(1));
+    MOCKER(calc_paddr_acidx_acpi_known_nid).stubs().will(returnValue(0));
+    int ret = calc_paddr_nid_idx(4096, PAGE_SIZE, &nid, &pa_idx, &is_hist);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(1, nid);
+    EXPECT_EQ(false, is_hist);
+
+    list_del(&adev.list);
+}
+
+TEST_F(AccessedBitTest, CalcPaddrNidIdxInvalidNid)
+{
+    int nid = 0;
+    u64 pa_idx = 0;
+    bool is_hist = false;
+
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(NUMA_NO_NODE));
+    int ret = calc_paddr_nid_idx(4096, PAGE_SIZE, &nid, &pa_idx, &is_hist);
+    EXPECT_EQ(-ERANGE, ret);
+}
+
+TEST_F(AccessedBitTest, CalcPaddrNidIdxOutOfRange)
+{
+    int nid = 0;
+    u64 pa_idx = 0;
+    bool is_hist = false;
+
+    nr_local_numa = 4;
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(1));
+    MOCKER(calc_paddr_acidx_acpi_known_nid).stubs().will(returnValue(-ERANGE));
+    int ret = calc_paddr_nid_idx(4096, PAGE_SIZE, &nid, &pa_idx, &is_hist);
+    EXPECT_EQ(-ERANGE, ret);
+}
+
+TEST_F(AccessedBitTest, CalcPaddrNidIdxNoAdev)
+{
+    int nid = 0;
+    u64 pa_idx = 0;
+    bool is_hist = false;
+
+    INIT_LIST_HEAD(&access_dev);
+
+    nr_local_numa = 4;
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(1));
+    MOCKER(calc_paddr_acidx_acpi_known_nid).stubs().will(returnValue(0));
+    int ret = calc_paddr_nid_idx(4096, PAGE_SIZE, &nid, &pa_idx, &is_hist);
+    EXPECT_EQ(-ERANGE, ret);
+}
+
+TEST_F(AccessedBitTest, CalcPaddrNidIdxRemoteNid)
+{
+    int nid = 0;
+    u64 pa_idx = 0;
+    bool is_hist = false;
+    struct access_tracking_dev adev;
+
+    memset(&adev, 0, sizeof(adev));
+    adev.node = 5;
+    adev.page_count = 1024;
+    adev.is_hist = true;
+
+    INIT_LIST_HEAD(&access_dev);
+    list_add_tail(&adev.list, &access_dev);
+
+    nr_local_numa = 4;
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(5));
+    MOCKER(calc_paddr_acidx_iomem_known_nid).stubs().will(returnValue(0));
+    int ret = calc_paddr_nid_idx(4096, PAGE_SIZE, &nid, &pa_idx, &is_hist);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(5, nid);
+    EXPECT_EQ(true, is_hist);
+
+    list_del(&adev.list);
+}
+
+extern "C" void actc_data_update(int nid, u64 pa_index);
+TEST_F(AccessedBitTest, ActcDataUpdateNormal)
+{
+    struct access_tracking_dev adev;
+
+    memset(&adev, 0, sizeof(adev));
+    adev.node = 1;
+    adev.page_count = 1024;
+    adev.is_hist = false;
+    adev.access_bit_actc_data = (actc_t *)malloc(sizeof(actc_t) * 1024);
+    memset(adev.access_bit_actc_data, 0, sizeof(actc_t) * 1024);
+
+    INIT_LIST_HEAD(&access_dev);
+    list_add_tail(&adev.list, &access_dev);
+
+    actc_data_update(1, 100);
+    EXPECT_EQ(1, adev.access_bit_actc_data[100]);
+
+    list_del(&adev.list);
+    free(adev.access_bit_actc_data);
+}
+
+TEST_F(AccessedBitTest, ActcDataUpdateHistMode)
+{
+    struct access_tracking_dev adev;
+
+    memset(&adev, 0, sizeof(adev));
+    adev.node = 1;
+    adev.page_count = 1024;
+    adev.is_hist = true;
+    adev.access_bit_actc_data = (actc_t *)malloc(sizeof(actc_t) * 1024);
+    memset(adev.access_bit_actc_data, 0, sizeof(actc_t) * 1024);
+
+    INIT_LIST_HEAD(&access_dev);
+    list_add_tail(&adev.list, &access_dev);
+
+    actc_data_update(1, 100);
+    EXPECT_EQ(0, adev.access_bit_actc_data[100]);
+
+    list_del(&adev.list);
+    free(adev.access_bit_actc_data);
+}
+
+TEST_F(AccessedBitTest, ActcDataUpdateNoAdev)
+{
+    INIT_LIST_HEAD(&access_dev);
+    actc_data_update(1, 100);
+}
+
+TEST_F(AccessedBitTest, ActcDataUpdateOutOfRange)
+{
+    struct access_tracking_dev adev;
+
+    memset(&adev, 0, sizeof(adev));
+    adev.node = 1;
+    adev.page_count = 100;
+    adev.is_hist = false;
+    adev.access_bit_actc_data = (actc_t *)malloc(sizeof(actc_t) * 100);
+    memset(adev.access_bit_actc_data, 0, sizeof(actc_t) * 100);
+
+    INIT_LIST_HEAD(&access_dev);
+    list_add_tail(&adev.list, &access_dev);
+
+    actc_data_update(1, 200);
+
+    list_del(&adev.list);
+    free(adev.access_bit_actc_data);
 }

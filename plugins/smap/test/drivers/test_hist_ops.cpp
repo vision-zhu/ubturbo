@@ -454,24 +454,24 @@ TEST_F(HistOpsTest, flush_actc_data)
     flush_actc_data(&dev);
 }
 
-extern int nr_local_numa;
+extern "C" int drivers_nr_local_numa;
 extern "C" int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize);
 TEST_F(HistOpsTest, addr_segs_init)
 {
     int ret;
     struct smap_hist_dev dev;
     INIT_LIST_HEAD(&drivers_remote_ram_list);
-    nr_local_numa = 1;
+    drivers_nr_local_numa = 1;
     struct ram_segment newdata1 = {
-        .numa_node = 0,
+        .numa_node = 2,
         .start = 0,
-        .end = 0x100,
+        .end = 0x1FFFFF,
     };
 
     struct ram_segment newdata2 = {
-        .numa_node = 1,
-        .start = 0x1000,
-        .end = 0x401000,
+        .numa_node = 3,
+        .start = 0x200000,
+        .end = 0x3FFFFF,
     };
     list_add(&newdata1.node, &drivers_remote_ram_list);
     list_add(&newdata2.node, &drivers_remote_ram_list);
@@ -482,6 +482,8 @@ TEST_F(HistOpsTest, addr_segs_init)
     MOCKER(vzalloc).stubs().will(returnValue((void *)NULL));
     ret = addr_segs_init(&dev, SIZE_2M);
     EXPECT_EQ(-ENOMEM, ret);
+    list_del(&newdata1.node);
+    list_del(&newdata2.node);
 }
 
 extern "C" void addr_segs_deinit(struct smap_hist_dev *dev);

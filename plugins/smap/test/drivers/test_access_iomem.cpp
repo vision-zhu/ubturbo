@@ -330,3 +330,111 @@ TEST_F(AccessIomemTest, smap_is_remote_addr_valid_two)
     EXPECT_EQ(0, ret);
     list_del(&seg.node);
 }
+
+extern "C" int calc_paddr_acidx_iomem_known_nid(u64 pa, int nid, u64 *index, int page_size);
+TEST_F(AccessIomemTest, CalcPaddrAcidxIomemKnownNidNormal)
+{
+    u64 index = 0;
+    struct ram_segment seg1;
+    struct ram_segment seg2;
+
+    seg1.numa_node = 4;
+    seg1.start = 0;
+    seg1.end = 4095;
+    list_add(&seg1.node, &drivers_remote_ram_list);
+
+    seg2.numa_node = 5;
+    seg2.start = 4096;
+    seg2.end = 8191;
+    list_add(&seg2.node, &drivers_remote_ram_list);
+
+    int ret = calc_paddr_acidx_iomem_known_nid(2048, 4, &index, PAGE_SIZE);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, index);
+
+    list_del(&seg1.node);
+    list_del(&seg2.node);
+}
+
+TEST_F(AccessIomemTest, CalcPaddrAcidxIomemKnownNidMultiSegments)
+{
+    u64 index = 0;
+    struct ram_segment seg1;
+    struct ram_segment seg2;
+    struct ram_segment seg3;
+
+    seg1.numa_node = 4;
+    seg1.start = 0;
+    seg1.end = 4095;
+    list_add_tail(&seg1.node, &drivers_remote_ram_list);
+
+    seg2.numa_node = 5;
+    seg2.start = 4096;
+    seg2.end = 8191;
+    list_add_tail(&seg2.node, &drivers_remote_ram_list);
+
+    seg3.numa_node = 4;
+    seg3.start = 8192;
+    seg3.end = 12287;
+    list_add_tail(&seg3.node, &drivers_remote_ram_list);
+
+    int ret = calc_paddr_acidx_iomem_known_nid(10240, 4, &index, PAGE_SIZE);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(1, index);
+
+    list_del(&seg1.node);
+    list_del(&seg2.node);
+    list_del(&seg3.node);
+}
+
+TEST_F(AccessIomemTest, CalcPaddrAcidxIomemKnownNidOutOfRange)
+{
+    u64 index = 0;
+    struct ram_segment seg;
+
+    seg.numa_node = 4;
+    seg.start = 0;
+    seg.end = 4095;
+    list_add(&seg.node, &drivers_remote_ram_list);
+
+    int ret = calc_paddr_acidx_iomem_known_nid(8192, 4, &index, PAGE_SIZE);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&seg.node);
+}
+
+TEST_F(AccessIomemTest, CalcPaddrAcidxIomemKnownNidWrongNid)
+{
+    u64 index = 0;
+    struct ram_segment seg;
+
+    seg.numa_node = 4;
+    seg.start = 0;
+    seg.end = 4095;
+    list_add(&seg.node, &drivers_remote_ram_list);
+
+    int ret = calc_paddr_acidx_iomem_known_nid(2048, 5, &index, PAGE_SIZE);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&seg.node);
+}
+
+TEST_F(AccessIomemTest, CalcPaddrAcidxIomemKnownNid2MPage)
+{
+    u64 index = 0;
+    struct ram_segment seg;
+
+    seg.numa_node = 4;
+    seg.start = 0;
+    seg.end = 2097151;
+    list_add(&seg.node, &drivers_remote_ram_list);
+
+    int ret = calc_paddr_acidx_iomem_known_nid(0, 4, &index, PAGE_SIZE_2M);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, index);
+
+    ret = calc_paddr_acidx_iomem_known_nid(2097152, 4, &index, PAGE_SIZE_2M);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&seg.node);
+}

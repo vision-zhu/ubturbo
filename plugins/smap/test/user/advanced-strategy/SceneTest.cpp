@@ -242,6 +242,25 @@ TEST_F(SceneTest, TestGetProcessSceneAttr)
     EXPECT_EQ(LIGHT_STABLE_MIGRATE_CYCLE, info.cycles.migCycle);
 }
 
+TEST_F(SceneTest, TestGetProcessSceneAttrProcessType)
+{
+    SceneInfo info = { 0 };
+    Scene scene = UNSTABLE_SCENE;
+    GetProcessSceneAttr(scene, &info, PROCESS_TYPE);
+    EXPECT_EQ(PROCESS_UNSTABLE_SCAN_CYCLE, info.cycles.scanCycle);
+    EXPECT_EQ(UNSTABLE_MIGRATE_CYCLE, info.cycles.migCycle);
+
+    scene = HEAVY_STABLE_SCENE;
+    GetProcessSceneAttr(scene, &info, PROCESS_TYPE);
+    EXPECT_EQ(PROCESS_HEAVY_STABLE_SCAN_CYCLE, info.cycles.scanCycle);
+    EXPECT_EQ(HEAVY_STABLE_MIGRATE_CYCLE, info.cycles.migCycle);
+
+    scene = LIGHT_STABLE_SCENE;
+    GetProcessSceneAttr(scene, &info, PROCESS_TYPE);
+    EXPECT_EQ(PROCESS_LIGHT_STABLE_SCAN_CYCLE, info.cycles.scanCycle);
+    EXPECT_EQ(LIGHT_STABLE_MIGRATE_CYCLE, info.cycles.migCycle);
+}
+
 extern "C" int InitSceneInfo(SceneInfo *info, PidType type);
 TEST_F(SceneTest, TestInitSceneInfo)
 {
@@ -249,6 +268,15 @@ TEST_F(SceneTest, TestInitSceneInfo)
     int ret = InitSceneInfo(&info, VM_TYPE);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(VM_LIGHT_STABLE_SCAN_CYCLE, info.cycles.scanCycle);
+    EXPECT_EQ(LIGHT_STABLE_MIGRATE_CYCLE, info.cycles.migCycle);
+}
+
+TEST_F(SceneTest, TestInitSceneInfoProcessType)
+{
+    SceneInfo info = { 0 };
+    int ret = InitSceneInfo(&info, PROCESS_TYPE);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(PROCESS_LIGHT_STABLE_SCAN_CYCLE, info.cycles.scanCycle);
     EXPECT_EQ(LIGHT_STABLE_MIGRATE_CYCLE, info.cycles.migCycle);
 }
 

@@ -224,3 +224,111 @@ TEST_F(DriversAcpiMemTest, CalcAcidxPaddrAcpi)
     EXPECT_EQ(0, ret);
     list_del(&mem.segment);
 }
+
+extern "C" int calc_paddr_acidx_acpi_known_nid(u64 paddr, int nid, u64 *index, int page_size);
+TEST_F(DriversAcpiMemTest, CalcPaddrAcidxAcpiKnownNidNormal)
+{
+    u64 index = 0;
+    struct acpi_mem_segment mem1;
+    struct acpi_mem_segment mem2;
+
+    mem1.node = 1;
+    mem1.start = 0;
+    mem1.end = 4095;
+    list_add(&mem1.segment, &drivers_acpi_mem.mem);
+
+    mem2.node = 2;
+    mem2.start = 4096;
+    mem2.end = 8191;
+    list_add(&mem2.segment, &drivers_acpi_mem.mem);
+
+    int ret = calc_paddr_acidx_acpi_known_nid(2048, 1, &index, PAGE_SIZE);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, index);
+
+    list_del(&mem1.segment);
+    list_del(&mem2.segment);
+}
+
+TEST_F(DriversAcpiMemTest, CalcPaddrAcidxAcpiKnownNidMultiSegments)
+{
+    u64 index = 0;
+    struct acpi_mem_segment mem1;
+    struct acpi_mem_segment mem2;
+    struct acpi_mem_segment mem3;
+
+    mem1.node = 1;
+    mem1.start = 0;
+    mem1.end = 4095;
+    list_add_tail(&mem1.segment, &drivers_acpi_mem.mem);
+
+    mem2.node = 2;
+    mem2.start = 4096;
+    mem2.end = 8191;
+    list_add_tail(&mem2.segment, &drivers_acpi_mem.mem);
+
+    mem3.node = 1;
+    mem3.start = 8192;
+    mem3.end = 12287;
+    list_add_tail(&mem3.segment, &drivers_acpi_mem.mem);
+
+    int ret = calc_paddr_acidx_acpi_known_nid(10240, 1, &index, PAGE_SIZE);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(1, index);
+
+    list_del(&mem1.segment);
+    list_del(&mem2.segment);
+    list_del(&mem3.segment);
+}
+
+TEST_F(DriversAcpiMemTest, CalcPaddrAcidxAcpiKnownNidOutOfRange)
+{
+    u64 index = 0;
+    struct acpi_mem_segment mem;
+
+    mem.node = 1;
+    mem.start = 0;
+    mem.end = 4095;
+    list_add(&mem.segment, &drivers_acpi_mem.mem);
+
+    int ret = calc_paddr_acidx_acpi_known_nid(8192, 1, &index, PAGE_SIZE);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&mem.segment);
+}
+
+TEST_F(DriversAcpiMemTest, CalcPaddrAcidxAcpiKnownNidWrongNid)
+{
+    u64 index = 0;
+    struct acpi_mem_segment mem;
+
+    mem.node = 1;
+    mem.start = 0;
+    mem.end = 4095;
+    list_add(&mem.segment, &drivers_acpi_mem.mem);
+
+    int ret = calc_paddr_acidx_acpi_known_nid(2048, 2, &index, PAGE_SIZE);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&mem.segment);
+}
+
+TEST_F(DriversAcpiMemTest, CalcPaddrAcidxAcpiKnownNid2MPage)
+{
+    u64 index = 0;
+    struct acpi_mem_segment mem;
+
+    mem.node = 1;
+    mem.start = 0;
+    mem.end = 2097151;
+    list_add(&mem.segment, &drivers_acpi_mem.mem);
+
+    int ret = calc_paddr_acidx_acpi_known_nid(0, 1, &index, PAGE_SIZE_2M);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, index);
+
+    ret = calc_paddr_acidx_acpi_known_nid(2097152, 1, &index, PAGE_SIZE_2M);
+    EXPECT_EQ(-ERANGE, ret);
+
+    list_del(&mem.segment);
+}

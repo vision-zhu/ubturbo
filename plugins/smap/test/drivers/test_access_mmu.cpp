@@ -457,3 +457,74 @@ TEST_F(AccessMMUTest, PosToAddr)
     vma.vm_start = 0;
     pos_to_addr(&mm, 0x1, &vaddr);
 }
+
+extern "C" int add_to_bm_page_fast(u64 paddr, int nid, u64 acidx, struct access_pid *ap);
+extern "C" int convert_nid_to_pos(int nid);
+extern "C" int drivers_nr_local_numa;
+TEST_F(AccessMMUTest, AddToBMPageFastNormal)
+{
+    int ret = 0;
+    struct access_pid ap = {0};
+
+    drivers_nr_local_numa = 4;
+    ap.numa_nodes = 0x11;
+    ap.bm_len[0] = 2;
+    ap.paddr_bm[0] = (unsigned long *)malloc(sizeof(unsigned long) * 2);
+
+    MOCKER(set_non_anon_bm).stubs().will(returnValue(0));
+    ret = add_to_bm_page_fast((u64)0x00005000, 0, 1, &ap);
+    EXPECT_EQ(0, ret);
+
+    free(ap.paddr_bm[0]);
+}
+
+TEST_F(AccessMMUTest, AddToBMPageFastInvalidNid)
+{
+    int ret = 0;
+    struct access_pid ap = {0};
+
+    drivers_nr_local_numa = 4;
+    ap.numa_nodes = 0x01;
+    ap.bm_len[0] = 2;
+    ap.paddr_bm[0] = (unsigned long *)malloc(sizeof(unsigned long) * 2);
+
+    MOCKER(set_non_anon_bm).stubs().will(returnValue(0));
+    ret = add_to_bm_page_fast((u64)0x00005000, 1, 1, &ap);
+    EXPECT_EQ(-EINVAL, ret);
+
+    free(ap.paddr_bm[0]);
+}
+
+TEST_F(AccessMMUTest, AddToBMPageFastOutOfRange)
+{
+    int ret = 0;
+    struct access_pid ap = {0};
+
+    drivers_nr_local_numa = 4;
+    ap.numa_nodes = 0x11;
+    ap.bm_len[0] = 1;
+    ap.paddr_bm[0] = (unsigned long *)malloc(sizeof(unsigned long));
+
+    MOCKER(set_non_anon_bm).stubs().will(returnValue(0));
+    ret = add_to_bm_page_fast((u64)0x00005000, 0, 100, &ap);
+    EXPECT_EQ(-ERANGE, ret);
+
+    free(ap.paddr_bm[0]);
+}
+
+TEST_F(AccessMMUTest, AddToBMPageFastRemoteNid)
+{
+    int ret = 0;
+    struct access_pid ap = {0};
+
+    drivers_nr_local_numa = 4;
+    ap.numa_nodes = 0x20;
+    ap.bm_len[5] = 2;
+    ap.paddr_bm[5] = (unsigned long *)malloc(sizeof(unsigned long) * 2);
+
+    MOCKER(set_non_anon_bm).stubs().will(returnValue(0));
+    ret = add_to_bm_page_fast((u64)0x00005000, 5, 1, &ap);
+    EXPECT_EQ(0, ret);
+
+    free(ap.paddr_bm[5]);
+}
