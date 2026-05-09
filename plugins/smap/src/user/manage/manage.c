@@ -613,7 +613,7 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
         for (int i = 0; i < nrLocalNuma && i < LOCAL_NUMA_NUM; i++) {
             attr->strategyAttr.initRemoteMemRatio[i][param->numaParam[0].nid - nrLocalNuma] =
                 param->numaParam[0].ratio;
-            if (EqualToAttrL1(attr, i)) {
+            if (InAttrL1(attr, i)) {
                 attr->migrateParam[0].memSize = param->numaParam[0].memSize;
                 attr->migrateParam[0].nid = param->numaParam[0].nid;
                 attr->strategyAttr.memSize[i][param->numaParam[0].nid - nrLocalNuma] = param->numaParam[0].memSize;

@@ -391,7 +391,7 @@ static void AssignProcessAttr(ProcessAttr *attr, struct ProcessPayload *payload)
         attr->migrateParam[i].nid = payload->migrateParam[i].nid;
         attr->migrateParam[i].memSize = payload->migrateParam[i].memSize;
         for (int j = 0; j < GetNrLocalNuma(); j++) {
-            if (EqualToAttrL1(attr, j)) {
+            if (InAttrL1(attr, j)) {
                 int l2Index = payload->migrateParam[i].nid - nrLocalNuma;
                 attr->strategyAttr.initRemoteMemRatio[j][l2Index] = payload->migrateParam[i].ratio;
                 attr->strategyAttr.memSize[j][l2Index] = payload->migrateParam[i].memSize;
