@@ -880,7 +880,7 @@ int SyncOneNumaConfig(int local, int remote, size_t size)
     bool exist;
     struct NumaPayload config = { local, remote, size };
 
-    if (local >= nrLocalNuma) {
+    if (local < 0 || local >= nrLocalNuma) {
         SMAP_LOGGER_ERROR("SyncOneNumaConfig local %d is invalid.", local);
         return -EINVAL;
     }

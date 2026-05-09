@@ -165,31 +165,6 @@ TEST_F(ManageTest, TestIsQemuTaskFile)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" void EnvMutexLock(EnvMutex *mutex);
-extern "C" void EnvMutexUnlock(EnvMutex *mutex);
-extern "C" void LinkedListAddSafe(ProcessAttr **head, ProcessAttr **add, EnvMutex *lock);
-TEST_F(ManageTest, TestLinkedListAddSafe)
-{
-    ProcessAttr *head;
-    ProcessAttr *add;
-    EnvMutex lock;
-
-    head = nullptr;
-    add = (ProcessAttr *)malloc(sizeof(ProcessAttr));
-    add->next = nullptr;
-    EnvMutexInit(&lock);
-    MOCKER(EnvMutexLock).stubs().with(eq(&lock));
-    MOCKER(EnvMutexUnlock).stubs().with(eq(&lock));
-
-    LinkedListAddSafe(&head, &add, &lock);
-
-    EXPECT_EQ(head, add);
-    EXPECT_EQ(add->next, nullptr);
-
-    free(add);
-    EnvMutexDestroy(&lock);
-}
-
 extern "C" void LinkedListRemove(ProcessAttr **remove, ProcessAttr **head);
 extern "C" void FreeProceccesAttr(ProcessAttr *attr);
 TEST_F(ManageTest, TestLinkedListRemoveInputNull)
@@ -452,17 +427,6 @@ TEST_F(ManageTest, TestSetProcessLocalNuma)
     int ret = SetProcessLocalNuma(pid, &nodeBitmap, true);
     EXPECT_EQ(ret, 0);
     EXPECT_EQ(nodeBitmap, BIT(1) | BIT(2));
-}
-
-extern "C" inline bool InAttrL1(ProcessAttr *attr, int nid);
-extern "C" inline bool InAttrL2(ProcessAttr *attr, int nid);
-extern "C" void PrintProcessNuma(ProcessAttr *attr);
-TEST_F(ManageTest, TestPrintProcessNuma)
-{
-    ProcessAttr attr;
-    attr.pid = 1234;
-    attr.numaAttr.numaNodes = 47;
-    PrintProcessNuma(&attr);
 }
 
 extern "C" int ProcessAddManage(ProcessParam *param, uint32_t *nodeBitmap);
@@ -731,48 +695,6 @@ TEST_F(ManageTest, TestFreeProceccesAttr)
     FreeProceccesAttr(attr);
 }
 
-extern "C" void ResetActcDataForPid(ProcessAttr *attr);
-TEST_F(ManageTest, TestResetActcDataForPid)
-{
-    ProcessAttr *attr = (ProcessAttr *)malloc(sizeof(ProcessAttr));
-    ASSERT_NE(nullptr, attr);
-    for (int i = 0; i < MAX_NODES; i++) {
-        attr->scanAttr.actcData[i] = (ActcData *)malloc(sizeof(ActcData));
-        ASSERT_NE(nullptr, attr->scanAttr.actcData[i]);
-    }
-    ResetActcDataForPid(attr);
-    EXPECT_EQ(attr->scanAttr.actcData[0], nullptr);
-    free(attr);
-}
-
-extern "C" int InitPidActcData(ProcessAttr *attr);
-TEST_F(ManageTest, TestInitPidActcData)
-{
-    int ret;
-
-    ProcessAttr *attr = (ProcessAttr *)malloc(sizeof(ProcessAttr));
-    attr->walkPage.nrPages[0] = 1;
-    attr->walkPage.nrPages[1] = 0;
-    attr->walkPage.nrPage = 1;
-    MOCKER(ResetActcDataForPid).stubs().will(ignoreReturnValue());
-    ret = InitPidActcData(attr);
-    EXPECT_EQ(0, ret);
-
-    MOCKER(calloc).stubs().will(returnValue(static_cast<void *>(nullptr)));
-    ret = InitPidActcData(attr);
-    EXPECT_EQ(-ENOMEM, ret);
-    free(attr);
-}
-
-TEST_F(ManageTest, TestInitPidActcDataTwo)
-{
-    int ret = 0;
-    ProcessAttr attr;
-    attr.walkPage.nrPage = 0;
-    ret = InitPidActcData(&attr);
-    EXPECT_EQ(-EINVAL, ret);
-}
-
 extern "C" unsigned long ProcessSmapsFile(pid_t pid, const char *targetLinePrefix, size_t prefixLength, size_t divisor);
 TEST_F(ManageTest, TestProcessSmapsFile)
 {
@@ -867,17 +789,6 @@ extern "C" ssize_t read(int fd, void *buf, size_t count);
 
 extern "C" int open(const char *pathname, int flags);
 
-extern "C" int FillActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb);
-extern "C" int FillActcByBitmap(ProcessAttr *attr, int nid, struct ProcessMemBitmap *pmb, struct AccessPidFreq *apf);
-TEST_F(ManageTest, TestFillActcData)
-{
-    struct ProcessMemBitmap pmb = { 0 };
-    ProcessAttr attr;
-    MOCKER(FillActcByBitmap).stubs().will(returnValue(-EPERM));
-    int ret = FillActcData(&attr, &pmb);
-    EXPECT_EQ(-EPERM, ret);
-}
-
 extern "C" void SetPidNrPages(ProcessAttr *attr, size_t *nrPages, int len);
 TEST_F(ManageTest, TestSetPidNrPages)
 {
@@ -893,64 +804,6 @@ TEST_F(ManageTest, TestSetPidNrPages)
     free(nrPages);
 }
 
-extern "C" int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb);
-TEST_F(ManageTest, TestFillPidDataInitError)
-{
-    int ret;
-    struct ProcessMemBitmap pmb = { 0 };
-    ProcessAttr attr;
-
-    MOCKER(InitPidActcData).stubs().will(returnValue(-EINVAL));
-    ret = FillPidData(&attr, &pmb);
-    EXPECT_EQ(-EINVAL, ret);
-}
-
-extern "C" int ReadPidFreq(struct AccessPidFreq *apf);
-extern "C" void FreePidFreq(struct AccessPidFreq *apf);
-TEST_F(ManageTest, TestFillPidDataReadError)
-{
-    int ret;
-    struct ProcessMemBitmap pmb = { 0 };
-    ProcessAttr attr = {};
-    attr.pid = 1;
-
-    MOCKER(InitPidActcData).stubs().will(returnValue(0));
-    MOCKER(ReadPidFreq).stubs().will(returnValue(-EINVAL));
-    MOCKER(FreePidFreq).stubs().will(ignoreReturnValue());
-    ret = FillPidData(&attr, &pmb);
-    EXPECT_EQ(-EINVAL, ret);
-}
-
-TEST_F(ManageTest, TestFillPidDataFillError)
-{
-    int ret;
-    struct ProcessMemBitmap pmb = { 0 };
-    ProcessAttr attr = {};
-    attr.pid = 1;
-
-    MOCKER(InitPidActcData).stubs().will(returnValue(0));
-    MOCKER(ReadPidFreq).stubs().will(returnValue(0));
-    MOCKER(FillActcData).stubs().will(returnValue(-ENOMEM));
-    MOCKER(ResetActcDataForPid).stubs().will(ignoreReturnValue());
-    MOCKER(FreePidFreq).stubs().will(ignoreReturnValue());
-    ret = FillPidData(&attr, &pmb);
-    EXPECT_EQ(-ENOMEM, ret);
-}
-
-TEST_F(ManageTest, TestFillPidDataFillOK)
-{
-    int ret;
-    struct ProcessMemBitmap pmb = { 0 };
-    ProcessAttr attr = {};
-    attr.pid = 1;
-
-    MOCKER(InitPidActcData).stubs().will(returnValue(0));
-    MOCKER(ReadPidFreq).stubs().will(returnValue(0));
-    MOCKER(FillActcData).stubs().will(returnValue(0));
-    ret = FillPidData(&attr, &pmb);
-    EXPECT_EQ(0, ret);
-}
-
 extern "C" void FreePmbData(struct ProcessMemBitmap *pmb);
 TEST_F(ManageTest, TestFreePmbData)
 {
@@ -964,6 +817,7 @@ TEST_F(ManageTest, TestFreePmbData)
 }
 
 extern "C" int BuildBitmapBuf(size_t *len, char **buf);
+extern "C" int ReadPidActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb);
 extern "C" int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessMemBitmap *pmb);
 extern "C" int BuildAllPidData(void);
 extern "C" clock_t clock(void);
@@ -1005,46 +859,10 @@ TEST_F(ManageTest, TestBuildAllPidData)
         .with(any(), any(), outBoundP(&len, sizeof(len)), outBoundP(&pmb, sizeof(pmb)))
         .will(returnValue(0));
     MOCKER(SetPidNrPages).stubs().will(ignoreReturnValue());
-    MOCKER(FillPidData).stubs().will(returnValue(0));
+    MOCKER(ReadPidActcData).stubs().will(returnValue(0));
     ret = BuildAllPidData();
     EXPECT_EQ(0, ret);
     g_processManager.processes = nullptr;
-}
-
-TEST_F(ManageTest, TestFillActcByBitmap)
-{
-    int ret;
-    unsigned long bitmap = 0b10101010;
-    unsigned long whiteListBitmap = 0b10000000;
-    uint16_t freq[4] = { 14, 13, 12, 11 };
-    struct ProcessMemBitmap pmb = {
-        .pid = 10250,
-        .nrPages = { 4 },
-        .len = { 1 },
-        .data = { &bitmap },
-        .whiteListBm = { &whiteListBitmap },
-    };
-    struct AccessPidFreq apf = {
-        .pid = 10250,
-        .len = { 4 },
-        .freq = { freq }
-    };
-    ProcessAttr processes;
-    processes.numaAttr.numaNodes = 0b1;
-    processes.walkPage.nrPages[0] = 4;
-    processes.scanAttr.actcData[0] = (ActcData *)malloc(sizeof(ActcData) * 4);
-
-    ret = FillActcByBitmap(&processes, L1, &pmb, &apf);
-    EXPECT_EQ(0, ret);
-    EXPECT_EQ(0, processes.scanAttr.actcData[0][0].addr);
-    EXPECT_EQ(14, processes.scanAttr.actcData[0][0].freq);
-    EXPECT_EQ(1, processes.scanAttr.actcData[0][1].addr);
-    EXPECT_EQ(13, processes.scanAttr.actcData[0][1].freq);
-    EXPECT_EQ(2, processes.scanAttr.actcData[0][2].addr);
-    EXPECT_EQ(12, processes.scanAttr.actcData[0][2].freq);
-    EXPECT_EQ(3, processes.scanAttr.actcData[0][3].addr);
-    EXPECT_EQ(11, processes.scanAttr.actcData[0][3].freq);
-    free(processes.scanAttr.actcData[0]);
 }
 
 extern "C" int BuildBitmapBuf(size_t *len, char **buf);
@@ -1803,24 +1621,6 @@ TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedSuccessFour)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" bool IsInPidArr(pid_t *pidArr, int len, pid_t pid);
-TEST_F(ManageTest, TestIsInPidArr)
-{
-    bool ret;
-    int len = 1;
-    pid_t *pidArr = (pid_t *)malloc(sizeof(pid_t) * len);
-    pidArr[0] = 1;
-    ret = IsInPidArr(pidArr, 0, 1);
-    EXPECT_EQ(false, ret);
-
-    ret = IsInPidArr(pidArr, len, 1);
-    EXPECT_EQ(true, ret);
-    free(pidArr);
-
-    ret = IsInPidArr(nullptr, len, 1);
-    EXPECT_EQ(false, ret);
-}
-
 TEST_F(ManageTest, TestBuildAndFillBitmapBuf)
 {
     int ret;
@@ -1861,18 +1661,4 @@ TEST_F(ManageTest, TestMigOutIsDoneSuccess)
     g_processManager.processes = &attr;
     ret = MigOutIsDone(&attr, &isMultiNumaPid);
     EXPECT_EQ(true, ret);
-}
-
-extern "C" int MappingAscFunc(const void *map1, const void *map2);
-TEST_F(ManageTest, TestMappingAscFunc)
-{
-    int ret;
-    uint32_t *map1 = (uint32_t *)malloc(sizeof(uint32_t));
-    uint32_t *map2 = (uint32_t *)malloc(sizeof(uint32_t));
-    *map1 = 2;
-    *map2 = 1;
-    ret = MappingAscFunc(map1, map2);
-    EXPECT_EQ(1, ret);
-    free(map1);
-    free(map2);
 }
