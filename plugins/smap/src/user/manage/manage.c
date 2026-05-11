@@ -474,15 +474,29 @@ static void SetProcessConfig(ProcessAttr *attr, ProcessParam *param)
         if (param->numaParam[0].nid < nrLocalNuma || param->numaParam[0].nid >= nrLocalNuma + REMOTE_NUMA_NUM) {
             return;
         }
-        for (int i = 0; i < nrLocalNuma && i < LOCAL_NUMA_NUM; i++) {
-            attr->strategyAttr.initRemoteMemRatio[i][param->numaParam[0].nid - nrLocalNuma] =
-                param->numaParam[0].ratio;
-            if (EqualToAttrL1(attr, i)) {
-                attr->migrateParam[0].memSize = param->numaParam[0].memSize;
-                attr->migrateParam[0].nid = param->numaParam[0].nid;
-                attr->strategyAttr.memSize[i][param->numaParam[0].nid - nrLocalNuma] = param->numaParam[0].memSize;
+        int l2Index = param->numaParam[0].nid - nrLocalNuma;
+
+        // 区分 ratio 模式和 memSize 模式
+        if (param->numaParam[0].memSize == 0) {
+            // ratio 模式：为所有本地 NUMA 设置 ratio
+            for (int i = 0; i < nrLocalNuma && i < LOCAL_NUMA_NUM; i++) {
+                attr->strategyAttr.initRemoteMemRatio[i][l2Index] = param->numaParam[0].ratio;
+            }
+        } else {
+            // memSize 模式：按顺序分配 memSize 到各本地 NUMA
+            uint64_t remainingPages = KBToNormalPage(param->numaParam[0].memSize);
+            for (int i = 0; i < nrLocalNuma && i < LOCAL_NUMA_NUM && remainingPages > 0; i++) {
+                attr->strategyAttr.initRemoteMemRatio[i][l2Index] = param->numaParam[0].ratio;
+                if (InAttrL1(attr, i)) {
+                    uint64_t allocPages = MIN(attr->scanAttr.actcLen[i], remainingPages);
+                    attr->strategyAttr.memSize[i][l2Index] = allocPages * (GetNormalPageSize() / KIB);
+                    remainingPages -= allocPages;
+                }
             }
         }
+
+        attr->migrateParam[0].memSize = param->numaParam[0].memSize;
+        attr->migrateParam[0].nid = param->numaParam[0].nid;
         SetAttrL2(attr, param->numaParam[0].nid);
     }
 }

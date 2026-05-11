@@ -1516,3 +1516,108 @@ TEST_F(ManageTest, TestMigOutIsDoneSuccess)
     ret = MigOutIsDone(&attr, &isMultiNumaPid);
     EXPECT_EQ(true, ret);
 }
+
+// 测试多本地NUMA进程memSize迁出模式迁移量分配
+// Issue #45: 修复多本地NUMA进程memSize迁出模式只迁移第一个本地NUMA内存的问题
+extern "C" uint32_t GetNormalPageSize(void);
+TEST_F(ManageTest, TestSetProcessConfigMultiLocalNumaMemSize)
+{
+    g_processManager.nrLocalNuma = 2;
+    ProcessAttr attr = {};
+    // 设置 NUMA 0 和 NUMA 1 为本地 NUMA (numaNodes = 0b00000011)
+    attr.numaAttr.numaNodes = 0b00000011;
+    // 模拟 Issue 场景：NUMA 0 有 213 页，NUMA 1 有 512022 页
+    attr.scanAttr.actcLen[0] = 213;
+    attr.scanAttr.actcLen[1] = 512022;
+
+    ProcessParam param = {
+        .pid = 404238,
+        .count = 1,
+    };
+    // 设置目标远端 NUMA = 2 (索引为 2 - 2 = 0)
+    param.numaParam[0].nid = 2;
+    param.numaParam[0].memSize = 1024000; // 1024000 KB = 256000 页
+    param.numaParam[0].ratio = 50;
+
+    // Mock GetNormalPageSize 返回 4096 (4KB)
+    MOCKER(GetNormalPageSize).stubs().will(returnValue(4096));
+
+    SetProcessConfig(&attr, &param);
+
+    // 验证分配结果：
+    // NUMA 0 分配 213 页 = 852 KB
+    // NUMA 1 分配 255787 页 = 1023148 KB
+    // 总计 = 1024000 KB
+    uint64_t pageSizeKB = 4; // 4096 / 1024 = 4 KB
+    EXPECT_EQ(213 * pageSizeKB, attr.strategyAttr.memSize[0][0]);
+    EXPECT_EQ(255787 * pageSizeKB, attr.strategyAttr.memSize[1][0]);
+
+    // 验证 migrateParam 设置正确
+    EXPECT_EQ(1024000, attr.migrateParam[0].memSize);
+    EXPECT_EQ(2, attr.migrateParam[0].nid);
+
+    // 验证 initRemoteMemRatio 设置正确
+    EXPECT_EQ(50, attr.strategyAttr.initRemoteMemRatio[0][0]);
+    EXPECT_EQ(50, attr.strategyAttr.initRemoteMemRatio[1][0]);
+
+    GlobalMockObject::verify();
+}
+
+// 测试 memSize 小于第一个本地 NUMA 内存量的情况
+TEST_F(ManageTest, TestSetProcessConfigMemSizeLessThanFirstLocalNuma)
+{
+    g_processManager.nrLocalNuma = 2;
+    ProcessAttr attr = {};
+    attr.numaAttr.numaNodes = 0b00000011;
+    attr.scanAttr.actcLen[0] = 500;
+    attr.scanAttr.actcLen[1] = 1000;
+
+    ProcessParam param = {
+        .pid = 123,
+        .count = 1,
+    };
+    param.numaParam[0].nid = 2;
+    param.numaParam[0].memSize = 1000; // 1000 KB = 250 页，小于 NUMA 0 的 500 页
+    param.numaParam[0].ratio = 50;
+
+    MOCKER(GetNormalPageSize).stubs().will(returnValue(4096));
+
+    SetProcessConfig(&attr, &param);
+
+    // NUMA 0 分配 250 页 = 1000 KB
+    // NUMA 1 分配 0 页（因为剩余量已为 0）
+    uint64_t pageSizeKB = 4;
+    EXPECT_EQ(250 * pageSizeKB, attr.strategyAttr.memSize[0][0]);
+    EXPECT_EQ(0, attr.strategyAttr.memSize[1][0]);
+
+    GlobalMockObject::verify();
+}
+
+// 测试单本地 NUMA 场景（原有逻辑）
+TEST_F(ManageTest, TestSetProcessConfigSingleLocalNumaMemSize)
+{
+    g_processManager.nrLocalNuma = 2;
+    ProcessAttr attr = {};
+    // 只有 NUMA 0 为本地 NUMA
+    attr.numaAttr.numaNodes = 0b00000001;
+    attr.scanAttr.actcLen[0] = 1000;
+
+    ProcessParam param = {
+        .pid = 123,
+        .count = 1,
+    };
+    param.numaParam[0].nid = 2;
+    param.numaParam[0].memSize = 4000; // 4000 KB = 1000 页
+    param.numaParam[0].ratio = 50;
+
+    MOCKER(GetNormalPageSize).stubs().will(returnValue(4096));
+
+    SetProcessConfig(&attr, &param);
+
+    uint64_t pageSizeKB = 4;
+    EXPECT_EQ(1000 * pageSizeKB, attr.strategyAttr.memSize[0][0]);
+    // NUMA 1 不在本地，不应分配
+    EXPECT_EQ(0, attr.strategyAttr.memSize[1][0]);
+
+    GlobalMockObject::verify();
+}
