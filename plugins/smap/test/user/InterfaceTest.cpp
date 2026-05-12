@@ -3375,3 +3375,230 @@ TEST_F(InterfaceTest, TestIsScanTypeValid)
 
     g_processManager.processes = nullptr;
 }
+
+extern "C" int CheckMigrateOutGroupMsg(struct MigrateOutGroupMsg *msg, int pidType);
+extern "C" int ConvertGroupMsgToMigrateOutMsg(struct MigrateOutGroupMsg *groupMsg, struct MigrateOutMsg *outMsg);
+extern "C" int ubturbo_smap_migrate_out_group(struct MigrateOutGroupMsg *msg, int pidType);
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgNull)
+{
+    int ret = CheckMigrateOutGroupMsg(nullptr, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidPidType)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_4K));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_NORMAL);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidCount)
+{
+    struct MigrateOutGroupMsg msg = { .count = 0, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+
+    GlobalMockObject::verify();
+    msg.count = MAX_NR_MIGOUT + 1;
+    ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidDestNid)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = -1, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(false));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgForbiddenDestNid)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(true));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidMigrateMode)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = (MigrateMode)2 };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidRatio)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 101, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgInvalidMemSize)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .memSize = 1, .migrateMode = MIG_MEMSIZE_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgMemPoolModeInvalidMode)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestCheckMigrateOutGroupMsgDuplicatePid)
+{
+    struct MigrateOutGroupMsg msg = { .count = 2, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+    msg.payload[1].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(IsRatioValid).stubs().will(returnValue(true));
+
+    int ret = CheckMigrateOutGroupMsg(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(InterfaceTest, TestConvertGroupMsgToMigrateOutMsg)
+{
+    struct MigrateOutGroupMsg groupMsg = { .count = 2, .destNid = 4, .ratio = 25, .memSize = 10240,
+                                           .migrateMode = MIG_RATIO_MODE };
+    groupMsg.payload[0].pid = 1234;
+    groupMsg.payload[1].pid = 5678;
+
+    struct MigrateOutMsg outMsg;
+    int ret = ConvertGroupMsgToMigrateOutMsg(&groupMsg, &outMsg);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(2, outMsg.count);
+    EXPECT_EQ(1234, outMsg.payload[0].pid);
+    EXPECT_EQ(5678, outMsg.payload[1].pid);
+    EXPECT_EQ(4, outMsg.payload[0].inner[0].destNid);
+    EXPECT_EQ(25, outMsg.payload[0].inner[0].ratio);
+    EXPECT_EQ(MIG_RATIO_MODE, outMsg.payload[0].inner[0].migrateMode);
+}
+
+TEST_F(InterfaceTest, TestUbturboSmapMigrateOutGroupNotRunning)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    EnvAtomicSet(&g_status, SLEEP);
+
+    int ret = ubturbo_smap_migrate_out_group(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(-EPERM, ret);
+}
+
+TEST_F(InterfaceTest, TestUbturboSmapMigrateOutGroupSuccess)
+{
+    struct MigrateOutGroupMsg msg = { .count = 1, .destNid = 4, .ratio = 25, .migrateMode = MIG_RATIO_MODE };
+    msg.payload[0].pid = 1234;
+
+    ProcessManager manager;
+    manager.tracking.pageSize = PAGESIZE_2M;
+    EnvMutexInit(&manager.lock);
+    EnvAtomicSet(&g_status, RUNNING);
+
+    ProcessAttr *attr = nullptr;
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNormalPageSize).stubs().will(returnValue((unsigned int)PAGESIZE_2M));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(IsRatioValid).stubs().will(returnValue(true));
+    MOCKER(IsPidTypeValid).stubs().will(returnValue(true));
+    MOCKER(LoadMangerNrVmNum).stubs().will(returnValue(0));
+    MOCKER(GetCurrentMaxNrPid).stubs().will(returnValue(MAX_2M_PROCESSES_CNT));
+    MOCKER(GetProcessAttrLocked).stubs().will(returnValue(attr));
+    MOCKER(ubturbo_smap_migrate_out).stubs().will(returnValue(0));
+
+    int ret = ubturbo_smap_migrate_out_group(&msg, PAGETYPE_HUGE);
+    EXPECT_EQ(0, ret);
+
+    EnvAtomicSet(&g_status, SLEEP);
+}

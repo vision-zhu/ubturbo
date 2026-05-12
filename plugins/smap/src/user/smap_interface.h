@@ -130,6 +130,19 @@ struct MigrateEscapeMsg {
     struct MigrateEscapePayload payload[MAX_NR_MIGRATE_ESCAPE];
 };
 
+struct MigrateOutGroupPayload {
+    pid_t pid;
+};
+
+struct MigrateOutGroupMsg {
+    int count;
+    struct MigrateOutGroupPayload payload[MAX_NR_MIGOUT];
+    int destNid;
+    int ratio;
+    uint64_t memSize;
+    MigrateMode migrateMode;
+};
+
 enum {
     NORMAL_DATA_SOURCE,
     STATISTIC_DATA_SOURCE,
@@ -239,6 +252,15 @@ bool ubturbo_smap_is_running(void);
  * @return int  0：操作成功；非0：操作失败
  */
 int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pidType, uint64_t maxWaitTime);
+
+/* *
+ * @brief   按组迁出进程到远端NUMA
+ *
+ * @param msg     [IN] 迁移进程信息，包含进程PID数组、远端NUMA、迁移比例/大小和迁移模式
+ * @param pidType [IN] 进程类型，目前支持4KB和2MB进程类型
+ * @return int  0：操作成功；非0：操作失败
+ */
+int ubturbo_smap_migrate_out_group(struct MigrateOutGroupMsg *msg, int pidType);
 
 /* 迁移远端内存相关接口 */
 

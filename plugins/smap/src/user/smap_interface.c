@@ -2276,3 +2276,113 @@ int ubturbo_smap_remote_numa_freq_query(uint16_t *numa, uint64_t *freq, uint16_t
     SMAP_LOGGER_INFO("ubturbo_smap_remote_numa_freq_query success.");
     return 0;
 }
+
+static int CheckMigrateOutGroupMsg(struct MigrateOutGroupMsg *msg, int pidType)
+{
+    int i;
+    if (!msg) {
+        SMAP_LOGGER_ERROR("Smap migrate out group msg is null.");
+        return -EINVAL;
+    }
+    if (!IsPidTypeValid(pidType)) {
+        SMAP_LOGGER_ERROR("migrate out group pidType %d != current pid type.", pidType);
+        return -EINVAL;
+    }
+    if (!IsCountValid(msg->count, MAX_NR_MIGOUT)) {
+        SMAP_LOGGER_ERROR("migrate out group count: %d is invalid.", msg->count);
+        return -EINVAL;
+    }
+    if (!IsRemoteNidValid(msg->destNid)) {
+        SMAP_LOGGER_ERROR("migrate out group destNid: %d is invalid.", msg->destNid);
+        return -EINVAL;
+    }
+    if (IsNodeForbidden(msg->destNid)) {
+        SMAP_LOGGER_ERROR("migrate out group destNid: %d is forbidden.", msg->destNid);
+        return -EINVAL;
+    }
+    if (msg->migrateMode < MIG_RATIO_MODE || msg->migrateMode > MIG_MEMSIZE_MODE) {
+        SMAP_LOGGER_ERROR("migrate out group migrateMode %d invalid.", msg->migrateMode);
+        return -EINVAL;
+    }
+    if (GetRunMode() == MEM_POOL_MODE && msg->migrateMode != MIG_MEMSIZE_MODE) {
+        SMAP_LOGGER_ERROR("smap runMode is MEM_POOL_MODE, not supported mode except MIG_MEMSIZE_MODE.");
+        return -EINVAL;
+    }
+    if (msg->migrateMode == MIG_RATIO_MODE && !IsRatioValid(msg->ratio)) {
+        SMAP_LOGGER_ERROR("migrate out group ratio %d invalid.", msg->ratio);
+        return -EINVAL;
+    }
+    if (msg->migrateMode == MIG_MEMSIZE_MODE && msg->memSize % KB_PER_4KB != 0) {
+        SMAP_LOGGER_ERROR("migrate out group memSize %llu is not 4K aligned.", msg->memSize);
+        return -EINVAL;
+    }
+
+    for (i = 0; i < msg->count; i++) {
+        pid_t currentPid = msg->payload[i].pid;
+        for (int j = i + 1; j < msg->count; j++) {
+            if (msg->payload[j].pid == currentPid) {
+                SMAP_LOGGER_ERROR("migrate out group msg exit duplicate pid %d.", msg->payload[i].pid);
+                return -EINVAL;
+            }
+        }
+    }
+
+    pid_t uniquePids[MAX_NR_MIGOUT];
+    for (i = 0; i < msg->count; i++) {
+        uniquePids[i] = msg->payload[i].pid;
+        SMAP_LOGGER_INFO("migrate out group msg pid[%d]: %d.", i, msg->payload[i].pid);
+    }
+    if (!IsMigOutCountValid(uniquePids, msg->count, pidType)) {
+        SMAP_LOGGER_ERROR("migrate out group count will exceed current max pid count: %d.", GetCurrentMaxNrPid());
+        return -EINVAL;
+    }
+    return 0;
+}
+
+static int ConvertGroupMsgToMigrateOutMsg(struct MigrateOutGroupMsg *groupMsg, struct MigrateOutMsg *outMsg)
+{
+    outMsg->count = groupMsg->count;
+    for (int i = 0; i < groupMsg->count; i++) {
+        outMsg->payload[i].pid = groupMsg->payload[i].pid;
+        outMsg->payload[i].srcNid = DEFAULT_DEST_NODE;
+        outMsg->payload[i].count = 1;
+        outMsg->payload[i].inner[0].destNid = groupMsg->destNid;
+        outMsg->payload[i].inner[0].ratio = groupMsg->ratio;
+        outMsg->payload[i].inner[0].memSize = groupMsg->memSize;
+        outMsg->payload[i].inner[0].migrateMode = groupMsg->migrateMode;
+    }
+    return 0;
+}
+
+int ubturbo_smap_migrate_out_group(struct MigrateOutGroupMsg *msg, int pidType)
+{
+    struct ProcessManager *manager = GetProcessManager();
+
+    SMAP_LOGGER_INFO("Receive ubturbo_smap_migrate_out_group msg, count: %d, destNid: %d.", msg ? msg->count : 0,
+                     msg ? msg->destNid : -1);
+    if (!ubturbo_smap_is_running()) {
+        SMAP_LOGGER_ERROR("Smap already stopped, ubturbo_smap_migrate_out_group failed.");
+        return -EPERM;
+    }
+
+    EnvMutexLock(&manager->lock);
+    int ret = CheckMigrateOutGroupMsg(msg, pidType);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Migrate out group msg check failed, ret: %d.", ret);
+        EnvMutexUnlock(&manager->lock);
+        return ret;
+    }
+
+    struct MigrateOutMsg outMsg;
+    ret = ConvertGroupMsgToMigrateOutMsg(msg, &outMsg);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Convert group msg to migrate out msg failed, ret: %d.", ret);
+        EnvMutexUnlock(&manager->lock);
+        return ret;
+    }
+    EnvMutexUnlock(&manager->lock);
+
+    ret = ubturbo_smap_migrate_out(&outMsg, pidType);
+    SMAP_LOGGER_INFO("ubturbo_smap_migrate_out_group result: %d.", ret);
+    return ret;
+}
