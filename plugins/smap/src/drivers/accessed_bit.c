@@ -1345,7 +1345,8 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
 		actc_data_update(nid, pa_idx);
 		if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
-			__ptep_test_and_clear_young(NULL, 0, pte);
+			if (!is_file_or_shared_page(paddr))
+				__ptep_test_and_clear_young(NULL, 0, pte);
 			pte_walk->flag = true;
 		}
 	}

@@ -16,6 +16,8 @@ extern rwlock_t rem_ram_list_lock;
 void walk_pid_pagemap(struct pagemapread *pm);
 struct mm_struct *get_mm_by_pid(pid_t pid);
 
+bool is_file_or_shared_page(phys_addr_t paddr);
+
 int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap);
 int add_to_bm_page(u64 paddr, struct access_pid *ap);
 int add_to_bm_page_fast(u64 paddr, int nid, u64 acidx, struct access_pid *ap);
