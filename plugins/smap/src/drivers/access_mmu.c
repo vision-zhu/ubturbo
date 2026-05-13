@@ -91,6 +91,25 @@ static int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
 	return 0;
 }
 
+bool is_file_or_shared_page(phys_addr_t paddr)
+{
+	unsigned long pfn;
+	struct page *page;
+
+	pfn = PHYS_PFN(paddr);
+	if (!pfn_valid(pfn))
+		return false;
+
+	page = pfn_to_online_page(pfn);
+	if (!page)
+		return false;
+
+	if (PageHuge(page))
+		return false;
+
+	return !PageAnon(page) || page_mapcount(page) > 1;
+}
+
 int add_to_bm_page(u64 paddr, struct access_pid *ap)
 {
 	int nid, nid_pos, ret;
