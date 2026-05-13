@@ -1332,3 +1332,103 @@ int main(void)
     return 0;
 }
 ```
+
+# ubturbo_smap_migrate_out_by_group: 按组配置虚机迁出
+
+## 库 LIBRARY
+
+SMAP库 (libsmap.so)
+
+## 摘要 SYNOPSIS
+
+```c
+#include "smap_interface.h"
+int ubturbo_smap_migrate_out_by_group(struct MigrateOutGroupMsg *msg, int pidType);
+```
+
+## 描述 DESCRIPTION
+
+按组配置大规格虚机批量迁出到远端NUMA，适用于需要将一组虚机统一迁移的场景。组内虚机使用相同的迁出配置（目标NUMA、迁出比例等）。
+
+## 参数 Parameters
+
+| name | IN/OUT | description |
+| --- | --- | --- |
+| msg | IN | 按组迁出配置参数。 |
+| msg.count | IN | 组数量，最大为MAX_NR_MIGOUT(50)。 |
+| msg.payload | IN | 组配置数组。 |
+| msg.payload.groupId | IN | 组ID，用于标识一组虚机。 |
+| msg.payload.count | IN | 组内虚机数量，最大为MAX_NR_MIGOUT_GROUP(50)。 |
+| msg.payload.pids | IN | 组内虚机PID列表。 |
+| msg.payload.inner | IN | 统一的迁出配置数组。 |
+| msg.payload.inner.destNid | IN | 远端NUMA。 |
+| msg.payload.inner.ratio | IN | 迁出比例。 |
+| msg.payload.inner.memSize | IN | 迁出大小，单位KB。 |
+| msg.payload.inner.migrateMode | IN | 迁移模式，0：按比例，1：按大小。 |
+| pidType | IN | 进程页面类型，0：4K，1：2M。 |
+
+## 返回值 RETURN VALUE
+
+返回 `0` 表示成功，返回其他值表示失败，请见`错误 ERRORS`
+
+## 错误 ERRORS
+
+| Error | Description |
+| --- | --- |
+| -EPERM | SMAP未初始化 |
+| -EINVAL | 参数错误（包括groupId无效、PID无效、PID重复、总数超限等） |
+
+## 约束 CONSTRAINTS
+
+* SMAP初始化后才能调用。
+* pidType需要和当前场景匹配。
+* 4K进程迁移不支持远端多NUMA。
+* 同一组内PID不能重复。
+* 所有组的PID总数不能超过MAX_NR_MIGOUT(50)。
+* HCCS代际远端NUMA最大值为21。
+* UB代际远端NUMA最大值为21。
+* 远端NUMA被禁用时无法配置迁出。
+* 配置后由SMAP线程异步迁移，在迁移周期到来时才会执行迁移操作。
+* 迁移会过滤掉共享页。
+
+## 附注 NOTES
+
+此接口适用于大规格虚机批量迁出场景，可将一组虚机统一配置迁出到相同的远端NUMA。
+
+## 样例 EXAMPLES
+
+以下程序将组ID为1的2个虚机（PID为10253和10254）迁出到NUMA4上，迁出比例为25%。
+
+```c
+#include <stdio.h>
+#include "smap_interface.h"
+
+int main(void)
+{
+    int ret;
+    struct MigrateOutGroupPayload groupPayload = {
+        .groupId = 1,
+        .count = 2,
+        .pids = { 10253, 10254 },
+        .inner = {
+            {
+                .destNid = 4,
+                .ratio = 25,
+                .memSize = 0,
+                .migrateMode = 0,
+            },
+        },
+    };
+    struct MigrateOutGroupMsg msg = {
+        .count = 1,
+        .payload = { groupPayload },
+    };
+
+    ret = ubturbo_smap_migrate_out_by_group(&msg, 1);
+    if (ret != 0) {
+        return ret;
+    }
+
+    return 0;
+}
+```
