@@ -1076,8 +1076,8 @@ static int CheckMigrateBackReadyMsg(struct MigrateBackMsg *msg)
             SMAP_LOGGER_ERROR("srcNode %d not allowed to migrate back.", srcNid);
             return -EINVAL;
         }
-        // disable之前先检查是否ready了,如果是内存碎片，不检查
-        if (GetRunMode() != MEM_POOL_MODE && !CheckReadyMigrateBack(srcNid)) {
+        // disable之前先检查是否ready了
+        if (!CheckReadyMigrateBack(srcNid)) {
             SMAP_LOGGER_ERROR("migrate back error, srcNid %d not ready to migrate back.", srcNid);
             return -EAGAIN;
         }
@@ -1191,19 +1191,18 @@ int ubturbo_smap_migrate_back(struct MigrateBackMsg *msg)
         SMAP_LOGGER_ERROR("Smap check mig back msg err: %d.", ret);
         return ret;
     }
+    // 在设置forbidden之前先检查migrate-back ready
+    ret = CheckMigrateBackReadyMsg(msg);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Smap check mig back ready err: %d.", ret);
+        return ret;
+    }
     struct ProcessManager *manager = GetProcessManager();
     EnvMutexLock(&manager->lock);
     ret = SetMigrateBackForbiddenLocked(msg);
     EnvMutexUnlock(&manager->lock);
     if (ret) {
         SMAP_LOGGER_ERROR("Smap check grouped pid for mig back err: %d.", ret);
-        return ret;
-    }
-
-    ret = CheckMigrateBackReadyMsg(msg);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Smap check mig back ready err: %d.", ret);
-        ClearMigrateBackBusyForbidden(msg);
         return ret;
     }
 
