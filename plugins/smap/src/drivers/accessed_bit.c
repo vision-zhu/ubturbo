@@ -720,6 +720,17 @@ static int process_memslot_pages(struct kvm *kvm, struct kvm_memory_slot *memslo
 	return 0;
 }
 
+static int vaddr_cmp(const void *a, const void *b)
+{
+	const u64 x = *(const u64 *)a;
+	const u64 y = *(const u64 *)b;
+	if (x < y)
+		return -1;
+	if (x > y)
+		return 1;
+	return 0;
+}
+
 static int scan_kvm_memslots(struct kvm *kvm, struct access_pid *ap, int page_size)
 {
 	struct kvm_memslots *slots;
@@ -756,6 +767,7 @@ static int scan_kvm_memslots(struct kvm *kvm, struct access_pid *ap, int page_si
 						vaddr, nr_pages, &cur_index);
 		}
 		kvm_flush_remote_tlbs(kvm);
+		sort(vaddr, cur_index, sizeof(u64), vaddr_cmp, NULL);
 		clear_statistic_tracking_info(ap->pid);
 		update_statistic_scan_freq_mm(vaddr, cur_index, ap->pid);
 		update_statistic_scan_num(ap->pid);
