@@ -63,6 +63,11 @@ struct pte_walk {
 	u64 *statistic_vaddr;
 	struct access_pid *ap;
 	bool group_hot;
+	/* 冷页面统计相关（仅最后一次 NORMAL_SCAN 使用，双指针匹配） */
+	u64 *cold_vas;			/* 已排序的冷页面 VA 数组 */
+	u64 cold_count;			/* 冷页面数量 */
+	u64 cold_match_idx;		/* 当前匹配位置索引 */
+	u64 remote_cold_count[SMAP_MAX_NUMNODES]; /* 各远端 NUMA 冷页面计数 */
 };
 
 struct freq_info {

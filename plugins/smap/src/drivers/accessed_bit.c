@@ -44,6 +44,8 @@
 #define pr_fmt(fmt) "access-bit: " fmt
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
 #define SCAN_GROUP_SIZE (64UL * 1024)  /* 64KiB分组扫描优化 */
+#define COLD_PAGE_FILE_PATH "/lib/modules/smap/cold_page_list_%d"
+#define COLD_PAGE_PATH_MAX 64
 
 LIST_HEAD(ham_pid_list);
 LIST_HEAD(statistic_pid_list);
@@ -1296,6 +1298,21 @@ static inline void smap_flush_tlb_mm(struct mm_struct *mm)
 	dsb(ish);
 }
 
+/* 双指针匹配：检查 addr 是否在冷页面列表中，返回 true 表示匹配成功 */
+static bool match_cold_page_va(u64 addr, u64 *cold_vas, u64 cold_count,
+				u64 *cold_match_idx)
+{
+	/* 跳过小于当前 addr 的冷页面 VA */
+	while (*cold_match_idx < cold_count && cold_vas[*cold_match_idx] < addr)
+		(*cold_match_idx)++;
+
+	/* 检查是否匹配 */
+	if (*cold_match_idx < cold_count && cold_vas[*cold_match_idx] == addr)
+		return true;
+
+	return false;
+}
+
 static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			   struct mm_walk *walk)
 {
@@ -1333,8 +1350,14 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		}
 	}
 skip_scan:
-	if (access_pid_cur_last_scanning(pte_walk->ap))
+	if (access_pid_cur_last_scanning(pte_walk->ap)) {
 		add_to_bm_page_fast(paddr, nid, pa_idx, pte_walk->ap);
+		/* 远端 NUMA 时，用双指针匹配冷页面 */
+		if (pte_walk->cold_vas && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
+		    match_cold_page_va(addr, pte_walk->cold_vas, pte_walk->cold_count,
+				    &pte_walk->cold_match_idx))
+			pte_walk->remote_cold_count[nid]++;
+	}
 	return 0;
 }
 
@@ -1488,18 +1511,102 @@ static int walk_all_vmas(struct mm_struct *mm, struct smap_vma_struct *vma_array
 	return 0;
 }
 
+static int cmp_u64(const void *a, const void *b)
+{
+	u64 x = *(const u64 *)a;
+	u64 y = *(const u64 *)b;
+	if (x < y)
+		return -1;
+	if (x > y)
+		return 1;
+	return 0;
+}
+
+static int read_cold_page_list_file(pid_t pid, u64 **vas, u64 *count)
+{
+	struct file *filp;
+	char path[COLD_PAGE_PATH_MAX];
+	loff_t pos = 0;
+	ssize_t ret;
+	loff_t file_size;
+	u64 *va_array;
+
+	*vas = NULL;
+	*count = 0;
+
+	snprintf(path, sizeof(path), COLD_PAGE_FILE_PATH, pid);
+	filp = filp_open(path, O_RDONLY, 0);
+	if (IS_ERR(filp)) {
+		pr_debug("cold page file %s not found\n", path);
+		return PTR_ERR(filp);
+	}
+
+	file_size = vfs_llseek(filp, 0, SEEK_END);
+	if (file_size <= 0 || file_size % sizeof(u64) != 0) {
+		pr_debug("cold page file %s size invalid: %lld\n", path, file_size);
+		filp_close(filp, NULL);
+		return -EINVAL;
+	}
+
+	*count = file_size / sizeof(u64);
+	va_array = vzalloc(file_size);
+	if (!va_array) {
+		filp_close(filp, NULL);
+		return -ENOMEM;
+	}
+
+	pos = 0;
+	ret = kernel_read(filp, va_array, file_size, &pos);
+	filp_close(filp, NULL);
+	if (ret != file_size) {
+		vfree(va_array);
+		return ret < 0 ? ret : -EIO;
+	}
+
+	sort(va_array, *count, sizeof(u64), cmp_u64, NULL);
+	*vas = va_array;
+	pr_debug("read cold page file %s: %llu pages, sorted\n", path, *count);
+	return 0;
+}
+
+static void print_remote_numa_cold_page_stats(struct access_pid *ap,
+						u64 remote_cold_count[SMAP_MAX_NUMNODES])
+{
+	int nid;
+	u64 ratio_percent;
+
+	for (nid = nr_local_numa; nid < SMAP_MAX_NUMNODES; nid++) {
+		u64 total_pages = ap->page_num[nid];
+		if (total_pages == 0 && remote_cold_count[nid] == 0)
+			continue;
+		if (total_pages > 0)
+			ratio_percent = remote_cold_count[nid] * 10000 / total_pages;
+		else
+			ratio_percent = 0;
+		pr_info("pid %d remote NUMA %d: total pages %llu, cold pages %llu, ratio %llu.%02llu%%\n",
+			ap->pid, nid, total_pages, remote_cold_count[nid],
+			ratio_percent / 100, ratio_percent % 100);
+	}
+}
+
 static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 {
 	int ret;
 	int vma_count = 0;
 	struct mm_struct *mm;
 	struct smap_vma_struct *vma_array = NULL;
+	int nid;
 	struct pte_walk pte_walk = {
 		.flag = false,
-		.ap = ap
+		.ap = ap,
+		.cold_vas = NULL,
+		.cold_count = 0,
+		.cold_match_idx = 0
 	};
 	pte_walk.pid = ap->pid;
 	pte_walk.type = ap->type;
+	for (nid = 0; nid < SMAP_MAX_NUMNODES; nid++)
+		pte_walk.remote_cold_count[nid] = 0;
 
 	mm = get_mm_by_pid(ap->pid);
 	if (IS_ERR(mm) || !mm || !mmget_not_zero(mm)) {
@@ -1513,14 +1620,26 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		return -EINVAL;
 	}
 
+	/* 最后一次扫描时，读取冷页面文件 */
+	if (access_pid_cur_last_scanning(ap))
+		read_cold_page_list_file(ap->pid, &pte_walk.cold_vas, &pte_walk.cold_count);
+
 	ret = setup_statistic_scan(&pte_walk, ap->pid, vma_array, vma_count);
 	if (ret) {
 		pr_err("failed to setup statistic scan, ret: %d\n", ret);
+		if (pte_walk.cold_vas)
+			vfree(pte_walk.cold_vas);
 		mmput(mm);
 		return -EINVAL;
 	}
 
 	ret = walk_all_vmas(mm, vma_array, vma_count, &pte_walk, ap->pid);
+
+	/* 扫描完成后打印统计并释放冷页面数组 */
+	if (pte_walk.cold_vas) {
+		print_remote_numa_cold_page_stats(ap, pte_walk.remote_cold_count);
+		vfree(pte_walk.cold_vas);
+	}
 
 	update_and_cleanup_statistic(ap->pid, &pte_walk, mm, vma_array);
 	mmput(mm);
