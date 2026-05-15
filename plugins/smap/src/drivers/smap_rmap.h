@@ -1,0 +1,28 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2024-2024. All rights reserved.
+ * Description: SMAP reverse map module for drivers
+ */
+
+#ifndef _SMAP_RMAP_H_
+#define _SMAP_RMAP_H_
+
+#include <linux/mm_types.h>
+
+enum page_task_type {
+	PAGE_PID_TYPE,
+	PAGE_NODE_TYPE,
+};
+
+struct page_task_arg {
+	enum page_task_type type;
+	pid_t pid;
+	bool found;
+	int node;
+	int nr_cpus_allowed;
+};
+
+void find_page_task(struct page *page, int is_locked,
+		    struct page_task_arg *pta);
+
+#endif /* _SMAP_RMAP_H_ */

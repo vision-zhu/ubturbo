@@ -20,6 +20,9 @@
 #include <linux/ktime.h>
 #include <linux/version.h>
 #include <linux/spinlock.h>
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
+#include <linux/migrate.h>
 
 #include "check.h"
 #include "access_iomem.h"
@@ -29,6 +32,7 @@
 #include "ub_hist.h"
 #include "hist_ops.h"
 #include "hist_tracking.h"
+#include "smap_rmap.h"
 
 #define to_access_tracking_dev(n) \
 	container_of(n, struct access_tracking_dev, ldev)
@@ -43,6 +47,28 @@
 #define pr_fmt(fmt) "hist: " fmt
 
 extern struct list_head access_dev;
+
+/* 热页迁回阈值配置 */
+u32 hot_page_threshold = HOT_PAGE_DEFAULT_THRESHOLD;
+
+/* 轮询选择本地 NUMA 的计数器（用于进程无 CPU 限制时的备选方案） */
+static atomic_t hot_page_rr_counter = ATOMIC_INIT(0);
+
+/* 根据页面获取进程亲和的 NUMA 节点 */
+static int get_page_task_numa(struct page *page)
+{
+	struct page_task_arg pta = { .type = PAGE_NODE_TYPE };
+	struct page *head;
+
+	head = compound_head(page);
+	find_page_task(head, 0, &pta);
+
+	/* 如果进程有 CPU 限制，使用其绑定的 NUMA */
+	if (pta.found && pta.nr_cpus_allowed < num_online_cpus())
+		return pta.node;
+
+	return NUMA_NO_NODE;
+}
 
 static inline void reset_actc_data(struct access_tracking_dev *hdev)
 {
@@ -226,6 +252,157 @@ static void scan_hist(struct access_tracking_dev *hdev)
 	read_unlock(&rem_ram_list_lock);
 }
 
+/* 获取本地 NUMA 节点空闲页数量 */
+static unsigned long get_local_node_nr_free_pages(int nid)
+{
+	pg_data_t *pgdat = NODE_DATA(nid);
+	struct zone *zones;
+	int i;
+	unsigned long count = 0;
+
+	if (!pgdat || nid >= nr_local_numa)
+		return 0;
+
+	zones = pgdat->node_zones;
+	for (i = 0; i < MAX_NR_ZONES; i++)
+		count += zone_page_state(zones + i, NR_FREE_PAGES);
+
+	return count;
+}
+
+/* 简单轮询选择有空闲内存的本地 NUMA 节点（备选方案） */
+static int select_local_numa_rr(void)
+{
+	int nid, start_nid;
+	unsigned long max_free = 0;
+	int best_nid = NUMA_NO_NODE;
+
+	if (nr_local_numa <= 0)
+		return NUMA_NO_NODE;
+
+	start_nid = atomic_read(&hot_page_rr_counter) % nr_local_numa;
+
+	for (nid = 0; nid < nr_local_numa; nid++) {
+		int check_nid = (start_nid + nid) % nr_local_numa;
+		unsigned long free_pages = get_local_node_nr_free_pages(check_nid);
+
+		if (free_pages > max_free) {
+			max_free = free_pages;
+			best_nid = check_nid;
+		}
+	}
+
+	if (best_nid >= 0)
+		atomic_inc(&hot_page_rr_counter);
+
+	return best_nid;
+}
+
+/* 热页迁回的新页分配回调 */
+static struct folio *hot_page_alloc_new_folio(struct folio *src, unsigned long private)
+{
+	int nid = (int)private;
+	gfp_t gfp = GFP_HIGHUSER_MOVABLE | __GFP_THISNODE | __GFP_NORETRY;
+
+	if (folio_test_hugetlb(src))
+		return NULL;  /* 大页暂不处理 */
+
+	return __folio_alloc(gfp, folio_order(src), nid, NULL);
+}
+
+/* 热页检测与迁回函数 */
+static void hot_page_migrate_back(struct access_tracking_dev *hdev)
+{
+	u32 pg_idx = 0;
+	u64 pa, page_size;
+	struct ram_segment *rseg;
+	struct addr_seg addr_seg;
+	struct folio **folios;
+	unsigned int nr_folios = 0, nr_migrated = 0;
+	unsigned long pfn;
+	struct page *page;
+	int dest_nid;
+	int ret;
+
+	if (!hdev->enable_on || hot_page_threshold == 0)
+		return;
+
+	page_size = hist_get_page_size(hdev);
+	folios = vzalloc(MAX_HOT_PAGES_PER_BATCH * sizeof(struct folio *));
+	if (!folios)
+		return;
+
+	/* 检测热页 */
+	read_lock(&rem_ram_list_lock);
+	list_for_each_entry(rseg, &remote_ram_list, node) {
+		u32 addr_pg_idx;
+		u32 idx;
+
+		if (rseg->numa_node != hdev->node)
+			continue;
+
+		addr_seg.start = rseg->start;
+		addr_seg.size = rseg->end - rseg->start + 1;
+		addr_pg_idx = addr_seg.size >> (hdev->page_size_mode == PAGE_MODE_2M ?
+				HIST_ADDR_SHIFT_2M : HIST_ADDR_SHIFT_4K);
+
+		for (pa = rseg->start; pa <= rseg->end && nr_folios < MAX_HOT_PAGES_PER_BATCH;
+		     pa += page_size) {
+			idx = pg_idx + ((pa - rseg->start) / page_size);
+
+			if (idx >= hdev->page_count)
+				break;
+
+			/* 检查频次是否超过阈值 */
+			if (hdev->access_bit_actc_data[idx] <= hot_page_threshold)
+				continue;
+
+			pfn = PHYS_PFN(pa);
+			if (!pfn_valid(pfn))
+				continue;
+
+			page = pfn_to_online_page(pfn);
+			if (!page || !PageHead(page))
+				continue;
+
+			/* 尝试获取 folio 引用 */
+			if (!folio_try_get(page_folio(page)))
+				continue;
+
+			folios[nr_folios++] = page_folio(page);
+		}
+		pg_idx += addr_pg_idx;
+	}
+	read_unlock(&rem_ram_list_lock);
+
+	if (nr_folios == 0) {
+		vfree(folios);
+		return;
+	}
+
+	/* 选择目标 NUMA：优先使用 PID 亲和的 NUMA */
+	dest_nid = get_page_task_numa(&folios[0]->page);
+	if (dest_nid < 0 || dest_nid >= nr_local_numa) {
+		/* 进程无 CPU 限制时，使用轮询备选方案 */
+		dest_nid = select_local_numa_rr();
+	}
+
+	if (dest_nid < 0 || dest_nid >= nr_local_numa) {
+		pr_debug("hot_page: no valid local NUMA found\n");
+		goto putback;
+	}
+
+	/* 使用内核导出的 isolate_and_migrate_folios 执行迁移 */
+	ret = isolate_and_migrate_folios(folios, nr_folios, hot_page_alloc_new_folio,
+					  NULL, dest_nid, MIGRATE_ASYNC, &nr_migrated);
+
+	pr_debug("hot_page migrate: %u pages from node %d to node %d, migrated %u, ret: %d\n",
+		 nr_folios, hdev->node, dest_nid, nr_migrated, ret);
+
+putback:
+	vfree(folios);
+}
+
 static void update_hist_actc_batch(void)
 {
 	struct access_tracking_dev *hdev, *n;
@@ -234,6 +411,8 @@ static void update_hist_actc_batch(void)
 			continue;
 		down_write(&hdev->buffer_lock);
 		scan_hist(hdev);
+		/* 热页检测与迁回 */
+		hot_page_migrate_back(hdev);
 		up_write(&hdev->buffer_lock);
 	}
 }
@@ -250,6 +429,71 @@ static void hist_tracking_deinit(void)
 		kfree(hdev);
 	}
 }
+
+/* debugfs 热页阈值配置接口 */
+static ssize_t hot_threshold_read(struct file *filp, char __user *buf,
+				   size_t count, loff_t *ppos)
+{
+	char tmp[32];
+	int len = scnprintf(tmp, sizeof(tmp), "%u\n", hot_page_threshold);
+	return simple_read_from_buffer(buf, count, ppos, tmp, len);
+}
+
+static ssize_t hot_threshold_write(struct file *filp, const char __user *buf,
+				    size_t count, loff_t *ppos)
+{
+	char tmp[32];
+	unsigned long val;
+
+	if (count >= sizeof(tmp))
+		return -EINVAL;
+	if (copy_from_user(tmp, buf, count))
+		return -EFAULT;
+	tmp[count] = '\0';
+
+	if (kstrtoul(tmp, 10, &val))
+		return -EINVAL;
+	if (val > HOT_PAGE_MAX_THRESHOLD)
+		return -EINVAL;
+
+	hot_page_threshold = val;
+	pr_info("hot_page_threshold set to %u\n", hot_page_threshold);
+	return count;
+}
+
+static const struct file_operations hot_threshold_fops = {
+	.owner = THIS_MODULE,
+	.read = hot_threshold_read,
+	.write = hot_threshold_write,
+	.llseek = default_llseek,
+};
+
+static struct dentry *hot_page_debugfs_dir;
+
+static int hot_page_debugfs_init(void)
+{
+	hot_page_debugfs_dir = debugfs_create_dir("smap", NULL);
+	if (!hot_page_debugfs_dir) {
+		pr_err("failed to create smap debugfs dir\n");
+		return -ENOMEM;
+	}
+
+	debugfs_create_file("hot_threshold", 0644, hot_page_debugfs_dir, NULL,
+			    &hot_threshold_fops);
+	return 0;
+}
+
+static void hot_page_debugfs_exit(void)
+{
+	debugfs_remove_recursive(hot_page_debugfs_dir);
+}
+
+void hist_tracking_exit(void)
+{
+	hot_page_debugfs_exit();
+	hist_tracking_deinit();
+}
+EXPORT_SYMBOL(hist_tracking_exit);
 
 void access_tracking_dev_release(struct device *dev)
 {
@@ -344,6 +588,14 @@ int hist_module_init(void)
 		pr_err("init histogram tracking device failed, ret: %d\n", ret);
 		goto err_tracking_add;
 	}
+
+	/* 初始化 debugfs 热页阈值配置接口 */
+	ret = hot_page_debugfs_init();
+	if (ret) {
+		pr_warn("hot page debugfs init failed\n");
+		/* 不影响主功能，继续执行 */
+	}
+
 	hist_set_flush_actc_cb(update_hist_actc_batch);
 	pr_info("smap hist tracking init success.\n");
 	return 0;

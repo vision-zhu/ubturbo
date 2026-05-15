@@ -23,6 +23,14 @@ extern u64 get_node_page_cnt_iomem(int nid, int page_size);
 
 extern u32 g_pagesize_huge;
 
+/* 热页迁回配置 */
+#define HOT_PAGE_DEFAULT_THRESHOLD 20
+#define HOT_PAGE_MAX_THRESHOLD U16_MAX
+#define MAX_HOT_PAGES_PER_BATCH 256
+
+/* 热页阈值（可通过 debugfs 配置） */
+extern u32 hot_page_threshold;
+
 struct access_tracking_dev {
 	struct list_head list;
 	struct device ldev;

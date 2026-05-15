@@ -26,6 +26,8 @@
 #include "ub_hist.h"
 #include "hist_ops.h"
 
+extern void hist_tracking_exit(void);
+
 #define HOT_WINDOW_RATIO (10)
 #define SCAN_INTERVAL_RANGE_US 1000
 
@@ -1095,6 +1097,7 @@ static int query_hist_ba_info(void)
 void hist_deinit(void)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
+	hist_tracking_exit();
 	scan_thread_deinit(dev);
 	hist_buffer_deinit(dev);
 	addr_segs_deinit(dev);
