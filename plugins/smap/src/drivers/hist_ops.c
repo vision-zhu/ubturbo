@@ -31,6 +31,17 @@
 
 static struct smap_hist_dev g_smap_hist_dev;
 
+/* 4K循环扫描当前窗口索引 */
+static u32 g_scan_win_idx_4k;
+
+/* Forward declarations */
+static void clear_actc_buf(void);
+static int smap_hist_read_paral(struct segs_info *win_info,
+				struct segs_info *rmem_info,
+				enum ub_hist_sts_size sts_size, actc_t *buf,
+				u32 scan_time, u32 buf_len);
+static inline void flush_actc_data(struct smap_hist_dev *dev);
+
 static inline u64 align_addr(u64 addr, u32 low_bit_len)
 {
 	return (addr >> low_bit_len) << low_bit_len;
@@ -385,42 +396,41 @@ static int filter_4k_scan_hot_wins(struct segs_info *win_info,
 static int generate_aligned_4k_scan_wins_info(struct segs_info *win_info,
 					  struct segs_info *info, actc_t *buf)
 {
+	int i;
+	u32 nr_wins = 0;
+	u32 nr_wins_4k;
 	struct addr_seg *wins_4k;
-	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	int ret;
-	int max_wins_4k_per_ba =
-		HIST_THREAD_PERIOD / HIST_SCAN_DURATION_PER_WIN -
-		dev->scan_wins_num_per_ba;
-	u32 nr_wins_4k = count_nr_windows(info->segs, info->cnt, STS_SIZE_4K);
-	if (nr_wins_4k == 0 || max_wins_4k_per_ba <= 0)
+	u64 shift = get_hist_scan_win_size(STS_SIZE_4K);
+	u64 ba_tag;
+
+	nr_wins_4k = count_nr_windows(info->segs, info->cnt, STS_SIZE_4K);
+	if (nr_wins_4k == 0)
 		return -EINVAL;
 
 	wins_4k = vzalloc(nr_wins_4k * sizeof(struct addr_seg));
 	if (!wins_4k)
 		return -ENOMEM;
 
+	for (i = 0; i < info->cnt; i++) {
+		u64 start = info->segs[i].start;
+		u64 size = info->segs[i].size;
+		calc_ba_tag(start, &ba_tag);
+		while (size > 0) {
+			if (nr_wins >= nr_wins_4k) {
+				vfree(wins_4k);
+				return -EINVAL;
+			}
+			wins_4k[nr_wins].start = start;
+			wins_4k[nr_wins].size = shift;
+			wins_4k[nr_wins].ba_tag = ba_tag;
+			start += shift;
+			size -= shift;
+			nr_wins++;
+		}
+	}
+
 	win_info->cnt = nr_wins_4k;
 	win_info->segs = wins_4k;
-	/*
-	 * Firstly, we look up each 32MB or 128MB long tracking window and calculate
-	 * the max access count within its range
-	 */
-	calc_4k_scan_hot_wins(info, buf, win_info);
-	/*
-	 * Secondly, sort windows by ba_tag in ascending order,
-	 * and for the same ba_tag, sort by frequency in descending order
-	 */
-	sort(win_info->segs, win_info->cnt, sizeof(struct addr_seg),
-	     addr_seg_cmp_max, NULL);
-	/*
-	 * Finally, filter the hottest part of the windows,
-	 * each BA is constrained to a maximum of max_wins_4k_per_ba windows
-	 */
-	ret = filter_4k_scan_hot_wins(win_info, max_wins_4k_per_ba);
-	if (ret) {
-		pr_err("filter_4k_scan_hot_wins failed.[ret:%d]\n", ret);
-		return ret;
-	}
 	return 0;
 }
 
@@ -703,17 +713,9 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 			     actc_t *buf, u32 buf_len, u32 pgsize)
 {
 	int ret;
-	/*
-	 * For 2M pages, size of a window which consist of 16K pages is as large
-	 * as 32GB, we can finish all windows scan in time and ensure that each
-	 * window has been scanned for a sufficient period of time. But for 4K
-	 * pages, windows to scan is 512 times more than that of 2M pages.
-	 * To deal this problem, we use a strategy named "Multi-Hierarchy scan",
-	 * we do scan of a 32GB sliding window firstly to figure out the hottest
-	 * windows, scan work of a 64MB sliding window will be launched in those
-	 * windows later to get a fine-grained access count of each 4K pages.
-	 */
-	bool do_multi_gran = pgsize == SIZE_4K;
+	struct segs_info win_info;
+	struct segs_info one_win;
+	bool is_4k_mode = pgsize == SIZE_4K;
 
 	if (!addr_seg_is_valid(info)) {
 		pr_err("invalid address segment passed to sliding scan\n");
@@ -727,23 +729,50 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 		pr_err("null buffer passed to sliding scan\n");
 		return -EINVAL;
 	}
-	ret = do_hist_scan_sliding(info, do_multi_gran, buf, buf_len,
-				   STS_SIZE_2M);
-	if (ret) {
-		pr_debug("sliding scan on 2M pages failed, ret: %d\n", ret);
-		return ret;
-	}
-	if (!do_multi_gran) {
+
+	/* 2M mode: original flow unchanged */
+	if (!is_4k_mode) {
+		ret = do_hist_scan_sliding(info, false, buf, buf_len,
+					   STS_SIZE_2M);
+		if (ret)
+			return ret;
+		if (!g_smap_hist_dev.status.status_all)
+			flush_actc_data(&g_smap_hist_dev);
 		return 0;
 	}
-	/* Rescan for the secondary hierarchy */
-	ret = do_hist_scan_sliding(info, do_multi_gran, buf, buf_len,
-				   STS_SIZE_4K);
-	if (ret) {
-		pr_debug("sliding scan on 4K pages failed, ret: %d\n", ret);
+
+	/* 4K mode: circular scan one window at a time */
+	ret = generate_aligned_4k_scan_wins_info(&win_info, info, buf);
+	if (ret)
+		return ret;
+
+	if (g_scan_win_idx_4k >= win_info.cnt)
+		g_scan_win_idx_4k = 0;
+
+	one_win.cnt = 1;
+	one_win.segs = &win_info.segs[g_scan_win_idx_4k];
+
+	g_smap_hist_dev.scan_wins_num_per_ba = 1;
+	clear_actc_buf();
+	ret = smap_hist_read_paral(&one_win, info, STS_SIZE_4K, buf,
+				   HIST_SCAN_DURATION_PER_WIN, buf_len);
+
+	if (ret == -EAGAIN) {
+		vfree(win_info.segs);
 		return ret;
 	}
-	return 0;
+
+	if (!g_smap_hist_dev.status.status_all && ret == 0)
+		flush_actc_data(&g_smap_hist_dev);
+
+	if (ret == 0) {
+		g_scan_win_idx_4k++;
+		if (g_scan_win_idx_4k >= win_info.cnt)
+			g_scan_win_idx_4k = 0;
+	}
+
+	vfree(win_info.segs);
+	return ret;
 }
 
 static void add_to_actc_data(actc_t *dst, actc_t *src, int len)
