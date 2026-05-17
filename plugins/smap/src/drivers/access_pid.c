@@ -21,6 +21,8 @@
 #include "access_tracking.h"
 #include "access_mmu.h"
 #include "access_pid.h"
+#include "access_acpi_mem.h"
+#include "smap_page_flags.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) "access_pid: " fmt
@@ -287,11 +289,32 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 		/* 填充freq */
 		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
 
-		/* 填充prior - 从mapping获取 */
-		if (ap->info.vm_size && ap->info.mapping) {
-			actc[len_cnt].prior = ap->info.mapping[mapping_offset + len_cnt] & 0xff;
+		/* 填充prior - 区分场景 */
+		if (is_access_hugepage()) {
+			/* 2M虚机场景：从mapping获取 */
+			if (ap->info.vm_size && ap->info.mapping) {
+				actc[len_cnt].prior = ap->info.mapping[mapping_offset + len_cnt] & 0xff;
+			} else {
+				actc[len_cnt].prior = 0;
+			}
 		} else {
-			actc[len_cnt].prior = 0;
+			/* 普通进程场景：从 page->flags 位25-32 获取累计频次 */
+			u64 paddr = 0;
+			unsigned long pfn;
+			struct page *page;
+
+			if (nid < nr_local_numa)
+				calc_acidx_paddr_acpi(nid, acidx, &paddr, PAGE_SIZE);
+			else
+				calc_acidx_paddr_iomem(nid, acidx, &paddr, PAGE_SIZE);
+
+			pfn = PHYS_PFN(paddr);
+			if (pfn_valid(pfn)) {
+				page = pfn_to_page(pfn);
+				actc[len_cnt].prior = get_smap_acc_cnt(page);
+			} else {
+				actc[len_cnt].prior = 0;
+			}
 		}
 
 		/* 填充is_white_list */

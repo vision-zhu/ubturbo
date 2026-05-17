@@ -35,6 +35,7 @@
 #include "access_mmu.h"
 #include "access_tracking.h"
 #include "accessed_bit.h"
+#include "smap_page_flags.h"
 
 #define DECIMAL 10
 #define DEFAULT_REF_COUNT 0
@@ -1322,6 +1323,7 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 	u64 pa_idx = 0;
 	bool is_hist = false;
 	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
+	unsigned long pfn = PHYS_PFN(paddr);
 
 	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
 		return 0;
@@ -1336,6 +1338,12 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			pte_walk->group_hot = pte_young(ptent);
 		else if (pte_walk->group_hot) {
 			actc_data_update(nid, pa_idx);
+			/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
+			if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
+				struct page *page = pfn_to_online_page(pfn);
+				if (page)
+					inc_smap_acc_cnt(page);
+			}
 			goto skip_scan;
 		}
 	}
@@ -1344,11 +1352,18 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		if (pte_walk->type == STATISTIC_SCAN)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
 		actc_data_update(nid, pa_idx);
-		if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
-			if (!is_file_or_shared_page(paddr))
-				__ptep_test_and_clear_young(NULL, 0, pte);
-			pte_walk->flag = true;
+
+		/* 页面 young 时累计频次加一，STATISTIC_SCAN不考虑 */
+		if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
+			struct page *page = pfn_to_online_page(pfn);
+			if (page)
+				inc_smap_acc_cnt(page);
 		}
+
+		/* 远端NUMA页面也需要清除young位 */
+		if (!is_file_or_shared_page(paddr))
+			__ptep_test_and_clear_young(NULL, 0, pte);
+		pte_walk->flag = true;
 	}
 skip_scan:
 	if (access_pid_cur_last_scanning(pte_walk->ap)) {

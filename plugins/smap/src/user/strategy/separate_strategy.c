@@ -397,6 +397,22 @@ static void FindThreshold(const SelectionMode mode, uint64_t nrMig, const uint32
     }
 }
 
+static int ComparePriorForDemote(const void *a, const void *b)
+{
+    /* SELECT_BOTTOM_K（迁出）：prior小的优先，升序排列 */
+    ActcData *pa = (ActcData *)a;
+    ActcData *pb = (ActcData *)b;
+    return (int)pa->prior - (int)pb->prior;
+}
+
+static int ComparePriorForPromote(const void *a, const void *b)
+{
+    /* SELECT_TOP_K（迁回）：prior大的优先，降序排列 */
+    ActcData *pa = (ActcData *)a;
+    ActcData *pb = (ActcData *)b;
+    return (int)pb->prior - (int)pa->prior;
+}
+
 static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t actcLen, ActcData *currentData,
                          struct MigList *currMlist, uint64_t nrMig, int thresholdFreq, uint32_t takeAtThreshold,
                          uint32_t *selectedBuckets)
@@ -405,14 +421,46 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
     uint32_t tmp = takeAtThreshold;
     size_t collected_count = 0;
     size_t write_idx = offset;
+    ActcData *thresholdPages = NULL;
+    size_t thresholdCount = 0;
+    size_t tpTakeIdx = 0;
+
+    /* 收集阈值频次页面并统计数量 */
+    if (takeAtThreshold > 0) {
+        /* 先统计数量 */
+        for (size_t i = offset; i < actcLen; ++i) {
+            if (currentData[i].freq == thresholdFreq && !currentData[i].isWhiteListPage) {
+                thresholdCount++;
+            }
+        }
+        if (thresholdCount > 0) {
+            thresholdPages = malloc(thresholdCount * sizeof(ActcData));
+            if (thresholdPages) {
+                size_t tpIdx = 0;
+                for (size_t i = offset; i < actcLen && tpIdx < thresholdCount; ++i) {
+                    if (currentData[i].freq == thresholdFreq && !currentData[i].isWhiteListPage) {
+                        thresholdPages[tpIdx++] = currentData[i];
+                    }
+                }
+                /* 按 prior 排序 */
+                if (mode == SELECT_TOP_K) {
+                    qsort(thresholdPages, thresholdCount, sizeof(ActcData), ComparePriorForPromote);
+                } else {
+                    qsort(thresholdPages, thresholdCount, sizeof(ActcData), ComparePriorForDemote);
+                }
+            }
+        }
+    }
+
+    /* 选取频次不在阈值的页面 */
     for (size_t i = offset; i < actcLen && collected_count < nrMig; ++i) {
         int freq = currentData[i].freq;
         bool shouldTake = false;
 
         if (mode == SELECT_TOP_K) {
-            shouldTake = (freq > thresholdFreq) || (freq == thresholdFreq && tmp > 0);
+            shouldTake = freq > thresholdFreq;
         } else {
-            shouldTake = (freq < thresholdFreq) || (freq == thresholdFreq && tmp > 0);
+            shouldTake = freq < thresholdFreq;
         }
 
         if (shouldTake) {
@@ -427,10 +475,19 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
                 currentData[write_idx] = temp;
             }
             write_idx++;
-            if (freq == thresholdFreq) {
-                tmp--;
-            }
         }
+    }
+
+    /* 从排序后的阈值页面数组选取 */
+    while (collected_count < nrMig && tmp > 0 && tpTakeIdx < thresholdCount) {
+        currMlist->addr[collected_count++] = thresholdPages[tpTakeIdx].addr;
+        selectedBuckets[thresholdFreq]++;
+        tpTakeIdx++;
+        tmp--;
+    }
+
+    if (thresholdPages) {
+        free(thresholdPages);
     }
 }
 
