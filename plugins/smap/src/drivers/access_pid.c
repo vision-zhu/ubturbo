@@ -14,6 +14,7 @@
 #include <linux/pid.h>
 #include <linux/namei.h>
 #include <linux/sizes.h>
+#include <linux/bitops.h>
 
 #include "check.h"
 #include "accessed_bit.h"
@@ -21,6 +22,8 @@
 #include "access_tracking.h"
 #include "access_mmu.h"
 #include "access_pid.h"
+#include "access_acpi_mem.h"
+#include "smap_page_flags.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) "access_pid: " fmt
@@ -245,6 +248,7 @@ static int mem_freq_release(struct inode *inode, struct file *file)
  *
  * 遍历bitmap，结合频次数据、mapping和white_list_bm，生成actc_data结构体数组。
  */
+static u16 max_prior = 0, prior_shift = 0;
 static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 				     struct actc_data *actc, u32 *actc_len,
 				     u32 mapping_offset)
@@ -294,7 +298,25 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 				ap->info.mapping[mapping_offset + len_cnt] &
 				0xff;
 		} else {
-			actc[len_cnt].prior = 0;
+			/* 普通进程场景：从 page->flags 位25-32 获取累计频次 */
+			u64 paddr = 0;
+			u16 prior = 0;
+			unsigned long pfn;
+			struct page *page;
+			if (nid < nr_local_numa)
+				calc_acidx_paddr_acpi(nid, acidx, &paddr, PAGE_SIZE);
+			else
+				calc_acidx_paddr_iomem(nid, acidx, &paddr, PAGE_SIZE);
+			pfn = PHYS_PFN(paddr);
+			if (pfn_valid(pfn)) {
+				page = pfn_to_page(pfn);
+				prior = get_smap_acc_cnt(page);
+			} else {
+				prior = 0;
+			}
+			if (prior > max_prior)
+				max_prior = prior;
+			actc[len_cnt].prior = prior >> prior_shift;
 		}
 
 		/* 填充is_white_list */
@@ -320,6 +342,14 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
  *
  * 对每个node调用fill_actc_data_by_bitmap生成actc_data。
  */
+static u16 calc_prior_shift(u16 val)
+{
+	u16 used_bit = fls((unsigned int)val);
+	if (used_bit > 8)
+		return used_bit - 8;
+	return 0;
+}
+
 static void fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc,
 			       u32 actc_len[SMAP_MAX_NUMNODES])
 {
@@ -333,6 +363,7 @@ static void fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc,
 		mapping_offset += actc_len[nid];
 		actc_offset += ap->page_num[nid];
 	}
+	prior_shift = calc_prior_shift(max_prior);
 }
 
 static inline size_t calc_process_page_number(struct access_pid *ap)
