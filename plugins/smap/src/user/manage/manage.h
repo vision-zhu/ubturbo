@@ -136,6 +136,8 @@ typedef struct {
     uint8_t prior;
 } LevelActcData;
 
+#define FREQ_BUCKETS_SIZE 256
+
 typedef struct {
     uint16_t freqMin;
     uint16_t freqMax;
@@ -145,6 +147,7 @@ typedef struct {
     uint64_t freqSum;
     uint64_t remoteHotNum;
     uint64_t whiteNum;
+    uint32_t freqBuckets[FREQ_BUCKETS_SIZE]; /* 频次桶：freqBuckets[freq] = 频次为freq的非白名单页面数 */
 } ActCount;
 
 typedef struct {
@@ -239,6 +242,7 @@ typedef struct {
     uint64_t actcLen[MAX_NODES];
     ActcData *actcData[MAX_NODES]; // actc数据
     ActCount actCount[MAX_NODES]; // 统计数据
+    uint32_t selectedBuckets[MAX_NODES][FREQ_BUCKETS_SIZE]; // 已选频次桶：selectedBuckets[nid][freq] = 已选频次为freq的页面数
 } ScanAttribute;
 
 typedef struct {
