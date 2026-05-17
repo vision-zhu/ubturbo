@@ -7,6 +7,8 @@
 #ifndef _SRC_ACCESSED_BIT_H
 #define _SRC_ACCESSED_BIT_H
 
+#include <linux/mm.h>
+#include <linux/mmzone.h>
 #include "access_pid.h"
 #include "access_iomem.h"
 #include "access_acpi_mem.h"
@@ -83,6 +85,66 @@ struct freq_info {
 	u64 hpa;
 	actc_t freq;
 };
+
+/*
+ * 使用LAST_CPUPID字段存储累计访问频次
+ * SMAP插件禁用了numa_balance，因此LAST_CPUPID是闲置的
+ * 页面释放时LAST_CPUPID会自动重置为全1
+ * prior字段保持u8，返回值截断到低8位，最大255
+ */
+
+#define SMAP_ACC_CNT_MAX     255  /* u8截断后的最大值 */
+
+static inline struct page *smap_paddr_to_page(phys_addr_t paddr)
+{
+	unsigned long pfn = PHYS_PFN(paddr);
+
+	if (pfn_valid(pfn))
+		return pfn_to_online_page(pfn);
+	return NULL;
+}
+
+/*
+ * 获取累计访问频次
+ * 初始值是全F（LAST_CPUPID_MASK），返回0
+ * 其他值加一后返回，最大不超过SMAP_ACC_CNT_MAX
+ */
+static inline u8 get_smap_acc_cnt(phys_addr_t paddr)
+{
+	unsigned long flags;
+	u16 cnt;
+	struct page *page = smap_paddr_to_page(paddr);
+
+	if (!page)
+		return 0;
+
+	flags = READ_ONCE(page->flags);
+	cnt = (flags >> LAST_CPUPID_PGSHIFT) & LAST_CPUPID_MASK;
+
+	/* 初始值是全F，返回0 */
+	if (cnt == LAST_CPUPID_MASK)
+		return 0;
+
+	return min_t(u16, cnt + 1, SMAP_ACC_CNT_MAX);
+}
+
+/* 累计访问频次加一 */
+static inline void inc_smap_acc_cnt(phys_addr_t paddr)
+{
+	unsigned long flags;
+	u16 cnt;
+	struct page *page = smap_paddr_to_page(paddr);
+
+	if (!page)
+		return;
+
+	flags = READ_ONCE(page->flags);
+	cnt = (flags >> LAST_CPUPID_PGSHIFT) & LAST_CPUPID_MASK;
+	cnt = cnt == (LAST_CPUPID_MASK - 1) ? : (cnt + 1);
+	flags &= ~(LAST_CPUPID_MASK << LAST_CPUPID_PGSHIFT);
+	flags |= ((unsigned long)(cnt) << LAST_CPUPID_PGSHIFT);
+	WRITE_ONCE(page->flags, flags);
+}
 
 int pid_pte_mkold(struct access_pid *ap);
 int smap_create_tracking_info_file(struct ham_tracking_info *info);

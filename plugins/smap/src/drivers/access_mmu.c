@@ -70,15 +70,6 @@ static int calc_paddr_acidx(u64 paddr, int *nid, u64 *index)
 	return calc_paddr_acidx_iomem(paddr, nid, index, page_size);
 }
 
-static inline struct page *smap_paddr_to_page(phys_addr_t paddr)
-{
-	unsigned long pfn = PHYS_PFN(paddr);
-
-	if (pfn_valid(pfn))
-		return pfn_to_online_page(pfn);
-	return NULL;
-}
-
 bool is_file_or_shared_page(phys_addr_t paddr)
 {
 	struct folio *folio;

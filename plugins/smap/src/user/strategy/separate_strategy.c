@@ -31,6 +31,13 @@ typedef struct NumaInfo {
     int remoteNid;
 } NumaInfo;
 
+/* 阈值频次页面条目，用于按prior排序并记录原始索引 */
+typedef struct ThresholdEntry {
+    size_t idx;    /* 原始索引 */
+    uint8_t prior; /* 优先级 */
+    uint64_t addr; /* 页面地址 */
+} ThresholdEntry;
+
 static int InitSeparateParam(ProcessAttr *process)
 {
     process->separateParam.freqWt = DEFAULT_FREQ_WT_2M;
@@ -395,6 +402,22 @@ static void FindThreshold(const SelectionMode mode, uint64_t nrMig, const uint32
     }
 }
 
+static int ComparePriorForDemote(const void *a, const void *b)
+{
+    /* SELECT_BOTTOM_K（迁出）：prior小的优先，升序排列 */
+    ThresholdEntry *pa = (ThresholdEntry *)a;
+    ThresholdEntry *pb = (ThresholdEntry *)b;
+    return (int)pa->prior - (int)pb->prior;
+}
+
+static int ComparePriorForPromote(const void *a, const void *b)
+{
+    /* SELECT_TOP_K（迁回）：prior大的优先，降序排列 */
+    ThresholdEntry *pa = (ThresholdEntry *)a;
+    ThresholdEntry *pb = (ThresholdEntry *)b;
+    return (int)pb->prior - (int)pa->prior;
+}
+
 static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t actcLen, ActcData *currentData,
                          struct MigList *currMlist, uint64_t nrMig, int thresholdFreq, uint32_t takeAtThreshold,
                          uint32_t *selectedBuckets)
@@ -403,14 +426,49 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
     uint32_t tmp = takeAtThreshold;
     size_t collected_count = 0;
     size_t write_idx = offset;
+    ThresholdEntry *thresholdEntries = NULL;
+    size_t thresholdCount = 0;
+    size_t tpTakeIdx = 0;
+
+    /* 收集阈值频次页面并统计数量 */
+    if (takeAtThreshold > 0) {
+        /* 先统计数量 */
+        for (size_t i = offset; i < actcLen; ++i) {
+            if (currentData[i].freq == thresholdFreq && !currentData[i].isWhiteListPage) {
+                thresholdCount++;
+            }
+        }
+        if (thresholdCount > 0) {
+            thresholdEntries = malloc(thresholdCount * sizeof(ThresholdEntry));
+            if (thresholdEntries) {
+                size_t tpIdx = 0;
+                for (size_t i = offset; i < actcLen && tpIdx < thresholdCount; ++i) {
+                    if (currentData[i].freq == thresholdFreq && !currentData[i].isWhiteListPage) {
+                        thresholdEntries[tpIdx].idx = i; /* 记录原始索引 */
+                        thresholdEntries[tpIdx].prior = currentData[i].prior;
+                        thresholdEntries[tpIdx].addr = currentData[i].addr;
+                        tpIdx++;
+                    }
+                }
+                /* 按 prior 排序 */
+                if (mode == SELECT_TOP_K) {
+                    qsort(thresholdEntries, thresholdCount, sizeof(ThresholdEntry), ComparePriorForPromote);
+                } else {
+                    qsort(thresholdEntries, thresholdCount, sizeof(ThresholdEntry), ComparePriorForDemote);
+                }
+            }
+        }
+    }
+
+    /* 选取频次不在阈值的页面 */
     for (size_t i = offset; i < actcLen && collected_count < nrMig; ++i) {
         int freq = currentData[i].freq;
         bool shouldTake = false;
 
         if (mode == SELECT_TOP_K) {
-            shouldTake = (freq > thresholdFreq) || (freq == thresholdFreq && tmp > 0);
+            shouldTake = freq > thresholdFreq;
         } else {
-            shouldTake = (freq < thresholdFreq) || (freq == thresholdFreq && tmp > 0);
+            shouldTake = freq < thresholdFreq;
         }
 
         if (shouldTake) {
@@ -425,10 +483,34 @@ static void CollectPages(const SelectionMode mode, uint64_t offset, uint64_t act
                 currentData[write_idx] = temp;
             }
             write_idx++;
-            if (freq == thresholdFreq) {
-                tmp--;
+        }
+    }
+
+    /* 从排序后的阈值页面数组选取，并通过地址匹配交换到数组前面 */
+    while (collected_count < nrMig && tmp > 0 && tpTakeIdx < thresholdCount) {
+        uint64_t targetAddr = thresholdEntries[tpTakeIdx].addr;
+        currMlist->addr[collected_count++] = targetAddr;
+        selectedBuckets[thresholdFreq]++;
+
+        /* 通过地址在 currentData 中查找并交换到 write_idx 位置 */
+        for (size_t j = write_idx; j < actcLen; ++j) {
+            if (currentData[j].addr == targetAddr) {
+                if (j != write_idx) {
+                    ActcData temp = currentData[j];
+                    currentData[j] = currentData[write_idx];
+                    currentData[write_idx] = temp;
+                }
+                write_idx++;
+                break;
             }
         }
+
+        tpTakeIdx++;
+        tmp--;
+    }
+
+    if (thresholdEntries) {
+        free(thresholdEntries);
     }
 }
 

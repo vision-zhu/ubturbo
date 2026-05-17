@@ -21,6 +21,7 @@
 #include "access_tracking.h"
 #include "access_mmu.h"
 #include "access_pid.h"
+#include "access_acpi_mem.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) "access_pid: " fmt
@@ -236,6 +237,28 @@ static int mem_freq_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static u8 get_page_prior(struct access_pid *ap, int nid, u64 acidx,
+			  u32 mapping_offset, u32 len_cnt)
+{
+	u8 prior = 0;
+	u64 paddr;
+
+	if (is_access_hugepage()) {
+		/* 2M虚机场景：从mapping获取 */
+		if (ap->info.vm_size && ap->info.mapping)
+			prior = ap->info.mapping[mapping_offset + len_cnt] & 0xff;
+	} else {
+		/* 普通进程场景：从 page->flags 获取累计频次 */
+		if (nid < nr_local_numa)
+			calc_acidx_paddr_acpi(nid, acidx, &paddr, PAGE_SIZE);
+		else
+			calc_acidx_paddr_iomem(nid, acidx, &paddr, PAGE_SIZE);
+
+		prior = get_smap_acc_cnt(paddr);
+	}
+	return prior;
+}
+
 /**
  * fill_actc_data_by_bitmap - 根据bitmap生成actc_data数组
  * @ap: access_pid结构体指针
@@ -259,9 +282,8 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 	}
 
 	list_for_each_entry(adev, &access_dev, list) {
-		if (adev->node == nid) {
+		if (adev->node == nid)
 			break;
-		}
 	}
 	if (list_entry_is_head(adev, &access_dev, list)) {
 		*actc_len = 0;
@@ -287,12 +309,9 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 		/* 填充freq */
 		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
 
-		/* 填充prior - 从mapping获取 */
-		if (ap->info.vm_size && ap->info.mapping) {
-			actc[len_cnt].prior = ap->info.mapping[mapping_offset + len_cnt] & 0xff;
-		} else {
-			actc[len_cnt].prior = 0;
-		}
+		/* 填充prior - 区分场景 */
+		actc[len_cnt].prior = get_page_prior(ap, nid, acidx,
+						     mapping_offset, len_cnt);
 
 		/* 填充is_white_list */
 		if (ap->white_list_bm[nid] && test_bit(acidx, ap->white_list_bm[nid])) {

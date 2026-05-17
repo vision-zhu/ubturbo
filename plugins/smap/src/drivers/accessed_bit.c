@@ -1347,6 +1347,8 @@ static void process_scan_results(struct pte_walk *pte_walk)
 			continue;
 		if (entry->hot)
 			actc_data_update(entry->nid, pa_idx);
+		if (pte_walk->type == NORMAL_SCAN && entry->nid < nr_local_numa)
+			inc_smap_acc_cnt(entry->paddr);
 		if (is_last_scan)
 			add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx, pte_walk->ap);
 		cond_resched();
