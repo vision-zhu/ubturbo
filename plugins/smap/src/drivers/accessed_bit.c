@@ -1354,16 +1354,15 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		actc_data_update(nid, pa_idx);
 
 		/* 页面 young 时累计频次加一，STATISTIC_SCAN不考虑 */
-		if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
+		if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
 			struct page *page = pfn_to_online_page(pfn);
 			if (page)
 				inc_smap_acc_cnt(page);
-		}
-
 		/* 远端NUMA页面也需要清除young位 */
-		if (!is_file_or_shared_page(paddr))
-			__ptep_test_and_clear_young(NULL, 0, pte);
-		pte_walk->flag = true;
+			if (!is_file_or_shared_page(paddr))
+				__ptep_test_and_clear_young(NULL, 0, pte);
+			pte_walk->flag = true;
+		}
 	}
 skip_scan:
 	if (access_pid_cur_last_scanning(pte_walk->ap)) {
@@ -1400,6 +1399,7 @@ static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 		return ret;
 	}
 	mmap_read_unlock(mm);
+	cond_resched();
 	return 0;
 }
 

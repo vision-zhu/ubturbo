@@ -546,7 +546,7 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
     attr->type = type;
     attr->isFirstScan = true; // 标记新PID首次扫描
     SetProcessConfig(attr, param);
-    attr->scanTime = MIN_SCAN_PERIOD; // 首次扫描使用高频周期
+    attr->scanTime = DEFAULT_SCAN_PERIOD; // 首次扫描使用高频周期
     LinkedListAdd(&g_processManager.processes, &attr);
     SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", attr->pid, attr->scanTime);
     g_processManager.nr[type]++;
@@ -1121,7 +1121,7 @@ static void CalcActcStats(ProcessAttr *attr)
         if (nid < nrLocalNuma) {
             for (int f = 0; f < FREQ_BUCKETS_SIZE; f++) {
                 if (count->freqBuckets[f] > 0) {
-                    SMAP_LOGGER_DEBUG("Node%d freq=%d pages=%u", nid, f, count->freqBuckets[f]);
+                    SMAP_LOGGER_INFO("Node%d freq=%d pages=%u", nid, f, count->freqBuckets[f]);
                 }
             }
         }
