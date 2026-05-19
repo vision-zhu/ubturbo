@@ -73,20 +73,21 @@ static int calc_paddr_acidx(u64 paddr, int *nid, u64 *index)
 static int set_non_anon_bm(struct access_pid *ap, u64 acidx, u64 paddr, int nid)
 {
 	unsigned long pfn;
-	struct page *p_page = NULL;
+	struct folio *folio;
+	struct page *page = NULL;
 
 	pfn = PHYS_PFN(paddr);
 	if (!pfn_valid(pfn)) {
 		return -EINVAL;
 	}
-	p_page = pfn_to_online_page(pfn);
-	if (!p_page) {
+	page = pfn_to_online_page(pfn);
+	if (!page) {
 		return -EINVAL;
 	}
-	if (!PageHuge(p_page)) {
-		if (!PageAnon(p_page) || page_mapcount(p_page) > 1) {
-			set_bit(acidx, ap->white_list_bm[nid]);
-		}
+	folio = page_folio(page);
+	if (!folio_test_anon(folio) || folio_test_ksm(folio) ||
+	    page_mapcount(page) > 1 || folio_test_swapcache(folio)) {
+		set_bit(acidx, ap->white_list_bm[nid]);
 	}
 	return 0;
 }
@@ -95,6 +96,7 @@ bool is_file_or_shared_page(phys_addr_t paddr)
 {
 	unsigned long pfn;
 	struct page *page;
+	struct folio *folio;
 
 	pfn = PHYS_PFN(paddr);
 	if (!pfn_valid(pfn))
@@ -104,10 +106,24 @@ bool is_file_or_shared_page(phys_addr_t paddr)
 	if (!page)
 		return false;
 
-	if (PageHuge(page))
+	folio = page_folio(page);
+
+	return !folio_test_anon(folio) || folio_test_ksm(folio) ||
+	       page_mapcount(page) > 1 || folio_test_swapcache(folio);
+}
+
+/* 方案3：接收 page 参数的快速版本，避免重复 pfn_to_online_page 调用 */
+bool is_file_or_shared_page_fast(struct page *page)
+{
+	struct folio *folio;
+
+	if (!page)
 		return false;
 
-	return !PageAnon(page) || page_mapcount(page) > 1;
+	folio = page_folio(page);
+
+	return !folio_test_anon(folio) || folio_test_ksm(folio) ||
+	       page_mapcount(page) > 1 || folio_test_swapcache(folio);
 }
 
 int add_to_bm_page(u64 paddr, struct access_pid *ap)
