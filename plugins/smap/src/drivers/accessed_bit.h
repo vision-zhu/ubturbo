@@ -63,6 +63,7 @@ struct pte_walk {
 	u64 *statistic_vaddr;
 	struct access_pid *ap;
 	bool group_hot;
+	u64 group_hot_skip_cnt;		/* group_hot策略跳过的页面计数 */
 	/* 冷页面统计相关（仅最后一次 NORMAL_SCAN 使用，双指针匹配） */
 	u64 *cold_vas;			/* 已排序的冷页面 VA 数组 */
 	u64 cold_count;			/* 冷页面数量 */

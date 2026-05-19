@@ -1381,10 +1381,13 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		if (is_first)
 			pte_walk->group_hot = pte_young(ptent);
 		else if (pte_walk->group_hot) {
-			actc_data_update(nid, pa_idx);
-			/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
-			if (pte_walk->type != STATISTIC_SCAN && page)
-				inc_smap_acc_cnt(page);
+			pte_walk->group_hot_skip_cnt++;
+			if (!is_hist) {
+				actc_data_update(nid, pa_idx);
+				/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
+				if (pte_walk->type != STATISTIC_SCAN && page)
+					inc_smap_acc_cnt(page);
+			}
 			goto skip_scan;
 		}
 	}
@@ -1653,12 +1656,14 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 	struct mm_struct *mm;
 	struct smap_vma_struct *vma_array = NULL;
 	int nid;
+
 	struct pte_walk pte_walk = {
 		.flag = false,
 		.ap = ap,
 		.cold_vas = NULL,
 		.cold_count = 0,
 		.cold_match_idx = 0,
+		.group_hot_skip_cnt = 0,
 		.last_nid = -1,		/* 缓存初始化为无效值 */
 		.last_paddr = 0,
 		.last_pa_idx = 0,
@@ -1706,6 +1711,11 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 
 	update_and_cleanup_statistic(ap->pid, &pte_walk, mm, vma_array);
 	mmput(mm);
+
+	/* 打印group_hot策略跳过的页面统计 */
+	if (pte_walk.type == NORMAL_SCAN)
+			pr_info("pid %d: group_hot skipped %llu pages\n",
+				ap->pid, pte_walk.group_hot_skip_cnt);
 
 	return ret;
 }
