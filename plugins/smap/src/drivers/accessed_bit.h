@@ -15,10 +15,24 @@
 
 #define SCAN_PERIOD_UNIT_MS 50
 
+/* 扫描结果缓冲区容量：MMAPLOCK_BATCH_SIZE (64MB) / PAGE_SIZE (4KB) */
+#define SCAN_RESULT_CAPACITY 16384
+
 extern struct list_head remote_ram_list;
 extern int nr_local_numa;
 extern struct access_pid_struct ap_data;
 extern bool remote_ram_changed;
+
+/* 方案1：Segment缓存，避免链表遍历 */
+#define SMAP_SEG_CACHE_SIZE 8
+
+struct segment_cache_entry {
+	u64 seg_start;		/* segment起始物理地址 */
+	u64 seg_end;		/* segment结束物理地址 */
+	u64 base_offset;	/* 该segment前所有同nid segment的累计offset（以页为单位） */
+	int nid;		/* NUMA节点ID */
+	bool valid;		/* 缓存是否有效 */
+};
 
 struct statistics_tracking_info {
 	pid_t pid;
@@ -46,6 +60,13 @@ struct ham_tracking_info {
 struct hva_info {
 	u64 va;
 	int nid;
+};
+
+/* 扫描结果条目 - 用于延迟处理 nid/pa_idx 计算 */
+struct scan_result_entry {
+	phys_addr_t paddr;      /* 物理地址 */
+	unsigned long addr;     /* 虚拟地址（用于冷页面匹配） */
+	bool hot;  /* 是否需要更新 actc_data */
 };
 
 struct pte_walk {
@@ -76,6 +97,9 @@ struct pte_walk {
 	bool last_is_hist;		/* 上一次的 is_hist */
 	u64 last_segment_end;		/* 上一次的 segment end，用于边界检查 */
 	struct access_tracking_dev *last_adev; /* 上一次的 adev 指针 */
+	/* 扫描结果缓冲区：锁内收集，锁外批量处理（动态分配，避免栈溢出） */
+	struct scan_result_entry *scan_results;
+	u64 scan_result_cnt;		/* 当前缓冲区计数 */
 };
 
 struct freq_info {

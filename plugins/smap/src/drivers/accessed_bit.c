@@ -1351,78 +1351,114 @@ static bool match_cold_page_va(u64 addr, u64 *cold_vas, u64 cold_count,
 	return false;
 }
 
+static inline bool is_page_shared(struct page *page)
+{
+	struct folio *folio;
+	folio = page_folio(page);
+	return !folio_test_anon(folio) || folio_test_ksm(folio) ||
+	       page_mapcount(page) > 1 || folio_test_swapcache(folio);
+}
+
 static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			   struct mm_walk *walk)
 {
-	struct pte_walk *pte_walk = walk->private;
+	struct pte_walk *pw = walk->private;
 	pte_t ptent = ptep_get(pte);
-	int nid = NUMA_NO_NODE;
-	u64 pa_idx = 0;
-	bool is_hist = false;
-	struct access_tracking_dev *adev = NULL;
 	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
 	unsigned long pfn = PHYS_PFN(paddr);
-	struct page *page = NULL;  /* 方案3：合并 page 查找 */
+	struct page *page = NULL;
+	bool is_young = pte_young(ptent);
+	bool is_local = false;
 
 	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
 		return 0;
 
-	/* 方案3：提前获取 page，避免重复 pfn_to_online_page 调用 */
-	if (pfn_valid(pfn))
-		page = pfn_to_online_page(pfn);
-
-	/* 方案2：使用缓存优化 nid/pa_idx 计算 */
-	if (calc_paddr_nid_idx_fast(paddr, PAGE_SIZE, pte_walk, &nid, &pa_idx, &is_hist, &adev))
+	/* 缓冲区溢出时直接返回 */
+	if (pw->scan_result_cnt >= SCAN_RESULT_CAPACITY)
 		return 0;
 
+	/* 锁内：获取 page 用于 inc_smap_acc_cnt */
+	if (!pfn_valid(pfn))
+		return 0;
+	page = pfn_to_online_page(pfn);
+	if (!page)
+		return 0;
+	is_local = page_to_nid(page) < nr_local_numa;
+	if (!is_local && enable_hist && pw->type == NORMAL_SCAN) {
+		is_young = false;
+		goto save_res;
+	}
+
 	/* 64KiB分组优化：NORMAL_SCAN类型，首页young则跳过后续页 */
-	if (pte_walk->type == NORMAL_SCAN) {
+	if (pw->type == NORMAL_SCAN) {
 		bool is_first = (addr & (SCAN_GROUP_SIZE - 1)) == 0;
 		if (is_first)
-			pte_walk->group_hot = pte_young(ptent);
-		else if (pte_walk->group_hot) {
-			pte_walk->group_hot_skip_cnt++;
-			if (!is_hist) {
-				actc_data_update(nid, pa_idx);
-				/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
-				if (pte_walk->type != STATISTIC_SCAN && page)
-					inc_smap_acc_cnt(page);
-			}
-			goto skip_scan;
+			pw->group_hot = is_young;
+		else if (pw->group_hot) {
+			pw->group_hot_skip_cnt++;
+			goto save_res;
 		}
 	}
 
-	if (pte_young(ptent)) {
-		if (pte_walk->type == STATISTIC_SCAN)
-			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
-		actc_data_update(nid, pa_idx);
+	if (is_young) {
+		if (pw->type == NORMAL_SCAN) {
+			inc_smap_acc_cnt(page);
+			if (!is_page_shared(page))
+				ptep_test_and_clear_young(walk->vma, addr, pte);
+			pw->flag = true;
+		} else if (pw->type == STATISTIC_SCAN)
+			pw->statistic_vaddr[pw->statistic_cnt++] = addr;
+	}
 
-		/* 页面 young 时累计频次加一，STATISTIC_SCAN不考虑 */
-		if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
-			/* 方案3：使用已缓存的 page 指针 */
-			if (page)
-				inc_smap_acc_cnt(page);
-			/* 远端NUMA页面也需要清除young位，使用快速版本 */
-			if (!is_file_or_shared_page(paddr))
-				__ptep_test_and_clear_young(NULL, 0, pte);
-			pte_walk->flag = true;
-		}
-	}
-skip_scan:
-	if (access_pid_cur_last_scanning(pte_walk->ap)) {
-		add_to_bm_page_fast(paddr, nid, pa_idx, pte_walk->ap);
-		/* 远端 NUMA 时，用双指针匹配冷页面 */
-		if (pte_walk->cold_vas && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
-		    match_cold_page_va(addr, pte_walk->cold_vas, pte_walk->cold_count,
-				    &pte_walk->cold_match_idx))
-			pte_walk->remote_cold_count[nid]++;
-	}
+save_res:
+	/* 保存到缓冲区，延迟处理 nid/pa_idx 计算 */
+	pw->scan_results[pw->scan_result_cnt].paddr = paddr;
+	pw->scan_results[pw->scan_result_cnt].addr = addr;
+	pw->scan_results[pw->scan_result_cnt].hot = is_young;
+	pw->scan_result_cnt++;
+
 	return 0;
 }
 
 static const struct mm_walk_ops pte_range_ops = {
 	.pte_entry = check_pte_young,
 };
+
+/* 在锁外批量处理扫描结果 */
+static void process_scan_results(struct pte_walk *pw)
+{
+	u64 i;
+	int nid;
+	u64 pa_idx;
+	bool is_hist;
+	struct access_tracking_dev *adev;
+	bool is_last_scan = access_pid_cur_last_scanning(pw->ap);
+
+	for (i = 0; i < pw->scan_result_cnt; i++) {
+		struct scan_result_entry *entry = &pw->scan_results[i];
+
+		/* 计算 nid/pa_idx（现在在锁外，不持有 mmap lock） */
+		if (calc_paddr_nid_idx_fast(entry->paddr, PAGE_SIZE, pw,
+					    &nid, &pa_idx, &is_hist, &adev))
+			continue;
+
+		/* 更新 actc_data（is_hist 为 true 时跳过） */
+		if (entry->hot && !is_hist)
+			actc_data_update(nid, pa_idx);
+
+		/* 最后一次扫描时添加到 bitmap 和统计冷页面 */
+		if (is_last_scan) {
+			add_to_bm_page_fast(entry->paddr, nid, pa_idx, pw->ap);
+			if (pw->cold_vas && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
+			    match_cold_page_va(entry->addr, pw->cold_vas, pw->cold_count,
+					    &pw->cold_match_idx))
+				pw->remote_cold_count[nid]++;
+		}
+		cond_resched();
+	}
+
+	pw->scan_result_cnt = 0;  /* 重置计数 */
+}
 
 static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 			  unsigned long end_vaddr, struct pte_walk *pte_walk,
@@ -1436,15 +1472,15 @@ static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 		return ret;
 	}
 
+	pte_walk->scan_result_cnt = 0;  /* 重置缓冲区 */
+
 	ret = walk_page_range(mm, start_vaddr, end_vaddr, ops, pte_walk);
-	if (ret) {
-		pr_err("failed to walk page range, ret: %d\n", ret);
-		mmap_read_unlock(mm);
-		return ret;
-	}
-	mmap_read_unlock(mm);
+	mmap_read_unlock(mm);  /* 释放锁 */
 	cond_resched();
-	return 0;
+
+	/* 锁外批量处理扫描结果 */
+	process_scan_results(pte_walk);
+	return ret;
 }
 
 static int huge_vma_walk(struct mm_struct *mm, struct smap_vma_struct *vma,
@@ -1669,7 +1705,9 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		.last_pa_idx = 0,
 		.last_is_hist = false,
 		.last_segment_end = 0,
-		.last_adev = NULL
+		.last_adev = NULL,
+		.scan_results = NULL,	/* 动态分配 */
+		.scan_result_cnt = 0
 	};
 	pte_walk.pid = ap->pid;
 	pte_walk.type = ap->type;
@@ -1681,9 +1719,19 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		pr_err("bad mm of pid: %d\n", ap->pid);
 		return -EINVAL;
 	}
+
+	/* 动态分配扫描结果缓冲区 */
+	pte_walk.scan_results = vzalloc(SCAN_RESULT_CAPACITY * sizeof(struct scan_result_entry));
+	if (!pte_walk.scan_results) {
+		pr_err("failed to allocate scan results buffer\n");
+		mmput(mm);
+		return -ENOMEM;
+	}
+
 	ret = take_vma_snapshot(mm, &vma_array, &vma_count);
 	if (ret) {
 		pr_err("failed to take VMA snapshot, ret: %d\n", ret);
+		vfree(pte_walk.scan_results);
 		mmput(mm);
 		return -EINVAL;
 	}
@@ -1697,6 +1745,7 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		pr_err("failed to setup statistic scan, ret: %d\n", ret);
 		if (pte_walk.cold_vas)
 			vfree(pte_walk.cold_vas);
+		vfree(pte_walk.scan_results);
 		mmput(mm);
 		return -EINVAL;
 	}
@@ -1708,6 +1757,9 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		print_remote_numa_cold_page_stats(ap, pte_walk.remote_cold_count);
 		vfree(pte_walk.cold_vas);
 	}
+
+	/* 释放扫描结果缓冲区 */
+	vfree(pte_walk.scan_results);
 
 	update_and_cleanup_statistic(ap->pid, &pte_walk, mm, vma_array);
 	mmput(mm);
