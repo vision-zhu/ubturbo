@@ -44,7 +44,7 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
-#define SCAN_GROUP_SIZE (64UL * 1024)  /* 64KiB分组扫描优化 */
+#define SCAN_GROUP_SIZE (64UL * 1024)  /* 64KiB分组扫描优化，可调整: 64K/128K/256K/512K/1M/2M */
 #define COLD_PAGE_FILE_PATH "/lib/modules/smap/cold_page_list_%d"
 #define COLD_PAGE_PATH_MAX 64
 
@@ -371,29 +371,66 @@ static inline int get_numa_id_by_paddr(phys_addr_t paddr)
 	return page_to_nid(page);
 }
 
-static int calc_paddr_nid_idx(u64 paddr, int page_size, int *nid, u64 *pa_idx,
-			      bool *is_hist)
+/* 方案2：利用缓存的快速版本，减少重复计算 */
+static int calc_paddr_nid_idx_fast(u64 paddr, int page_size, struct pte_walk *pw,
+				   int *nid, u64 *pa_idx, bool *is_hist,
+				   struct access_tracking_dev **adev)
 {
 	int ret;
-	struct access_tracking_dev *adev;
+	u64 paddr_diff;
+	u64 seg_end;
 
+	/* 检查是否可以利用缓存：连续页面、同一 NUMA、未超出 segment 边界 */
+	if (pw->last_nid >= 0 && pw->last_adev &&
+	    (paddr & PAGE_MASK) == (pw->last_paddr + PAGE_SIZE) &&
+	    paddr <= pw->last_segment_end) {
+		paddr_diff = paddr - pw->last_paddr;
+		/* 同 NUMA 节点且在 segment 内，简单增量计算 pa_idx */
+		*nid = pw->last_nid;
+		*pa_idx = pw->last_pa_idx + (paddr_diff >> PAGE_SHIFT);
+		*is_hist = pw->last_is_hist;
+		*adev = pw->last_adev;
+
+		if (unlikely(*pa_idx >= (*adev)->page_count))
+			goto fallback;
+
+		/* 更新缓存 */
+		pw->last_paddr = paddr;
+		pw->last_pa_idx = *pa_idx;
+		return 0;
+	}
+
+fallback:
+	/* 无法利用缓存，走完整计算路径 */
 	*nid = get_numa_id_by_paddr(paddr);
 	if (unlikely(*nid == NUMA_NO_NODE))
 		return -ERANGE;
 
+	/* 使用带 segment_end 返回值的函数 */
 	if (*nid < nr_local_numa)
-		ret = calc_paddr_acidx_acpi_known_nid(paddr, *nid, pa_idx, page_size);
+		ret = calc_paddr_acidx_acpi_known_nid_with_seg_end(paddr, *nid, pa_idx,
+								   &seg_end, page_size);
 	else
-		ret = calc_paddr_acidx_iomem_known_nid(paddr, *nid, pa_idx, page_size);
+		ret = calc_paddr_acidx_iomem_known_nid_with_seg_end(paddr, *nid, pa_idx,
+								&seg_end, page_size);
 
 	if (unlikely(ret))
 		return ret;
 
-	adev = get_access_tracking_dev(*nid);
-	if (unlikely(!adev || *pa_idx >= adev->page_count))
+	*adev = get_access_tracking_dev(*nid);
+	if (unlikely(!*adev || *pa_idx >= (*adev)->page_count))
 		return -ERANGE;
 
-	*is_hist = adev->is_hist;
+	*is_hist = (*adev)->is_hist;
+
+	/* 更新缓存 */
+	pw->last_nid = *nid;
+	pw->last_paddr = paddr;
+	pw->last_pa_idx = *pa_idx;
+	pw->last_is_hist = *is_hist;
+	pw->last_segment_end = seg_end;
+	pw->last_adev = *adev;
+
 	return 0;
 }
 
@@ -1314,71 +1351,183 @@ static bool match_cold_page_va(u64 addr, u64 *cold_vas, u64 cold_count,
 	return false;
 }
 
-static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
-			   struct mm_walk *walk)
+
+/* NORMAL_SCAN批量扫描 - 优化版本 */
+static void scan_pmd_normal(pte_t *pte_base, unsigned long addr, unsigned long end,
+			    struct pte_walk *pw, bool is_last, bool has_cold)
 {
-	struct pte_walk *pte_walk = walk->private;
-	pte_t ptent = ptep_get(pte);
-	int nid = NUMA_NO_NODE;
-	u64 pa_idx = 0;
-	bool is_hist = false;
-	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
-	unsigned long pfn = PHYS_PFN(paddr);
+	unsigned long group_start, group_end, cur_addr;
+	pte_t *pte;
+	bool group_hot;
+	phys_addr_t paddr;
+	unsigned long pfn;
+	struct page *page = NULL;
+	int nid;
+	u64 pa_idx;
+	bool is_hist;
+	struct access_tracking_dev *adev;
+	pte_t ptent;
 
-	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
-		return 0;
+	/* 使用 SCAN_GROUP_SIZE 控制分组大小 */
+	group_start = addr;
+	while (group_start < end) {
+		group_end = min(group_start + SCAN_GROUP_SIZE, end);
+		pte = pte_base + ((group_start - addr) >> PAGE_SHIFT);
+		group_hot = false;
 
-	if (calc_paddr_nid_idx(paddr, PAGE_SIZE, &nid, &pa_idx, &is_hist))
-		return 0;
+		/* 检查分组首页是否young */
+		ptent = ptep_get(pte);
+		if (pte_young(ptent) && pte_present(ptent) && !is_swap_pte(ptent)) {
+			paddr = (phys_addr_t)__pte_to_phys(ptent);
+			if (paddr != 0)
+				group_hot = true;
+		}
 
-	/* 64KiB分组优化：NORMAL_SCAN类型，首页young则跳过后续页 */
-	if (pte_walk->type == NORMAL_SCAN) {
-		bool is_first = (addr & (SCAN_GROUP_SIZE - 1)) == 0;
-		if (is_first)
-			pte_walk->group_hot = pte_young(ptent);
-		else if (pte_walk->group_hot) {
-			actc_data_update(nid, pa_idx);
-			/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
-			if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
-				struct page *page = pfn_to_online_page(pfn);
+		/* 内联处理逻辑，减少函数调用开销 */
+		for (cur_addr = group_start; cur_addr < group_end;
+		     cur_addr += PAGE_SIZE, pte++) {
+			ptent = ptep_get(pte);
+			paddr = (phys_addr_t)__pte_to_phys(ptent);
+
+			/* 快速过滤无效PTE */
+			if (paddr == 0)
+				continue;
+			if (is_swap_pte(ptent) || !pte_present(ptent))
+				continue;
+
+			pfn = PHYS_PFN(paddr);
+			page = NULL;
+			if (pfn_valid(pfn))
+				page = pfn_to_online_page(pfn);
+
+			if (calc_paddr_nid_idx_fast(paddr, PAGE_SIZE, pw, &nid, &pa_idx, &is_hist, &adev))
+				continue;
+
+			/* group_hot场景批量处理，跳过逐个young检查 */
+			if (group_hot) {
+				actc_data_update(nid, pa_idx);
 				if (page)
 					inc_smap_acc_cnt(page);
+
+				if (is_last) {
+					add_to_bm_page_fast(paddr, nid, pa_idx, pw->ap);
+					if (has_cold && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
+					    match_cold_page_va(cur_addr, pw->cold_vas, pw->cold_count, &pw->cold_match_idx))
+						pw->remote_cold_count[nid]++;
+				}
+			} else if (pte_young(ptent)) {
+				actc_data_update(nid, pa_idx);
+				if (!is_hist) {
+					if (page)
+						inc_smap_acc_cnt(page);
+					if (!is_file_or_shared_page_fast(page))
+						__ptep_test_and_clear_young(NULL, 0, pte);
+					pw->flag = true;
+				}
+
+				if (is_last) {
+					add_to_bm_page_fast(paddr, nid, pa_idx, pw->ap);
+					if (has_cold && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
+					    match_cold_page_va(cur_addr, pw->cold_vas, pw->cold_count, &pw->cold_match_idx))
+						pw->remote_cold_count[nid]++;
+				}
 			}
-			goto skip_scan;
 		}
+		group_start = group_end;
 	}
+}
+
+/* 处理单个PTE核心逻辑 - STATISTIC_SCAN模式 */
+static void process_pte_statistic(pte_t *pte, unsigned long addr,
+				  struct pte_walk *pw, bool is_last, bool has_cold)
+{
+	pte_t ptent = ptep_get(pte);
+	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
+	unsigned long pfn = PHYS_PFN(paddr);
+	struct page *page = NULL;
+	int nid;
+	u64 pa_idx;
+	bool is_hist;
+	struct access_tracking_dev *adev;
+
+	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
+		return;
+
+	if (pfn_valid(pfn))
+		page = pfn_to_online_page(pfn);
+
+	if (calc_paddr_nid_idx_fast(paddr, PAGE_SIZE, pw, &nid, &pa_idx, &is_hist, &adev))
+		return;
 
 	if (pte_young(ptent)) {
-		if (pte_walk->type == STATISTIC_SCAN)
-			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] = addr;
+		pw->statistic_vaddr[pw->statistic_cnt++] = addr;
 		actc_data_update(nid, pa_idx);
-
-		/* 页面 young 时累计频次加一，STATISTIC_SCAN不考虑 */
-		if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
-			struct page *page = pfn_to_online_page(pfn);
+		if (!is_hist) {
 			if (page)
 				inc_smap_acc_cnt(page);
+			if (!is_file_or_shared_page_fast(page))
+				__ptep_test_and_clear_young(NULL, 0, pte);
+			pw->flag = true;
 		}
+	}
 
-		/* 远端NUMA页面也需要清除young位 */
-		if (!is_file_or_shared_page(paddr))
-			__ptep_test_and_clear_young(NULL, 0, pte);
-		pte_walk->flag = true;
+	if (is_last) {
+		add_to_bm_page_fast(paddr, nid, pa_idx, pw->ap);
+		if (has_cold && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
+		    match_cold_page_va(addr, pw->cold_vas, pw->cold_count, &pw->cold_match_idx))
+			pw->remote_cold_count[nid]++;
 	}
-skip_scan:
-	if (access_pid_cur_last_scanning(pte_walk->ap)) {
-		add_to_bm_page_fast(paddr, nid, pa_idx, pte_walk->ap);
-		/* 远端 NUMA 时，用双指针匹配冷页面 */
-		if (pte_walk->cold_vas && nid >= nr_local_numa && nid < SMAP_MAX_NUMNODES &&
-		    match_cold_page_va(addr, pte_walk->cold_vas, pte_walk->cold_count,
-				    &pte_walk->cold_match_idx))
-			pte_walk->remote_cold_count[nid]++;
+}
+
+/* STATISTIC_SCAN完整扫描 */
+static void scan_pmd_statistic(pte_t *pte_base, unsigned long addr,
+			       unsigned long end, struct pte_walk *pw,
+			       bool is_last, bool has_cold)
+{
+	unsigned long cur_addr;
+	pte_t *pte = pte_base;
+
+	for (cur_addr = addr; cur_addr < end; cur_addr += PAGE_SIZE, pte++)
+		process_pte_statistic(pte, cur_addr, pw, is_last, has_cold);
+}
+
+/* pmd_entry回调：批量处理一个PMD下的所有PTE */
+static int check_pmd_young(pmd_t *pmd, unsigned long addr, unsigned long next,
+			   struct mm_walk *walk)
+{
+	struct pte_walk *pw = walk->private;
+	pte_t *pte_base;
+	spinlock_t *ptl;
+	unsigned long end;
+	bool is_normal, is_last, has_cold;
+
+	if (pmd_trans_huge(*pmd) || pmd_devmap(*pmd))
+		return 0;
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+		return 0;
+
+	end = min(next, addr + PMD_SIZE);
+	pte_base = smap_pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+	if (!pte_base) {
+		walk->action = ACTION_AGAIN;
+		return 0;
 	}
+
+	is_normal = (pw->type == NORMAL_SCAN);
+	is_last = access_pid_cur_last_scanning(pw->ap);
+	has_cold = (pw->cold_vas != NULL);
+
+	if (is_normal)
+		scan_pmd_normal(pte_base, addr, end, pw, is_last, has_cold);
+	else
+		scan_pmd_statistic(pte_base, addr, end, pw, is_last, has_cold);
+
+	pte_unmap_unlock(pte_base, ptl);
 	return 0;
 }
 
 static const struct mm_walk_ops pte_range_ops = {
-	.pte_entry = check_pte_young,
+	.pmd_entry = check_pmd_young,
 };
 
 static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
@@ -1400,6 +1549,7 @@ static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 		return ret;
 	}
 	mmap_read_unlock(mm);
+	cond_resched();
 	return 0;
 }
 
@@ -1617,7 +1767,13 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		.ap = ap,
 		.cold_vas = NULL,
 		.cold_count = 0,
-		.cold_match_idx = 0
+		.cold_match_idx = 0,
+		.last_nid = -1,		/* 缓存初始化为无效值 */
+		.last_paddr = 0,
+		.last_pa_idx = 0,
+		.last_is_hist = false,
+		.last_segment_end = 0,
+		.last_adev = NULL
 	};
 	pte_walk.pid = ap->pid;
 	pte_walk.type = ap->type;
