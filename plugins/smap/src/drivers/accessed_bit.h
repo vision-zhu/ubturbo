@@ -68,6 +68,13 @@ struct pte_walk {
 	u64 cold_count;			/* 冷页面数量 */
 	u64 cold_match_idx;		/* 当前匹配位置索引 */
 	u64 remote_cold_count[SMAP_MAX_NUMNODES]; /* 各远端 NUMA 冷页面计数 */
+	/* 性能优化缓存（方案2：缓存 nid/adev/page 指针） */
+	int last_nid;			/* 上一次的 NUMA 节点 ID */
+	u64 last_paddr;			/* 上一次的物理地址 */
+	u64 last_pa_idx;		/* 上一次的 pa_idx */
+	bool last_is_hist;		/* 上一次的 is_hist */
+	u64 last_segment_end;		/* 上一次的 segment end，用于边界检查 */
+	struct access_tracking_dev *last_adev; /* 上一次的 adev 指针 */
 };
 
 struct freq_info {
