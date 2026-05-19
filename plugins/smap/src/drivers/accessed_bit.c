@@ -371,29 +371,66 @@ static inline int get_numa_id_by_paddr(phys_addr_t paddr)
 	return page_to_nid(page);
 }
 
-static int calc_paddr_nid_idx(u64 paddr, int page_size, int *nid, u64 *pa_idx,
-			      bool *is_hist)
+/* 方案2：利用缓存的快速版本，减少重复计算 */
+static int calc_paddr_nid_idx_fast(u64 paddr, int page_size, struct pte_walk *pw,
+				   int *nid, u64 *pa_idx, bool *is_hist,
+				   struct access_tracking_dev **adev)
 {
 	int ret;
-	struct access_tracking_dev *adev;
+	u64 paddr_diff;
+	u64 seg_end;
 
+	/* 检查是否可以利用缓存：连续页面、同一 NUMA、未超出 segment 边界 */
+	if (pw->last_nid >= 0 && pw->last_adev &&
+	    (paddr & PAGE_MASK) == (pw->last_paddr + PAGE_SIZE) &&
+	    paddr <= pw->last_segment_end) {
+		paddr_diff = paddr - pw->last_paddr;
+		/* 同 NUMA 节点且在 segment 内，简单增量计算 pa_idx */
+		*nid = pw->last_nid;
+		*pa_idx = pw->last_pa_idx + (paddr_diff >> PAGE_SHIFT);
+		*is_hist = pw->last_is_hist;
+		*adev = pw->last_adev;
+
+		if (unlikely(*pa_idx >= (*adev)->page_count))
+			goto fallback;
+
+		/* 更新缓存 */
+		pw->last_paddr = paddr;
+		pw->last_pa_idx = *pa_idx;
+		return 0;
+	}
+
+fallback:
+	/* 无法利用缓存，走完整计算路径 */
 	*nid = get_numa_id_by_paddr(paddr);
 	if (unlikely(*nid == NUMA_NO_NODE))
 		return -ERANGE;
 
+	/* 使用带 segment_end 返回值的函数 */
 	if (*nid < nr_local_numa)
-		ret = calc_paddr_acidx_acpi_known_nid(paddr, *nid, pa_idx, page_size);
+		ret = calc_paddr_acidx_acpi_known_nid_with_seg_end(paddr, *nid, pa_idx,
+								   &seg_end, page_size);
 	else
-		ret = calc_paddr_acidx_iomem_known_nid(paddr, *nid, pa_idx, page_size);
+		ret = calc_paddr_acidx_iomem_known_nid_with_seg_end(paddr, *nid, pa_idx,
+								&seg_end, page_size);
 
 	if (unlikely(ret))
 		return ret;
 
-	adev = get_access_tracking_dev(*nid);
-	if (unlikely(!adev || *pa_idx >= adev->page_count))
+	*adev = get_access_tracking_dev(*nid);
+	if (unlikely(!*adev || *pa_idx >= (*adev)->page_count))
 		return -ERANGE;
 
-	*is_hist = adev->is_hist;
+	*is_hist = (*adev)->is_hist;
+
+	/* 更新缓存 */
+	pw->last_nid = *nid;
+	pw->last_paddr = paddr;
+	pw->last_pa_idx = *pa_idx;
+	pw->last_is_hist = *is_hist;
+	pw->last_segment_end = seg_end;
+	pw->last_adev = *adev;
+
 	return 0;
 }
 
@@ -1322,13 +1359,20 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 	int nid = NUMA_NO_NODE;
 	u64 pa_idx = 0;
 	bool is_hist = false;
+	struct access_tracking_dev *adev = NULL;
 	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
 	unsigned long pfn = PHYS_PFN(paddr);
+	struct page *page = NULL;  /* 方案3：合并 page 查找 */
 
 	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
 		return 0;
 
-	if (calc_paddr_nid_idx(paddr, PAGE_SIZE, &nid, &pa_idx, &is_hist))
+	/* 方案3：提前获取 page，避免重复 pfn_to_online_page 调用 */
+	if (pfn_valid(pfn))
+		page = pfn_to_online_page(pfn);
+
+	/* 方案2：使用缓存优化 nid/pa_idx 计算 */
+	if (calc_paddr_nid_idx_fast(paddr, PAGE_SIZE, pte_walk, &nid, &pa_idx, &is_hist, &adev))
 		return 0;
 
 	/* 64KiB分组优化：NORMAL_SCAN类型，首页young则跳过后续页 */
@@ -1339,11 +1383,8 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		else if (pte_walk->group_hot) {
 			actc_data_update(nid, pa_idx);
 			/* group_hot场景也需要更新累计频次，STATISTIC_SCAN不考虑 */
-			if (pte_walk->type != STATISTIC_SCAN && pfn_valid(pfn)) {
-				struct page *page = pfn_to_online_page(pfn);
-				if (page)
-					inc_smap_acc_cnt(page);
-			}
+			if (pte_walk->type != STATISTIC_SCAN && page)
+				inc_smap_acc_cnt(page);
 			goto skip_scan;
 		}
 	}
@@ -1355,10 +1396,10 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 
 		/* 页面 young 时累计频次加一，STATISTIC_SCAN不考虑 */
 		if (pte_walk->type == STATISTIC_SCAN || !is_hist) {
-			struct page *page = pfn_to_online_page(pfn);
+			/* 方案3：使用已缓存的 page 指针 */
 			if (page)
 				inc_smap_acc_cnt(page);
-		/* 远端NUMA页面也需要清除young位 */
+			/* 远端NUMA页面也需要清除young位，使用快速版本 */
 			if (!is_file_or_shared_page(paddr))
 				__ptep_test_and_clear_young(NULL, 0, pte);
 			pte_walk->flag = true;
@@ -1617,7 +1658,13 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 		.ap = ap,
 		.cold_vas = NULL,
 		.cold_count = 0,
-		.cold_match_idx = 0
+		.cold_match_idx = 0,
+		.last_nid = -1,		/* 缓存初始化为无效值 */
+		.last_paddr = 0,
+		.last_pa_idx = 0,
+		.last_is_hist = false,
+		.last_segment_end = 0,
+		.last_adev = NULL
 	};
 	pte_walk.pid = ap->pid;
 	pte_walk.type = ap->type;
