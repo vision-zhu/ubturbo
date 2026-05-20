@@ -260,12 +260,13 @@ static void calc_4k_scan_hot_wins(struct segs_info *info, actc_t *buf,
 	}
 }
 
-static int cut_into_2m_scan_wins(struct addr_seg *segs, int cnt,
-				 struct addr_seg *aligned_segs, int aligned_cnt)
+static int cut_into_scan_wins(struct addr_seg *segs, int cnt,
+			       struct addr_seg *aligned_segs, int aligned_cnt,
+			       enum ub_hist_sts_size sts_size)
 {
 	int i;
 	u32 nr_wins = 0;
-	u64 shift = get_hist_scan_win_size(STS_SIZE_2M);
+	u64 shift = get_hist_scan_win_size(sts_size);
 	for (i = 0; i < cnt; i++) {
 		u64 start = segs[i].start;
 		u64 size = segs[i].size;
@@ -288,8 +289,17 @@ static int cut_into_2m_scan_wins(struct addr_seg *segs, int cnt,
 	return 0;
 }
 
-static int generate_aligned_2m_scan_wins_info(struct segs_info *win_info,
-					      struct segs_info *info)
+/**
+ * generate_aligned_scan_wins_info - 生成对齐的扫描窗口（通用版本）
+ * @win_info: 输出的窗口信息
+ * @info: 输入的远端内存地址段信息
+ * @sts_size: 扫描粒度（STS_SIZE_2M 或 STS_SIZE_4K）
+ *
+ * 生成指定粒度的所有扫描窗口，不做热窗口筛选
+ */
+static int generate_aligned_scan_wins_info(struct segs_info *win_info,
+					    struct segs_info *info,
+					    enum ub_hist_sts_size sts_size)
 {
 	int merged_cnt, ret;
 	u32 total_wins;
@@ -304,8 +314,8 @@ static int generate_aligned_2m_scan_wins_info(struct segs_info *win_info,
 
 	memcpy(merged_segs, info->segs, info->cnt * sizeof(struct addr_seg));
 	merged_cnt = merge_segments(merged_segs, info->cnt);
-	align_segments(merged_segs, merged_cnt, STS_SIZE_2M);
-	total_wins = count_nr_windows(merged_segs, merged_cnt, STS_SIZE_2M);
+	align_segments(merged_segs, merged_cnt, sts_size);
+	total_wins = count_nr_windows(merged_segs, merged_cnt, sts_size);
 	if (total_wins == 0) {
 		vfree(merged_segs);
 		return -EINVAL;
@@ -316,8 +326,8 @@ static int generate_aligned_2m_scan_wins_info(struct segs_info *win_info,
 		return -ENOMEM;
 	}
 
-	ret = cut_into_2m_scan_wins(merged_segs, merged_cnt, aligned_segs,
-				    total_wins);
+	ret = cut_into_scan_wins(merged_segs, merged_cnt, aligned_segs,
+				  total_wins, sts_size);
 	if (ret) {
 		vfree(aligned_segs);
 	} else {
@@ -483,6 +493,7 @@ static int submit_ba_task(uint64_t ba_tag, u64 start_addr,
 	union hi_upa_smap_cfg_smap_cfg00 *smap_cfg00;
 	struct ub_hist_ba_config cfg = { 0 };
 
+	pr_debug("submit_ba_task, start_addr: %#llx\n", start_addr);
 	base_addr = align_addr_by_sts_size(start_addr, sts_size);
 	shift = get_hist_addr_shift(STS_SIZE_4K);
 	cfg.reg_offset = BA_CTRL_REG_OFFSET;
@@ -579,6 +590,7 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 	int ret = 0, i, ba_cnt;
 	u64 ba_tag;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
+	bool do_seq_loop = (sts_size == STS_SIZE_4K && dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
 	struct ub_hist_ba_result *ba_result =
 		kmalloc(sizeof(*ba_result), GFP_KERNEL);
 	int *offset = kzalloc(sizeof(*offset) * dev->ba_cnt, GFP_KERNEL);
@@ -587,8 +599,14 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 		kfree(offset);
 		return -ENOMEM;
 	}
+
+	/*
+	 * 初始化每个BA的偏移：
+	 * - 顺序循环模式且4K扫描：使用seq_loop_ba_offset记录的偏移
+	 * - 其他模式：从-1开始（从头扫描）
+	 */
 	for (i = 0; i < dev->ba_cnt; ++i) {
-		offset[i] = -1;
+		offset[i] = do_seq_loop ? dev->seq_loop_ba_offset[i] : -1;
 	}
 
 	while (1) {
@@ -614,14 +632,25 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 
 			ret = get_hist_results(dev->ba_info[ba_cnt].ba_tag,
 					       ba_result);
+			/* 无论是否中断，都先更新频次到actc_data */
+			copy_actc_to_buf(rmem_info,
+					 &win_info->segs[offset[ba_cnt]], buf,
+					 ba_result->buffer, buf_len, sts_size);
+
 			if (ret) {
+				/*
+				 * 扫描中断（abort_flag）：保存当前BA的偏移，
+				 * 下次扫描从这里继续
+				 */
+				if (do_seq_loop && ret == -EAGAIN) {
+					dev->seq_loop_ba_offset[ba_cnt] = offset[ba_cnt];
+					pr_debug("seq_loop scan paused, ba[%d] offset: %d\n",
+						ba_cnt, offset[ba_cnt]);
+				}
 				kfree(ba_result);
 				kfree(offset);
 				return ret;
 			}
-			copy_actc_to_buf(rmem_info,
-					 &win_info->segs[offset[ba_cnt]], buf,
-					 ba_result->buffer, buf_len, sts_size);
 		}
 	}
 	kfree(ba_result);
@@ -652,18 +681,6 @@ static u32 get_2m_scan_wins_per_ba(struct segs_info *win_info)
 	return max_cnt;
 }
 
-static int generate_aligned_wins_info(struct segs_info *win_info,
-				      struct segs_info *info, actc_t *buf,
-				      enum ub_hist_sts_size sts_size)
-{
-	int ret = 0;
-
-	ret = (sts_size == STS_SIZE_2M) ?
-		      generate_aligned_2m_scan_wins_info(win_info, info) :
-		      generate_aligned_4k_scan_wins_info(win_info, info, buf);
-	return ret;
-}
-
 static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
 				actc_t *buf, u32 buf_len,
 				enum ub_hist_sts_size sts_size)
@@ -671,30 +688,42 @@ static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
 	int ret;
 	struct segs_info win_info;
 	u32 scan_time;
+	struct smap_hist_dev *dev = &g_smap_hist_dev;
+	bool do_seq_loop = (sts_size == STS_SIZE_4K && dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
+
 	/*
-	 * First of all, we calculate the least number of windows to
-	 * cover all address segments
+	 * 顺序循环扫描模式：直接生成所有窗口，不做热窗口筛选
+	 * 多粒度扫描模式：根据sts_size生成窗口，可能筛选热窗口
 	 */
-	ret = generate_aligned_wins_info(&win_info, info, buf, sts_size);
+	if (do_seq_loop || sts_size == STS_SIZE_2M) {
+		ret = generate_aligned_scan_wins_info(&win_info, info, sts_size);
+	} else {
+		ret = generate_aligned_4k_scan_wins_info(&win_info, info, buf);
+	}
 	if (ret) {
-		pr_err("generate merged segs info failed. ret: %d\n", ret);
+		pr_err("generate aligned segs info failed. ret: %d\n", ret);
 		return ret;
 	}
+
 	/* Secondly, calculate scan period of a single window */
 	if (sts_size == STS_SIZE_2M) {
-		g_smap_hist_dev.scan_wins_num_per_ba =
-			get_2m_scan_wins_per_ba(&win_info);
+		dev->scan_wins_num_per_ba = get_2m_scan_wins_per_ba(&win_info);
 	}
-	scan_time = (do_multi_gran == true) ?
+
+	/*
+	 * 顺序循环扫描：固定64ms
+	 * 多粒度扫描：根据窗口数量动态计算
+	 */
+	scan_time = (do_multi_gran || do_seq_loop) ?
 			    HIST_SCAN_DURATION_PER_WIN :
-			    HIST_THREAD_PERIOD /
-				    g_smap_hist_dev.scan_wins_num_per_ba;
-	pr_debug("scan_wins_num_per_win: %u ms\n", scan_time);
+			    HIST_THREAD_PERIOD / dev->scan_wins_num_per_ba;
+	pr_debug("scan_time_per_win: %u ms\n", scan_time);
 
 	/* Finally, launch scan job for every windows */
 	clear_actc_buf();
 	ret = smap_hist_read_paral(&win_info, info, sts_size, buf, scan_time,
 				   buf_len);
+
 	vfree(win_info.segs);
 	return ret;
 }
@@ -703,6 +732,7 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 			     actc_t *buf, u32 buf_len, u32 pgsize)
 {
 	int ret;
+	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	/*
 	 * For 2M pages, size of a window which consist of 16K pages is as large
 	 * as 32GB, we can finish all windows scan in time and ensure that each
@@ -713,7 +743,8 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	 * windows, scan work of a 64MB sliding window will be launched in those
 	 * windows later to get a fine-grained access count of each 4K pages.
 	 */
-	bool do_multi_gran = pgsize == SIZE_4K;
+	bool do_multi_gran = (pgsize == SIZE_4K && dev->scan_mode == HIST_4K_SCAN_MULTI_GRAN);
+	bool do_seq_loop = (pgsize == SIZE_4K && dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
 
 	if (!addr_seg_is_valid(info)) {
 		pr_err("invalid address segment passed to sliding scan\n");
@@ -727,21 +758,41 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 		pr_err("null buffer passed to sliding scan\n");
 		return -EINVAL;
 	}
-	ret = do_hist_scan_sliding(info, do_multi_gran, buf, buf_len,
-				   STS_SIZE_2M);
-	if (ret) {
-		pr_debug("sliding scan on 2M pages failed, ret: %d\n", ret);
-		return ret;
+	/*
+	 * 2M扫描：仅多粒度滑窗方式或非4K页面需要
+	 * 顺序循环滑窗直接扫描所有4K窗口，无需2M预扫描
+	 */
+	if (do_multi_gran || pgsize == SIZE_2M) {
+		ret = do_hist_scan_sliding(info, do_multi_gran, buf, buf_len,
+					   STS_SIZE_2M);
+		if (ret) {
+			pr_debug("sliding scan on 2M pages failed, ret: %d\n", ret);
+			return ret;
+		}
 	}
-	if (!do_multi_gran) {
+
+	if (pgsize == SIZE_2M)
 		return 0;
-	}
-	/* Rescan for the secondary hierarchy */
-	ret = do_hist_scan_sliding(info, do_multi_gran, buf, buf_len,
-				   STS_SIZE_4K);
-	if (ret) {
-		pr_debug("sliding scan on 4K pages failed, ret: %d\n", ret);
-		return ret;
+
+	/*
+	 * 4K扫描：根据scan_mode选择方式
+	 * 多粒度滑窗：先2M粗扫筛选热区，再4K细扫热窗口
+	 * 顺序循环滑窗：直接顺序扫描所有4K窗口，固定64ms
+	 */
+	if (do_seq_loop) {
+		ret = do_hist_scan_sliding(info, false, buf, buf_len,
+					   STS_SIZE_4K);
+		if (ret) {
+			pr_debug("seq loop scan on 4K pages failed, ret: %d\n", ret);
+			return ret;
+		}
+	} else {
+		ret = do_hist_scan_sliding(info, true, buf, buf_len,
+					   STS_SIZE_4K);
+		if (ret) {
+			pr_debug("sliding scan on 4K pages failed, ret: %d\n", ret);
+			return ret;
+		}
 	}
 	return 0;
 }
@@ -1014,7 +1065,8 @@ static int scan_thread_run(void *data)
 
 		ret = hist_scan_sliding(&dev->info, dev->period, dev->buf,
 					dev->pgcount, dev->pgsize);
-		if (ret) {
+		/* -EAGAIN 表示扫描中断，已扫描部分数据有效，需要更新 */
+		if (ret && ret != -EAGAIN) {
 			pr_debug("failed to do scan sliding, ret: %d\n", ret);
 			msleep(THREAD_SLEEP);
 			continue;
@@ -1110,6 +1162,7 @@ int hist_init(u32 pgsize)
 	ret = ub_hist_init();
 	if (ret)
 		return ret;
+	dev->scan_mode = HIST_4K_SCAN_SEQ_LOOP;
 	dev->hw_type = ub_hist_get_hw_type();
 	pr_info("Smap hist dev init start, dev->hw_type: %u\n", dev->hw_type);
 	dev->freq_register_cnt = (dev->hw_type == UB_HIST_SMAP_TYPE_N6) ?

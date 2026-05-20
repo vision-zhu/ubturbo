@@ -35,6 +35,12 @@
 
 #define THREAD_SLEEP (50)
 
+/* 4K扫描模式枚举 */
+enum hist_4k_scan_mode {
+	HIST_4K_SCAN_MULTI_GRAN = 0,   /* 多粒度滑窗（现有方式） */
+	HIST_4K_SCAN_SEQ_LOOP = 1,     /* 顺序循环滑窗（新增方式） */
+};
+
 struct addr_seg {
 	u64 start;
 	u64 size;
@@ -74,6 +80,8 @@ struct smap_hist_dev {
 	flush_actc flush_actc;
 	union smap_hist_status status;
 	ub_hist_smap_type hw_type;
+	enum hist_4k_scan_mode scan_mode;  /* 4K扫描模式 */
+	int seq_loop_ba_offset[HIST_STS_DEV_CNT]; /* 每个BA的顺序循环扫描偏移 */
 };
 
 struct hist_ops {
