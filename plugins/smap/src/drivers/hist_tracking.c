@@ -236,9 +236,9 @@ static void update_hist_actc_batch(void)
 	list_for_each_entry_safe(hdev, n, &access_dev, list) {
 		if (!hdev->is_hist)
 			continue;
-		down_write(&hdev->buffer_lock);
+		down_read(&hdev->buffer_lock);
 		scan_hist(hdev);
-		up_write(&hdev->buffer_lock);
+		up_read(&hdev->buffer_lock);
 	}
 }
 
