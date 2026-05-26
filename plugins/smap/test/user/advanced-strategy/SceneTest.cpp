@@ -228,7 +228,7 @@ TEST_F(SceneTest, TestGetProcessSceneAttr)
     SceneInfo info = { 0 };
     Scene scene = UNSTABLE_SCENE;
     GetProcessSceneAttr(scene, &info, VM_TYPE);
-    EXPECT_EQ(VM_UNSTABLE_SCAN_CYCLE, info.cycles.scanCycle);
+    EXPECT_EQ(UNSTABLE_SCAN_CYCLE, info.cycles.scanCycle);
     EXPECT_EQ(UNSTABLE_MIGRATE_CYCLE, info.cycles.migCycle);
 
     scene = HEAVY_STABLE_SCENE;
