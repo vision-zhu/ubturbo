@@ -90,6 +90,12 @@ module_param_cb(hist_4k_scan_mode_param, &hist_4k_scan_mode_ops,
 MODULE_PARM_DESC(hist_4k_scan_mode_param,
 		 "4K scan mode: 0=multi-granularity, 1=seq-loop (default)");
 
+/* Scan duration per window kernel parameter (ms), default 64ms */
+unsigned int hist_scan_duration_per_win = 64;
+module_param(hist_scan_duration_per_win, uint, 0644);
+MODULE_PARM_DESC(hist_scan_duration_per_win,
+		 "Scan duration per window in ms (default 64)");
+
 static inline u64 align_addr(u64 addr, u32 low_bit_len)
 {
 	return (addr >> low_bit_len) << low_bit_len;

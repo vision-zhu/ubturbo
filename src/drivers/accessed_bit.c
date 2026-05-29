@@ -43,6 +43,12 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 
+/* Scan group size kernel parameter (bytes), default 64KiB */
+unsigned long scan_group_size = 64UL * 1024;
+module_param(scan_group_size, ulong, 0644);
+MODULE_PARM_DESC(scan_group_size,
+		 "Scan group size in bytes (default 64KiB)");
+
 LIST_HEAD(ham_pid_list);
 LIST_HEAD(statistic_pid_list);
 spinlock_t ham_lock;
