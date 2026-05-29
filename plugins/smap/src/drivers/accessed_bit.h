@@ -16,7 +16,8 @@
 #define SCAN_PERIOD_UNIT_MS 50
 
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
-#define SCAN_GROUP_SIZE (64UL * 1024) /* 64KiB分组扫描优化 */
+extern unsigned long scan_group_size;
+#define SCAN_GROUP_SIZE (scan_group_size)  /* 64KiB分组扫描优化，可动态修改 */
 
 #define SCAN_RESULT_CAPACITY (MMAPLOCK_BATCH_SIZE / PAGE_SIZE)
 
