@@ -30,7 +30,8 @@
 #define STS_PER_WORD (2)
 #define HIST_STS_VALUE_NUM (HIST_STS_VALUE_WORD_NUM * STS_PER_WORD)
 #define HIST_THREAD_PERIOD (512)
-#define HIST_SCAN_DURATION_PER_WIN (64)
+#define HIST_SCAN_DURATION_PER_WIN_DEFAULT (64)
+extern unsigned int hist_scan_duration_per_win_param;
 #define PAGE_SIZE_64K_DIV_4K 16
 
 #define THREAD_SLEEP (50)

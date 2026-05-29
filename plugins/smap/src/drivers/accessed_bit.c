@@ -43,6 +43,60 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 
+/**
+ * scan_group_size_set - Callback for setting scan group size parameter
+ * @val: String containing the new scan group size value (in bytes)
+ * @kp: Pointer to kernel_param structure
+ *
+ * When user modifies the parameter via sysfs:
+ * - Validate the parameter range (must be > 0 and power of 2)
+ * - Update the global parameter value
+ */
+static int scan_group_size_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned long new_size;
+	int ret;
+
+	/* Parse parameter value */
+	ret = kstrtoul(val, 10, &new_size);
+	if (ret)
+		return ret;
+
+	/* Validate parameter range: must be > 0 */
+	if (new_size == 0) {
+		pr_err("invalid scan group size: %lu, must be > 0\n", new_size);
+		return -EINVAL;
+	}
+
+	/* Validate parameter: must be power of 2 */
+	if (new_size & (new_size - 1)) {
+		pr_err("invalid scan group size: %lu, must be power of 2\n",
+		       new_size);
+		return -EINVAL;
+	}
+
+	pr_info("scan group size changed: %lu -> %lu bytes\n",
+		scan_group_size_param, new_size);
+
+	/* Update scan group size */
+	scan_group_size_param = new_size;
+
+	return 0;
+}
+
+/* Custom parameter operations structure for scan group size */
+static const struct kernel_param_ops scan_group_size_ops = {
+	.set = scan_group_size_set,
+	.get = param_get_ulong,
+};
+
+/* Scan group size kernel parameter (in bytes), default 64KiB */
+unsigned long scan_group_size_param = SCAN_GROUP_SIZE_DEFAULT;
+module_param_cb(scan_group_size_param, &scan_group_size_ops,
+		&scan_group_size_param, 0644);
+MODULE_PARM_DESC(scan_group_size_param,
+		 "scan group size in bytes, must be power of 2 (default 64KiB)");
+
 LIST_HEAD(ham_pid_list);
 LIST_HEAD(statistic_pid_list);
 spinlock_t ham_lock;
@@ -1320,7 +1374,7 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 
 	/* 64KiB分组优化：NORMAL_SCAN类型，首页young则跳过后续页 */
 	if (pte_walk->type == NORMAL_SCAN) {
-		bool is_first = (addr & (SCAN_GROUP_SIZE - 1)) == 0;
+		bool is_first = (addr & (scan_group_size_param - 1)) == 0;
 		if (is_first)
 			pte_walk->group_hot = is_young;
 		else if (pte_walk->group_hot) {
