@@ -90,6 +90,53 @@ module_param_cb(hist_4k_scan_mode_param, &hist_4k_scan_mode_ops,
 MODULE_PARM_DESC(hist_4k_scan_mode_param,
 		 "4K scan mode: 0=multi-granularity, 1=seq-loop (default)");
 
+/**
+ * hist_scan_duration_per_win_set - Callback for setting scan duration per window parameter
+ * @val: String containing the new scan duration value
+ * @kp: Pointer to kernel_param structure
+ *
+ * When user modifies the parameter via sysfs:
+ * - Validate the value is positive
+ * - Update the global scan duration per window
+ */
+static int hist_scan_duration_per_win_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned int new_duration;
+	int ret;
+
+	/* Parse parameter value */
+	ret = kstrtouint(val, 10, &new_duration);
+	if (ret)
+		return ret;
+
+	/* Validate parameter range: must be positive */
+	if (new_duration == 0) {
+		pr_err("invalid scan duration per win: %u, must be > 0\n", new_duration);
+		return -EINVAL;
+	}
+
+	pr_info("hist scan duration per win changed: %u -> %u\n",
+		hist_scan_duration_per_win, new_duration);
+
+	/* Update scan duration */
+	hist_scan_duration_per_win = new_duration;
+
+	return 0;
+}
+
+/* Custom parameter operations structure */
+static const struct kernel_param_ops hist_scan_duration_per_win_ops = {
+	.set = hist_scan_duration_per_win_set,
+	.get = param_get_uint,
+};
+
+/* Scan duration per window kernel parameter: default 64ms */
+unsigned int hist_scan_duration_per_win = 64;
+module_param_cb(hist_scan_duration_per_win, &hist_scan_duration_per_win_ops,
+		&hist_scan_duration_per_win, 0644);
+MODULE_PARM_DESC(hist_scan_duration_per_win,
+		 "Scan duration per window in ms (default: 64)");
+
 static inline u64 align_addr(u64 addr, u32 low_bit_len)
 {
 	return (addr >> low_bit_len) << low_bit_len;
