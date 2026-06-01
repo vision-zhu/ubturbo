@@ -8,6 +8,7 @@
 
 #include "manage/manage.h"
 #include "strategy/separate_strategy.h"
+#include "strategy/grouped_strategy.h"
 #include "strategy/strategy.h"
 #include "smap_user_log.h"
 
@@ -179,5 +180,105 @@ TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeFour)
         .will(returnValue(0));
     MOCKER(fclose).stubs().will(returnValue(-1));
     ret = GetNrFreeHugePagesByNode(nid);
+    EXPECT_EQ(0, ret);
+}
+
+extern "C" RunMode GetRunMode(void);
+extern "C" bool IsHugeMode(void);
+extern "C" struct ProcessManager *GetProcessManager(void);
+extern "C" int GetNrLocalNuma(void);
+extern "C" bool IsRemoteNidValid(int nid);
+extern "C" bool NotInAttrL1(ProcessAttr *attr, int nid);
+extern "C" bool NotInAttrL2(ProcessAttr *attr, int nid);
+
+TEST_F(StrategyTest, TestRunStrategyWaterlineModeLimitMigrate)
+{
+    size_t mlistSize = MAX_NODES;
+    ProcessAttr process;
+    memset(&process, 0, sizeof(ProcessAttr));
+    ActcData actcData[MAX_NODES] = { { 0 } };
+    for (int i = 0; i < MAX_NODES; i++) {
+        process.scanAttr.actcData[i] = &actcData[i];
+        process.scanAttr.actcLen[i] = 1;
+    }
+    process.numaAttr.numaNodes = 0x11;  // bit 0 for L1 node 0, bit 4 for L2 node 4
+    process.strategyAttr.nrMigratePages[0][4] = 1000;
+    process.groupPolicy.enabled = false;
+    struct MigList mlist[MAX_NODES][MAX_NODES] = {};
+
+    static struct ProcessManager manager;
+    memset(&manager, 0, sizeof(struct ProcessManager));
+    manager.nrLocalNuma = 4;
+    EnvMutexInit(&manager.remoteNumaInfo.lock);
+    manager.remoteNumaInfo.usedInfo[0].size = 500;
+    manager.remoteNumaInfo.usedInfo[0].used = 100;
+
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(IsRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
+
+    int ret = RunStrategy(&process, mlist, mlistSize);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(400, process.strategyAttr.nrMigratePages[0][4]);
+}
+
+TEST_F(StrategyTest, TestRunStrategyMemPoolModeNoLimit)
+{
+    size_t mlistSize = MAX_NODES;
+    ProcessAttr process;
+    memset(&process, 0, sizeof(ProcessAttr));
+    ActcData actcData[MAX_NODES] = { { 0 } };
+    for (int i = 0; i < MAX_NODES; i++) {
+        process.scanAttr.actcData[i] = &actcData[i];
+        process.scanAttr.actcLen[i] = 1;
+    }
+    process.numaAttr.numaNodes = 0x11;  // bit 0 for L1 node 0, bit 4 for L2 node 4
+    process.strategyAttr.nrMigratePages[0][4] = 1000;
+    process.groupPolicy.enabled = false;
+    struct MigList mlist[MAX_NODES][MAX_NODES] = {};
+
+    static struct ProcessManager manager;
+    memset(&manager, 0, sizeof(struct ProcessManager));
+    manager.nrLocalNuma = 4;
+
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
+
+    int ret = RunStrategy(&process, mlist, mlistSize);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(1000, process.strategyAttr.nrMigratePages[0][4]);
+}
+
+TEST_F(StrategyTest, TestRunStrategyGroupedPolicyNoLimit)
+{
+    size_t mlistSize = MAX_NODES;
+    ProcessAttr process;
+    memset(&process, 0, sizeof(ProcessAttr));
+    ActcData actcData[MAX_NODES] = { { 0 } };
+    for (int i = 0; i < MAX_NODES; i++) {
+        process.scanAttr.actcData[i] = &actcData[i];
+        process.scanAttr.actcLen[i] = 1;
+    }
+    process.numaAttr.numaNodes = 0x11;  // bit 0 for L1 node 0, bit 4 for L2 node 4
+    process.strategyAttr.nrMigratePages[0][4] = 1000;
+    process.groupPolicy.enabled = true;
+    process.groupPolicy.groupCount = 1;
+    struct MigList mlist[MAX_NODES][MAX_NODES] = {};
+
+    static struct ProcessManager manager;
+    memset(&manager, 0, sizeof(struct ProcessManager));
+    manager.nrLocalNuma = 4;
+
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GroupedMigrationStrategy).stubs().will(returnValue(0));
+
+    int ret = RunStrategy(&process, mlist, mlistSize);
     EXPECT_EQ(0, ret);
 }
