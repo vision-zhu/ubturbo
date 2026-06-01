@@ -531,6 +531,7 @@ TEST_F(MigrationTest, TestCompareMigOut)
 }
 
 extern "C" void NumaSwapMemPool(ProcessAttr *current);
+extern "C" struct ProcessManager g_processManager;
 TEST_F(MigrationTest, TestNumaSwapMemPool)
 {
     int l2Node = 4;
@@ -538,10 +539,14 @@ TEST_F(MigrationTest, TestNumaSwapMemPool)
     attr.strategyAttr.allocRemoteNrPages[0][0] = 100;
     attr.scanAttr.actcLen[l2Node] = 5;
     attr.strategyAttr.memSize[0][0] = 4096; // 2 hugepage
+    // 初始化外部配置的远端内存可用量
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].size = 1000;
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].used = 0;
     MOCKER(IsHugeMode).stubs().will(returnValue(true));
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(l2Node));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&g_processManager));
 
-    // migNum > 0 case
+    // migNum > 0 case, availRemote > migNum
     NumaSwapMemPool(&attr);
     EXPECT_EQ(5, attr.strategyAttr.nrMigratePages[l2Node][0]);
 
@@ -558,6 +563,38 @@ TEST_F(MigrationTest, TestNumaSwapMemPool)
     attr.scanAttr.actcLen[0] = 10;
     NumaSwapMemPool(&attr);
     EXPECT_EQ(10, attr.strategyAttr.nrMigratePages[0][l2Node]);
+}
+
+// 测试外部配置远端内存可用量限制迁移量
+TEST_F(MigrationTest, TestNumaSwapMemPoolWithRemoteMemAvailLimit)
+{
+    int l2Node = 4;
+    ProcessAttr attr = {};
+    attr.strategyAttr.allocRemoteNrPages[0][0] = 100;
+    attr.scanAttr.actcLen[l2Node] = 100;
+    attr.strategyAttr.memSize[0][0] = 4096; // 2 hugepage, migNum = 98
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(l2Node));
+    MOCKER(GetProcessManager).stubs().will(returnValue(&g_processManager));
+
+    // case1: 剩余可用量小于迁移量，迁移量被限制
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].size = 50;
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].used = 10;
+    NumaSwapMemPool(&attr);
+    EXPECT_EQ(40, attr.strategyAttr.nrMigratePages[l2Node][0]); // 50 - 10 = 40
+
+    // case2: 剩余可用量为0，不迁移
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].size = 100;
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].used = 100;
+    attr.strategyAttr.nrMigratePages[l2Node][0] = 0; // 重置
+    NumaSwapMemPool(&attr);
+    EXPECT_EQ(0, attr.strategyAttr.nrMigratePages[l2Node][0]);
+
+    // case3: 剩余可用量大于迁移量，迁移量不变
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].size = 200;
+    g_processManager.remoteNumaInfo.privateUsedInfo[0][0].used = 0;
+    NumaSwapMemPool(&attr);
+    EXPECT_EQ(98, attr.strategyAttr.nrMigratePages[l2Node][0]);
 }
 
 extern "C" void NumaMigReduceDeal(ProcessAttr *current);

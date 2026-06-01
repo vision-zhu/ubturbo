@@ -413,6 +413,8 @@ static void NumaSwapMemPool(ProcessAttr *current)
     if (IsMultiNumaVm(current)) {
         return;
     }
+    struct ProcessManager *manager = GetProcessManager();
+    struct RemoteNumaInfo *numaInfo = &manager->remoteNumaInfo;
     for (int i = 0; i < LOCAL_NUMA_NUM; i++) {
         for (int j = 0; j < REMOTE_NUMA_NUM; j++) {
             int l2Node = GetNrLocalNuma() + j;
@@ -421,6 +423,13 @@ static void NumaSwapMemPool(ProcessAttr *current)
             int32_t migNum = current->strategyAttr.allocRemoteNrPages[i][j] - tmpNum;
             if (migNum > 0) {
                 migNum = MIN(migNum, current->scanAttr.actcLen[l2Node]);
+                // 考虑外部配置的远端内存可用量
+                int64_t availRemote = numaInfo->privateUsedInfo[i][j].size - numaInfo->privateUsedInfo[i][j].used;
+                if (availRemote > 0) {
+                    migNum = MIN(migNum, (int32_t)availRemote);
+                } else {
+                    migNum = 0;
+                }
                 current->strategyAttr.nrMigratePages[l2Node][i] = migNum;
             } else {
                 migNum = MIN(-migNum, current->scanAttr.actcLen[i]);
