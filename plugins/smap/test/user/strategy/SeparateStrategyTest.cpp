@@ -909,34 +909,150 @@ TEST_F(SeparateStrategyTest, TestCalculateMigInfo)
     int index = nid - nrLocalNuma;
     process.migrateParam[0].memSize = 4096;
     process.scanAttr.actcLen[nid] = 1;
+    process.numaAttr.numaNodes = 0b0001;  // L1在node 0
     uint64_t demoteNum = 0;
     uint64_t promoteNum = 0;
     RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM] = { 0 };
     uint64_t nrPages[NR_LEVEL] = { 0 };
 
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma)); // 本地4个numa
+    struct ProcessManager *procMgr = GetProcessManager();
+    procMgr->nrLocalNuma = nrLocalNuma;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 100;  // 足够大的限制
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 0;
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
     CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
     EXPECT_EQ(DEMOTE, remoteMigInfo[index].dir);
     EXPECT_EQ(1, remoteMigInfo[index].nrMig);
     EXPECT_EQ(remoteMigInfo[index].nrMig, demoteNum);
     EXPECT_EQ(0, promoteNum);
 
+    GlobalMockObject::verify();
     process.scanAttr.actcLen[nid] = 3;
     demoteNum = 0;
     promoteNum = 0;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 100;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 0;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
     CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
     EXPECT_EQ(PROMOTE, remoteMigInfo[index].dir);
     EXPECT_EQ(1, remoteMigInfo[index].nrMig);
     EXPECT_EQ(0, demoteNum);
     EXPECT_EQ(remoteMigInfo[index].nrMig, promoteNum);
 
+    GlobalMockObject::verify();
     process.scanAttr.actcLen[nid] = 2;
     demoteNum = 0;
     promoteNum = 0;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 100;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 0;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
     CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
     EXPECT_EQ(SWAP, remoteMigInfo[index].dir);
     EXPECT_EQ(0, remoteMigInfo[index].nrMig);
     EXPECT_EQ(0, demoteNum);
+    EXPECT_EQ(0, promoteNum);
+}
+
+TEST_F(SeparateStrategyTest, TestCalculateMigInfoMemPoolModeWithRemoteLimit)
+{
+    int nrLocalNuma = 4;
+    ProcessAttr process = {};
+    process.remoteNumaCnt = 1;
+    process.migrateParam[0].nid = 4;
+    int nid = process.migrateParam[0].nid;
+    int index = nid - nrLocalNuma;
+    process.migrateParam[0].memSize = 8192;  // 4个2M页
+    process.scanAttr.actcLen[nid] = 1;  // 目标4页，当前1页，需迁出3页
+    process.numaAttr.numaNodes = 0b0001;  // L1在node 0
+    uint64_t demoteNum = 0;
+    uint64_t promoteNum = 0;
+    RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM] = { 0 };
+    uint64_t nrPages[NR_LEVEL] = { 0 };
+
+    struct ProcessManager *procMgr = GetProcessManager();
+    procMgr->nrLocalNuma = nrLocalNuma;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 2;  // 限制2页
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 0;  // 已用0页
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
+    EXPECT_EQ(DEMOTE, remoteMigInfo[index].dir);
+    EXPECT_EQ(2, remoteMigInfo[index].nrMig);  // 限制为2页而非3页
+    EXPECT_EQ(2, demoteNum);
+    EXPECT_EQ(0, promoteNum);
+}
+
+TEST_F(SeparateStrategyTest, TestCalculateMigInfoMemPoolModeRemoteLimitExceeded)
+{
+    int nrLocalNuma = 4;
+    ProcessAttr process = {};
+    process.remoteNumaCnt = 1;
+    process.migrateParam[0].nid = 4;
+    int nid = process.migrateParam[0].nid;
+    int index = nid - nrLocalNuma;
+    process.migrateParam[0].memSize = 8192;  // 4个2M页
+    process.scanAttr.actcLen[nid] = 1;  // 目标4页，当前1页，需迁出3页
+    process.numaAttr.numaNodes = 0b0001;  // L1在node 0
+    uint64_t demoteNum = 0;
+    uint64_t promoteNum = 0;
+    RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM] = { 0 };
+    uint64_t nrPages[NR_LEVEL] = { 0 };
+
+    struct ProcessManager *procMgr = GetProcessManager();
+    procMgr->nrLocalNuma = nrLocalNuma;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 2;  // 限制2页
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 2;  // 已用2页，无剩余
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
+    EXPECT_EQ(SWAP, remoteMigInfo[index].dir);  // 无可用内存，不迁出
+    EXPECT_EQ(0, remoteMigInfo[index].nrMig);
+    EXPECT_EQ(0, demoteNum);
+    EXPECT_EQ(0, promoteNum);
+}
+
+TEST_F(SeparateStrategyTest, TestCalculateMigInfoMemPoolModeNoLimit)
+{
+    int nrLocalNuma = 4;
+    ProcessAttr process = {};
+    process.remoteNumaCnt = 1;
+    process.migrateParam[0].nid = 4;
+    int nid = process.migrateParam[0].nid;
+    int index = nid - nrLocalNuma;
+    process.migrateParam[0].memSize = 8192;  // 4个2M页
+    process.scanAttr.actcLen[nid] = 1;  // 目标4页，当前1页，需迁出3页
+    process.numaAttr.numaNodes = 0b0001;  // L1在node 0
+    uint64_t demoteNum = 0;
+    uint64_t promoteNum = 0;
+    RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM] = { 0 };
+    uint64_t nrPages[NR_LEVEL] = { 0 };
+
+    struct ProcessManager *procMgr = GetProcessManager();
+    procMgr->nrLocalNuma = nrLocalNuma;
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].size = 10;  // 限制10页
+    procMgr->remoteNumaInfo.privateUsedInfo[0][index].used = 0;  // 已用0页
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocalNuma));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetAttrL1).stubs().will(returnValue(0));
+
+    CalculateMigInfo(&process, remoteMigInfo, nrPages, &demoteNum, &promoteNum);
+    EXPECT_EQ(DEMOTE, remoteMigInfo[index].dir);
+    EXPECT_EQ(3, remoteMigInfo[index].nrMig);  // 无限制，正常迁出3页
+    EXPECT_EQ(3, demoteNum);
     EXPECT_EQ(0, promoteNum);
 }
 
