@@ -84,6 +84,7 @@
 #define NUMA_MAPS_MAX_PATTERN_LEN 20
 
 #define FREQ_BUCKETS_SIZE 256
+#define PRIOR_HISTOGRAM_SIZE 256
 
 extern EnvAtomic g_forbiddenNodes[MAX_NODES];
 
@@ -250,6 +251,9 @@ typedef struct {
     ActcData *actcData[MAX_NODES]; // actc数据
     ActCount actCount[MAX_NODES]; // 统计数据
     uint32_t selectedBuckets[MAX_NODES][FREQ_BUCKETS_SIZE]; // 已选频次为freq的页面数
+    /* prior 历史频次的直方图统计（用于估算中位数） */
+    uint32_t priorHistogram[PRIOR_HISTOGRAM_SIZE]; // 累积统计 prior 分布
+    uint8_t priorMedian; // 估算的中位数阈值（供下次使用）
 } ScanAttribute;
 
 typedef struct {
