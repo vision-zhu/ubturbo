@@ -1107,15 +1107,36 @@ static void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[R
                              uint64_t nrPages[NR_LEVEL], uint64_t *demoteNum, uint64_t *promoteNum)
 {
     int nrLocalNuma = GetNrLocalNuma();
+    int l1Node = GetAttrL1(process);
+    struct ProcessManager *manager = GetProcessManager();
+    struct RemoteNumaInfo *numaInfo = &manager->remoteNumaInfo;
     if (GetRunMode() == MEM_POOL_MODE) {
+        EnvMutexLock(&numaInfo->lock);
         for (int i = 0; i < process->remoteNumaCnt; i++) {
             int nid = process->migrateParam[i].nid;
             int index = nid - nrLocalNuma;
             uint64_t targetL2Page = KBToHugePage(process->migrateParam[i].memSize);
             if (targetL2Page > process->scanAttr.actcLen[nid]) {
-                remoteMigInfo[index].dir = DEMOTE;
-                remoteMigInfo[index].nrMig = targetL2Page - process->scanAttr.actcLen[nid];
-                *demoteNum += remoteMigInfo[index].nrMig;
+                uint64_t calcMig = targetL2Page - process->scanAttr.actcLen[nid];
+                /* Check remote NUMA available memory limit set by SetRemoteNumaInfo */
+                uint64_t maxSize = numaInfo->privateUsedInfo[l1Node][index].size;
+                uint64_t currentUsed = numaInfo->privateUsedInfo[l1Node][index].used;
+                uint64_t maxAllowed = (maxSize > currentUsed) ? (maxSize - currentUsed) : 0;
+                /* Limit migration size to not exceed available memory */
+                if (calcMig > maxAllowed) {
+                    SMAP_LOGGER_INFO("Pid %d, limit demote from %llu to %llu pages due to remote limit "
+                                     "(maxSize: %llu, used: %llu).",
+                                     process->pid, calcMig, maxAllowed, maxSize, currentUsed);
+                    calcMig = maxAllowed;
+                }
+                if (calcMig > 0) {
+                    remoteMigInfo[index].dir = DEMOTE;
+                    remoteMigInfo[index].nrMig = calcMig;
+                    *demoteNum += remoteMigInfo[index].nrMig;
+                } else {
+                    remoteMigInfo[index].nrMig = 0;
+                    remoteMigInfo[index].dir = SWAP;
+                }
             } else if (targetL2Page < process->scanAttr.actcLen[nid]) {
                 remoteMigInfo[index].dir = PROMOTE;
                 remoteMigInfo[index].nrMig = process->scanAttr.actcLen[nid] - targetL2Page;
@@ -1125,6 +1146,7 @@ static void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[R
                 remoteMigInfo[index].dir = SWAP;
             }
         }
+        EnvMutexUnlock(&numaInfo->lock);
     } else {
         int l1Node = GetAttrL1(process);
         for (int l2Node = nrLocalNuma; l2Node < nrLocalNuma + REMOTE_NUMA_NUM; l2Node++) {
