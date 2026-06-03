@@ -674,7 +674,7 @@ int ScanMigrateWork(ThreadCtx *ctx)
         SMAP_LOGGER_ERROR("Disable tracking failed! ret:%d.", ret);
         goto out;
     }
-    SMAP_LOGGER_DEBUG("Tracking disabled.");
+    SMAP_LOGGER_INFO("Tracking disabled.");
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
     ret = PerformMigrationPreparation(manager);
@@ -704,13 +704,11 @@ int ScanMigrateWork(ThreadCtx *ctx)
     ret = PerformMigration(manager);
     SMAP_LOGGER_INFO("Migration result: %d.", ret);
     // 只在迁移成功时恢复新PID的扫描周期
-    if (ret == 0) {
-        RestoreNewPidScanTime(ctx);
-    }
+    RestoreNewPidScanTime(ctx);
 out:
     // 启动扫描
     EnableTracking(manager);
-    SMAP_LOGGER_DEBUG("Tracking enabled.");
+    SMAP_LOGGER_INFO("Tracking enabled.");
     return ret;
 }
 
