@@ -13,13 +13,26 @@
 #include "check.h"
 
 #define REMOTE_NUMA_ID 4
-#define REMOTE_PA_START 0x40000000000
-#define REMOTE_PA_END 0x47fffffffff
+#define REMOTE_PA_START 0x20000000000ULL
+#define REMOTE_PA_END 0x3ffffffffffULL
+#define REMOTE_RAM_RANGE_SIZE (REMOTE_PA_END - REMOTE_PA_START + 1ULL)
+#define INDEX_TABLE_SIZE (REMOTE_RAM_RANGE_SIZE / PAGE_SIZE_2M)
 
 extern struct list_head remote_ram_list;
 extern int nr_local_numa;
 extern rwlock_t rem_ram_list_lock;
 extern unsigned int smap_scene;
+
+struct index_table_entry {
+	u8 numa_node;
+	u64 node_4k_base_idx;
+	u64 node_2m_base_idx;
+};
+
+extern struct index_table_entry *remote_ram_index_table;
+extern bool index_table_valid;
+extern u64 node_total_4k_pages[SMAP_MAX_NUMNODES];
+extern u64 node_total_2m_pages[SMAP_MAX_NUMNODES];
 struct ram_segment {
 	struct list_head node;
 	int numa_node;
