@@ -738,13 +738,11 @@ int ScanMigrateWork(ThreadCtx *ctx)
     ret = PerformMigration(manager);
     SMAP_LOGGER_INFO("Migration result: %d.", ret);
     // 只在迁移成功时恢复新PID的扫描周期
-    if (ret == 0) {
-        RestoreNewPidScanTime(ctx);
-    }
+    RestoreNewPidScanTime(ctx);
 out:
     // 启动扫描
     EnableTracking(manager);
-    SMAP_LOGGER_DEBUG("Tracking enabled.");
+    SMAP_LOGGER_INFO("Tracking enabled.");
     return ret;
 }
 
