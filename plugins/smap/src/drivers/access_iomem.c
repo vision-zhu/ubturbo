@@ -28,6 +28,15 @@ EXPORT_SYMBOL(remote_ram_list);
 DEFINE_RWLOCK(rem_ram_list_lock);
 EXPORT_SYMBOL(rem_ram_list_lock);
 
+struct index_table_entry *remote_ram_index_table;
+EXPORT_SYMBOL(remote_ram_index_table);
+bool index_table_valid;
+EXPORT_SYMBOL(index_table_valid);
+u64 node_total_4k_pages[SMAP_MAX_NUMNODES];
+EXPORT_SYMBOL(node_total_4k_pages);
+u64 node_total_2m_pages[SMAP_MAX_NUMNODES];
+EXPORT_SYMBOL(node_total_2m_pages);
+
 static void free_remote_ram(struct list_head *head)
 {
 	struct ram_segment *seg, *tmp;
@@ -161,7 +170,64 @@ void release_remote_ram(void)
 {
 	write_lock(&rem_ram_list_lock);
 	free_remote_ram(&remote_ram_list);
+	if (remote_ram_index_table) {
+		vfree(remote_ram_index_table);
+		remote_ram_index_table = NULL;
+	}
+	index_table_valid = false;
+	memset(node_total_4k_pages, 0, sizeof(node_total_4k_pages));
+	memset(node_total_2m_pages, 0, sizeof(node_total_2m_pages));
 	write_unlock(&rem_ram_list_lock);
+}
+
+static int build_index_table(void)
+{
+	struct ram_segment *seg;
+	u64 block_start, block_end, block_idx;
+	u64 cur_4k_idx[SMAP_MAX_NUMNODES] = { 0 };
+	u64 cur_2m_idx[SMAP_MAX_NUMNODES] = { 0 };
+	u64 seg_start_offset;
+
+	if (list_empty(&remote_ram_list))
+		return 0;
+
+	remote_ram_index_table = vzalloc(INDEX_TABLE_SIZE *
+					  sizeof(struct index_table_entry));
+	if (!remote_ram_index_table)
+		return -ENOMEM;
+
+	list_for_each_entry(seg, &remote_ram_list, node) {
+		if (seg->numa_node >= SMAP_MAX_NUMNODES)
+			continue;
+
+		/* 计算段在索引表中的范围 */
+		seg_start_offset = seg->start - REMOTE_PA_START;
+		block_start = seg_start_offset >> 21;
+		block_end = (seg_start_offset + (seg->end - seg->start)) >> 21;
+
+		for (block_idx = block_start; block_idx <= block_end; block_idx++) {
+			if (block_idx >= INDEX_TABLE_SIZE)
+				break;
+			remote_ram_index_table[block_idx].numa_node = seg->numa_node;
+			remote_ram_index_table[block_idx].node_4k_base_idx =
+				cur_4k_idx[seg->numa_node];
+			remote_ram_index_table[block_idx].node_2m_base_idx =
+				cur_2m_idx[seg->numa_node];
+			cur_4k_idx[seg->numa_node] += 512;
+			cur_2m_idx[seg->numa_node] += 1;
+		}
+	}
+
+	/* 存储每个节点的总页面数 */
+	for (int node = 0; node < SMAP_MAX_NUMNODES; node++) {
+		node_total_4k_pages[node] = cur_4k_idx[node];
+		node_total_2m_pages[node] = cur_2m_idx[node];
+	}
+
+	index_table_valid = true;
+	pr_info("built remote ram index table with %llu entries\n",
+		(unsigned long long)INDEX_TABLE_SIZE);
+	return 0;
 }
 
 int refresh_remote_ram(void)
@@ -177,10 +243,16 @@ int refresh_remote_ram(void)
 	merge_ram_segments(&tmp_head);
 	write_lock(&rem_ram_list_lock);
 	free_remote_ram(&remote_ram_list);
+	if (remote_ram_index_table) {
+		vfree(remote_ram_index_table);
+		remote_ram_index_table = NULL;
+		index_table_valid = false;
+	}
 	move_remote_ram(&remote_ram_list, &tmp_head);
 	free_remote_ram(&tmp_head);
+	ret = build_index_table();
 	write_unlock(&rem_ram_list_lock);
-	return 0;
+	return ret;
 }
 
 int get_numa_by_pfn(unsigned long pfn)
@@ -200,13 +272,34 @@ int get_numa_by_pfn(unsigned long pfn)
 	return nid;
 }
 
+static u64 get_node_page_cnt_list(int nid, int page_size);
+
 u64 get_node_page_cnt_iomem(int nid, int page_size)
 {
 	u64 len = 0;
-	struct ram_segment *seg, *tmp;
 
-	if (unlikely(nid < nr_local_numa))
+	if (unlikely(nid < nr_local_numa || nid >= SMAP_MAX_NUMNODES))
 		return 0;
+
+	read_lock(&rem_ram_list_lock);
+	if (index_table_valid) {
+		if (page_size == PAGE_SIZE)
+			len = node_total_4k_pages[nid];
+		else if (page_size == PAGE_SIZE_2M)
+			len = node_total_2m_pages[nid];
+		read_unlock(&rem_ram_list_lock);
+		return len;
+	}
+	read_unlock(&rem_ram_list_lock);
+
+	/* 兜底：链表遍历 */
+	return get_node_page_cnt_list(nid, page_size);
+}
+
+static u64 get_node_page_cnt_list(int nid, int page_size)
+{
+	u64 len = 0;
+	struct ram_segment *seg, *tmp;
 
 	read_lock(&rem_ram_list_lock);
 	list_for_each_entry_safe(seg, tmp, &remote_ram_list, node) {
@@ -224,7 +317,72 @@ u64 get_node_page_cnt_iomem(int nid, int page_size)
 }
 EXPORT_SYMBOL(get_node_page_cnt_iomem);
 
+static inline int calc_paddr_idx_o1(u64 pa, int nid, u64 *index, int page_size)
+{
+	u64 block_idx, offset_in_block;
+	struct index_table_entry *entry;
+
+	if (pa < REMOTE_PA_START || pa > REMOTE_PA_END)
+		return -ERANGE;
+
+	block_idx = (pa - REMOTE_PA_START) >> 21;
+	if (block_idx >= INDEX_TABLE_SIZE)
+		return -ERANGE;
+
+	entry = &remote_ram_index_table[block_idx];
+
+	if (entry->numa_node != nid)
+		return -ERANGE;
+
+	if (page_size == PAGE_SIZE) {
+		offset_in_block = (pa - (REMOTE_PA_START + block_idx * PAGE_SIZE_2M)) >> 12;
+		*index = entry->node_4k_base_idx + offset_in_block;
+	} else if (page_size == PAGE_SIZE_2M) {
+		*index = entry->node_2m_base_idx;
+	} else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int calc_paddr_idx_list(u64 pa, int nid, u64 *index, int page_size);
+static int calc_paddr_acidx_iomem_list(u64 pa, int *nid, u64 *index, int page_size);
+
+static int calc_paddr_acidx_iomem_o1(u64 pa, int *nid, u64 *index, int page_size)
+{
+	u64 block_idx;
+	struct index_table_entry *entry;
+
+	if (pa < REMOTE_PA_START || pa > REMOTE_PA_END)
+		return -ERANGE;
+
+	block_idx = (pa - REMOTE_PA_START) >> 21;
+	if (block_idx >= INDEX_TABLE_SIZE)
+		return -ERANGE;
+
+	entry = &remote_ram_index_table[block_idx];
+	*nid = entry->numa_node;
+
+	return calc_paddr_idx_o1(pa, *nid, index, page_size);
+}
+
 int calc_paddr_acidx_iomem(u64 pa, int *nid, u64 *index, int page_size)
+{
+	int ret;
+
+	read_lock(&rem_ram_list_lock);
+	if (index_table_valid && remote_ram_index_table) {
+		ret = calc_paddr_acidx_iomem_o1(pa, nid, index, page_size);
+		read_unlock(&rem_ram_list_lock);
+		return ret;
+	}
+	read_unlock(&rem_ram_list_lock);
+
+	return calc_paddr_acidx_iomem_list(pa, nid, index, page_size);
+}
+
+static int calc_paddr_acidx_iomem_list(u64 pa, int *nid, u64 *index, int page_size)
 {
 	struct ram_segment *seg;
 	int shift = __builtin_ctz(page_size);
@@ -262,18 +420,31 @@ int calc_paddr_acidx_iomem(u64 pa, int *nid, u64 *index, int page_size)
 
 int calc_paddr_acidx_iomem_known_nid(u64 pa, int nid, u64 *index, int page_size)
 {
+	int ret;
+
+	read_lock(&rem_ram_list_lock);
+	if (index_table_valid && remote_ram_index_table) {
+		ret = calc_paddr_idx_o1(pa, nid, index, page_size);
+		read_unlock(&rem_ram_list_lock);
+		return ret;
+	}
+	read_unlock(&rem_ram_list_lock);
+
+	return calc_paddr_idx_list(pa, nid, index, page_size);
+}
+
+static int calc_paddr_idx_list(u64 pa, int nid, u64 *index, int page_size)
+{
 	struct ram_segment *seg;
 	int shift = __builtin_ctz(page_size);
 	u64 idx = 0;
 
 	read_lock(&rem_ram_list_lock);
 	list_for_each_entry(seg, &remote_ram_list, node) {
-		if (seg->numa_node != nid) {
+		if (seg->numa_node != nid)
 			continue;
-		}
-		if (pa < seg->start) {
+		if (pa < seg->start)
 			break;
-		}
 		if (pa <= seg->end) {
 			idx += ((pa - seg->start) >> shift);
 			*index = idx;
