@@ -21,7 +21,7 @@
 
 #undef pr_fmt
 #define pr_fmt(fmt) "access_ioctl: " fmt
-#define MAX_NR_MIGOUT 40
+#define MAX_NR_MIGOUT 300
 #define MAX_NR_REMOVE MAX_NR_MIGOUT
 #define SCHEDULE_INTERVAL (100000)
 

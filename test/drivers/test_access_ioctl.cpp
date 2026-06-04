@@ -237,13 +237,22 @@ TEST_F(AccessIoctlTestKernel, CheckMsgValidityTest)
     msg.count = 0;
     EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 
-    msg.count = 41;
+    msg.count = 301;
     EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 
     msg.payload = nullptr;
     EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 
     EXPECT_EQ(-EINVAL, check_msg_validity(nullptr));
+
+    // Test new MAX_NR_MIGOUT limit (300)
+    GlobalMockObject::verify();
+    msg.payload = &payload;
+    msg.count = 300;
+    EXPECT_EQ(0, check_msg_validity(&msg));
+
+    msg.count = 301;
+    EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 }
 
 static struct access_add_pid_msg *g_test_msg = nullptr;
