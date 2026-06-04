@@ -16,9 +16,14 @@
 #define SCAN_PERIOD_UNIT_MS 50
 
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
-#define SCAN_GROUP_SIZE (64UL * 1024) /* 64KiB分组扫描优化 */
+#define SCAN_GROUP_SIZE_DEFAULT (64UL * 1024) /* 64KiB default */
+#define SCAN_GROUP_SIZE_MIN (4UL * 1024) /* 4KiB minimum */
+#define SCAN_GROUP_SIZE_MAX (1024UL * 1024) /* 1MiB maximum */
 
 #define SCAN_RESULT_CAPACITY (MMAPLOCK_BATCH_SIZE / PAGE_SIZE)
+
+/* Dynamic kernel parameter: scan group size (bytes) */
+extern unsigned long scan_group_size;
 
 extern struct list_head remote_ram_list;
 extern int nr_local_numa;

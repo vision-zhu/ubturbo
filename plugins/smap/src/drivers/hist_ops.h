@@ -30,7 +30,9 @@
 #define STS_PER_WORD (2)
 #define HIST_STS_VALUE_NUM (HIST_STS_VALUE_WORD_NUM * STS_PER_WORD)
 #define HIST_THREAD_PERIOD (512)
-#define HIST_SCAN_DURATION_PER_WIN (64)
+#define HIST_SCAN_DURATION_PER_WIN_DEFAULT (64)
+#define HIST_SCAN_DURATION_PER_WIN_MIN (1)
+#define HIST_SCAN_DURATION_PER_WIN_MAX (1000)
 #define PAGE_SIZE_64K_DIV_4K 16
 
 #define THREAD_SLEEP (50)
@@ -40,6 +42,9 @@ enum hist_4k_scan_mode {
 	HIST_4K_SCAN_MULTI_GRAN = 0, /* Multi-granularity sliding */
 	HIST_4K_SCAN_SEQ_LOOP = 1, /* Sequential loop sliding */
 };
+
+/* Dynamic kernel parameter: scan duration per window (ms) */
+extern unsigned int hist_scan_duration_per_win;
 
 struct addr_seg {
 	u64 start;

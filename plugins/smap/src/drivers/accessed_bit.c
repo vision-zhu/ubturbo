@@ -43,6 +43,60 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 
+/**
+ * scan_group_size_set - Callback for setting scan group size parameter
+ * @val: String containing the new scan group size value
+ * @kp: Pointer to kernel_param structure
+ *
+ * When user modifies the parameter via sysfs:
+ * - Validate the new value is within reasonable range
+ * - Validate the new value is a power of 2
+ * - Update the global scan group size value
+ */
+static int scan_group_size_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned long new_size;
+	int ret;
+
+	/* Parse parameter value */
+	ret = kstrtoul(val, 10, &new_size);
+	if (ret)
+		return ret;
+
+	/* Validate parameter range */
+	if (new_size < SCAN_GROUP_SIZE_MIN || new_size > SCAN_GROUP_SIZE_MAX) {
+		pr_err("invalid scan group size: %lu, valid: %lu-%lu\n",
+		       new_size, SCAN_GROUP_SIZE_MIN, SCAN_GROUP_SIZE_MAX);
+		return -EINVAL;
+	}
+
+	/* Validate it's a power of 2 for efficient bitmask operations */
+	if (new_size & (new_size - 1)) {
+		pr_err("scan group size must be power of 2: %lu\n", new_size);
+		return -EINVAL;
+	}
+
+	pr_info("scan group size changed: %lu -> %lu bytes\n",
+		scan_group_size, new_size);
+
+	/* Update scan group size */
+	scan_group_size = new_size;
+
+	return 0;
+}
+
+/* Custom parameter operations structure for scan group size */
+static const struct kernel_param_ops scan_group_size_ops = {
+	.set = scan_group_size_set,
+	.get = param_get_ulong,
+};
+
+/* Scan group size kernel parameter (bytes) */
+unsigned long scan_group_size = SCAN_GROUP_SIZE_DEFAULT;
+module_param_cb(scan_group_size, &scan_group_size_ops, &scan_group_size, 0644);
+MODULE_PARM_DESC(scan_group_size,
+		 "Scan group size in bytes (default: 64KB, range: 4KB-1MB, must be power of 2)");
+
 LIST_HEAD(ham_pid_list);
 LIST_HEAD(statistic_pid_list);
 spinlock_t ham_lock;
@@ -1320,7 +1374,7 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 
 	/* 64KiB分组优化：NORMAL_SCAN类型，首页young则跳过后续页 */
 	if (pte_walk->type == NORMAL_SCAN) {
-		bool is_first = (addr & (SCAN_GROUP_SIZE - 1)) == 0;
+		bool is_first = (addr & (scan_group_size - 1)) == 0;
 		if (is_first)
 			pte_walk->group_hot = is_young;
 		else if (pte_walk->group_hot) {
