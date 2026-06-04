@@ -39,6 +39,7 @@ struct task_struct {
 };
 
 void schedule(void);
+int wake_up_process(struct task_struct *tsk);
 extern char *__get_task_comm(char *to, size_t len, struct task_struct *tsk);
 extern struct task_struct *find_get_task_by_vpid(pid_t nr);
 #define get_task_comm(buf, tsk) ({			\

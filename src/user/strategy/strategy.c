@@ -20,6 +20,63 @@
 #include "grouped_strategy.h"
 #include "strategy.h"
 
+static uint64_t GetRemoteAvailablePages(int remoteNid)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    if (!manager || !IsRemoteNidValid(remoteNid)) {
+        SMAP_LOGGER_ERROR("Invalid manager or remote nid %d.", remoteNid);
+        return 0;
+    }
+
+    struct RemoteNumaInfo *numaInfo = &manager->remoteNumaInfo;
+    int column = remoteNid - GetNrLocalNuma();
+    if (column < 0 || column >= REMOTE_NUMA_NUM) {
+        return 0;
+    }
+
+    EnvMutexLock(&numaInfo->lock);
+    uint64_t size = numaInfo->usedInfo[column].size;
+    uint64_t used = numaInfo->usedInfo[column].used;
+    EnvMutexUnlock(&numaInfo->lock);
+
+    uint64_t available = (size > used) ? (size - used) : 0;
+    SMAP_LOGGER_DEBUG("Remote NUMA %d available pages: %llu (size=%llu, used=%llu).",
+                      remoteNid, available, size, used);
+    return available;
+}
+
+static void LimitMigratePagesByRemoteAvailable(ProcessAttr *process)
+{
+    int nrLocalNuma = GetNrLocalNuma();
+
+    for (int l1Node = 0; l1Node < nrLocalNuma; l1Node++) {
+        if (NotInAttrL1(process, l1Node)) {
+            continue;
+        }
+
+        for (int l2Node = nrLocalNuma; l2Node < nrLocalNuma + REMOTE_NUMA_NUM; l2Node++) {
+            if (NotInAttrL2(process, l2Node)) {
+                continue;
+            }
+
+            uint64_t remoteAvailable = GetRemoteAvailablePages(l2Node);
+            uint32_t *nrMigOut = &process->strategyAttr.nrMigratePages[l1Node][l2Node];
+            uint32_t *nrMigIn = &process->strategyAttr.nrMigratePages[l2Node][l1Node];
+
+            if (*nrMigOut > 0 && *nrMigOut > remoteAvailable) {
+                SMAP_LOGGER_INFO("Pid %d migrate out %u pages from NUMA%d to NUMA%d limited to %llu.",
+                                 process->pid, *nrMigOut, l1Node, l2Node, remoteAvailable);
+                *nrMigOut = (uint32_t)remoteAvailable;
+            }
+
+            if (*nrMigIn > 0) {
+                SMAP_LOGGER_DEBUG("Pid %d migrate in %u pages from NUMA%d to NUMA%d, no need to limit.",
+                                  process->pid, *nrMigIn, l2Node, l1Node);
+            }
+        }
+    }
+}
+
 uint64_t GetNrFreePagesByNode(int nid)
 {
     int ret;
@@ -109,6 +166,9 @@ int RunStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES]
     if (!process || CheckActcDataValid(process)) {
         SMAP_LOGGER_ERROR("Invalid pid %d actc.", process ? process->pid : -1);
         return -EINVAL;
+    }
+    if (GetRunMode() == WATERLINE_MODE && !process->groupPolicy.enabled) {
+        LimitMigratePagesByRemoteAvailable(process);
     }
     if (IsHugeMode()) {
         if (process->groupPolicy.enabled) {
