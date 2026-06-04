@@ -1107,15 +1107,39 @@ static void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[R
                              uint64_t nrPages[NR_LEVEL], uint64_t *demoteNum, uint64_t *promoteNum)
 {
     int nrLocalNuma = GetNrLocalNuma();
+    struct ProcessManager *manager = GetProcessManager();
+    struct RemoteNumaInfo *numaInfo = &manager->remoteNumaInfo;
+    int l1Node = GetAttrL1(process);
+
     if (GetRunMode() == MEM_POOL_MODE) {
+        EnvMutexLock(&numaInfo->lock);
         for (int i = 0; i < process->remoteNumaCnt; i++) {
             int nid = process->migrateParam[i].nid;
             int index = nid - nrLocalNuma;
             uint64_t targetL2Page = KBToHugePage(process->migrateParam[i].memSize);
             if (targetL2Page > process->scanAttr.actcLen[nid]) {
-                remoteMigInfo[index].dir = DEMOTE;
-                remoteMigInfo[index].nrMig = targetL2Page - process->scanAttr.actcLen[nid];
-                *demoteNum += remoteMigInfo[index].nrMig;
+                uint64_t calcMig = targetL2Page - process->scanAttr.actcLen[nid];
+
+                /* Check remote memory limit set by set_remote_numa_info */
+                uint64_t maxSize = numaInfo->privateUsedInfo[l1Node][index].size;
+                uint64_t currentUsed = numaInfo->privateUsedInfo[l1Node][index].used;
+                uint64_t maxAllowed = (maxSize > currentUsed) ? (maxSize - currentUsed) : 0;
+
+                /* Limit migration amount to not exceed available remote memory */
+                remoteMigInfo[index].nrMig = (calcMig > maxAllowed) ? maxAllowed : calcMig;
+                if (remoteMigInfo[index].nrMig > 0) {
+                    remoteMigInfo[index].dir = DEMOTE;
+                    *demoteNum += remoteMigInfo[index].nrMig;
+                    SMAP_LOGGER_INFO("MEM_POOL_MODE: pid %d, l1Node %d, destNid %d, calcMig %llu, "
+                                     "maxSize %llu, used %llu, maxAllowed %llu, actualMig %llu.",
+                                     process->pid, l1Node, nid, calcMig, maxSize, currentUsed,
+                                     maxAllowed, remoteMigInfo[index].nrMig);
+                } else {
+                    remoteMigInfo[index].dir = SWAP;
+                    SMAP_LOGGER_WARNING("MEM_POOL_MODE: pid %d, l1Node %d, destNid %d, remote memory "
+                                        "limit reached (size %llu, used %llu), skip demote.",
+                                        process->pid, l1Node, nid, maxSize, currentUsed);
+                }
             } else if (targetL2Page < process->scanAttr.actcLen[nid]) {
                 remoteMigInfo[index].dir = PROMOTE;
                 remoteMigInfo[index].nrMig = process->scanAttr.actcLen[nid] - targetL2Page;
@@ -1125,17 +1149,37 @@ static void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[R
                 remoteMigInfo[index].dir = SWAP;
             }
         }
+        EnvMutexUnlock(&numaInfo->lock);
     } else {
-        int l1Node = GetAttrL1(process);
+        EnvMutexLock(&numaInfo->lock);
         for (int l2Node = nrLocalNuma; l2Node < nrLocalNuma + REMOTE_NUMA_NUM; l2Node++) {
             if (NotInAttrL2(process, l2Node)) {
                 continue;
             }
             int index = l2Node - nrLocalNuma;
             if (process->strategyAttr.nrMigratePages[l1Node][l2Node] > 0) {
-                remoteMigInfo[index].dir = DEMOTE;
-                remoteMigInfo[index].nrMig = process->strategyAttr.nrMigratePages[l1Node][l2Node];
-                *demoteNum += remoteMigInfo[index].nrMig;
+                uint64_t calcMig = process->strategyAttr.nrMigratePages[l1Node][l2Node];
+
+                /* Check remote memory limit set by set_remote_numa_info for WATERLINE_MODE */
+                uint64_t maxSize = numaInfo->privateUsedInfo[l1Node][index].size;
+                uint64_t currentUsed = numaInfo->privateUsedInfo[l1Node][index].used;
+                uint64_t maxAllowed = (maxSize > currentUsed) ? (maxSize - currentUsed) : 0;
+
+                /* Limit migration amount to not exceed available remote memory */
+                remoteMigInfo[index].nrMig = (calcMig > maxAllowed) ? maxAllowed : calcMig;
+                if (remoteMigInfo[index].nrMig > 0) {
+                    remoteMigInfo[index].dir = DEMOTE;
+                    *demoteNum += remoteMigInfo[index].nrMig;
+                    SMAP_LOGGER_INFO("WATERLINE_MODE: pid %d, l1Node %d, destNid %d, calcMig %llu, "
+                                     "maxSize %llu, used %llu, maxAllowed %llu, actualMig %llu.",
+                                     process->pid, l1Node, l2Node, calcMig, maxSize, currentUsed,
+                                     maxAllowed, remoteMigInfo[index].nrMig);
+                } else {
+                    remoteMigInfo[index].dir = SWAP;
+                    SMAP_LOGGER_WARNING("WATERLINE_MODE: pid %d, l1Node %d, destNid %d, remote memory "
+                                        "limit reached (size %llu, used %llu), skip demote.",
+                                        process->pid, l1Node, l2Node, maxSize, currentUsed);
+                }
             } else if (process->strategyAttr.nrMigratePages[l2Node][l1Node] > 0) {
                 remoteMigInfo[index].dir = PROMOTE;
                 remoteMigInfo[index].nrMig = process->strategyAttr.nrMigratePages[l2Node][l1Node];
@@ -1145,6 +1189,7 @@ static void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[R
                 remoteMigInfo[index].dir = SWAP;
             }
         }
+        EnvMutexUnlock(&numaInfo->lock);
     }
 }
 
