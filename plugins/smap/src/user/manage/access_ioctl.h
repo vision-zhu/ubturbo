@@ -19,7 +19,7 @@
 #include "manage.h"
 
 #define ACCESS_DEVICE "/dev/smap_access_device"
-#define MAX_NR_PID MAX_NR_MIGOUT
+#define MAX_NR_PID MAX_4K_PROCESSES_CNT
 
 struct AccessAddPidPayload {
     pid_t pid;

@@ -237,7 +237,13 @@ TEST_F(AccessIoctlTestKernel, CheckMsgValidityTest)
     msg.count = 0;
     EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 
-    msg.count = 41;
+    // count at max limit (300) is valid
+    msg.count = 300;
+    msg.payload = &payload;
+    EXPECT_EQ(0, check_msg_validity(&msg));
+
+    // count exceeding max limit is invalid
+    msg.count = 301;
     EXPECT_EQ(-EINVAL, check_msg_validity(&msg));
 
     msg.payload = nullptr;

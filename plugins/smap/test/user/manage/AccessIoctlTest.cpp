@@ -49,6 +49,17 @@ TEST_F(AccessIoctlTest, TestAccessIoctlAddPid)
     EXPECT_EQ(-EBADF, ret);
 }
 
+TEST_F(AccessIoctlTest, TestAccessIoctlAddPidExceedMaxNrPid)
+{
+    int ret;
+    struct AccessAddPidPayload payload;
+    // len exceeding MAX_NR_PID should always return -EINVAL
+    ret = AccessIoctlAddPid(MAX_NR_PID + 1, &payload);
+    EXPECT_EQ(-EINVAL, ret);
+    // verify MAX_NR_PID equals MAX_4K_PROCESSES_CNT
+    EXPECT_EQ(MAX_NR_PID, MAX_4K_PROCESSES_CNT);
+}
+
 TEST_F(AccessIoctlTest, TestAccessIoctlRemovePid)
 {
     int ret;
@@ -61,6 +72,15 @@ TEST_F(AccessIoctlTest, TestAccessIoctlRemovePid)
     len = 1;
     ret = AccessIoctlRemovePid(len, &payload);
     EXPECT_EQ(-EBADF, ret);
+}
+
+TEST_F(AccessIoctlTest, TestAccessIoctlRemovePidExceedMaxNrPid)
+{
+    int ret;
+    struct AccessRemovePidPayload payload;
+    // len exceeding MAX_NR_PID should always return -EINVAL
+    ret = AccessIoctlRemovePid(MAX_NR_PID + 1, &payload);
+    EXPECT_EQ(-EINVAL, ret);
 }
 
 TEST_F(AccessIoctlTest, TestAccessIoctlRemoveAllPid)

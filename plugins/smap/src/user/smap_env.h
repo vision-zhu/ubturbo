@@ -52,7 +52,7 @@
 #define PAGESIZE_64K (64 * KIB)
 #define PAGESIZE_2M (2 * MIB)
 
-#define MAX_NR_MIGOUT 40
+#define MAX_NR_MIGOUT 300
 
 #define CAT_SCRIPT_CAT_PATH "sudo /usr/local/bin/cat.sh"
 #define CAT_SCRIPT_TAIL "2>&1"
