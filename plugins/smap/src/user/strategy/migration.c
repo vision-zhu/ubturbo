@@ -562,15 +562,40 @@ static int HandleScene(ThreadCtx *ctx)
     EnvMutexLock(&manager->lock);
     ProcessAttr *current = manager->processes;
     while (current) {
-        // 更新进程的场景
         SceneInfo *info = &current->sceneInfo;
         GetProcessSceneAttr(info->currScene, info, current->type);
-        if (info->currScene != info->lastScene) {
+        if (current->isFirstScan) {
+            if (current->eligibleForRestore) {
+                if (current->walkPage.nrPage == 0) {
+                    // 扫描还没就绪，保持高频扫描，同时确保内存scanTime与高频扫描一致
+                    current->scanTime = DEFAULT_SCAN_PERIOD;
+                    SMAP_LOGGER_INFO("Skip pid %d scan cycle restore, nrPage=0, keeping high-freq scan.", current->pid);
+                } else {
+                    // 已完成高频扫描，恢复为正常扫描周期并下发内核
+                    current->isFirstScan = false;
+                    current->eligibleForRestore = false;
+                    ret = UpdateScanTime(current);
+                    uint32_t targetScanTime = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : current->sceneInfo.cycles.scanCycle;
+                    if (ret) {
+                        SMAP_LOGGER_ERROR("Restore scan time failed for pid %d.", current->pid);
+                    } else {
+                        current->scanTime = targetScanTime;
+                    }
+                    SMAP_LOGGER_INFO("Restore pid %d scan cycle to %ums.", current->pid, targetScanTime);
+                }
+            } else {
+                // 尚未完成高频扫描，仅更新场景信息不下发内核
+                SMAP_LOGGER_INFO("Skip pid %d scene update, keeping high-freq scan.", current->pid);
+            }
+        } else if (info->currScene != info->lastScene) {
             ret = UpdateScanTime(current);
-            SMAP_LOGGER_INFO("Update pid %d scan cycle to %dms.", current->pid, current->sceneInfo.cycles.scanCycle);
+            uint32_t targetScanTime = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : current->sceneInfo.cycles.scanCycle;
             if (ret) {
                 SMAP_LOGGER_ERROR("Update scan time failed for pid %d.", current->pid);
+            } else {
+                current->scanTime = targetScanTime;
             }
+            SMAP_LOGGER_INFO("Update pid %d scan cycle to %dms.", current->pid, targetScanTime);
         }
         scene = current->sceneInfo.currScene;
         if (scene > worstScene) {
@@ -594,49 +619,67 @@ static void UpdateAllProcessScanTime(ThreadCtx *ctx)
 {
     int ret;
     struct ProcessManager *manager = ctx->processManager;
-    ProcessAttr *current;
     EnvMutexLock(&manager->lock);
-    current = manager->processes;
-    while (current) {
-        // 更新虚机的场景
+    for (ProcessAttr *current = manager->processes; current; current = current->next) {
+        if (current->isFirstScan || current->walkPage.nrPage == 0) {
+            // 正在首次高频扫描中或扫描数据未就绪，确保内存scanTime与高频扫描一致
+            current->scanTime = DEFAULT_SCAN_PERIOD;
+            continue;
+        }
         if (current->scanType == NORMAL_SCAN) {
             ret = UpdateScanTime(current);
             if (ret) {
                 SMAP_LOGGER_WARNING("Update pid %d scan cycle failed, ret=%d.", current->pid, ret);
+            } else {
+                current->scanTime = GetScanPeriodConfig();
             }
             SMAP_LOGGER_INFO("Update pid %d scan cycle to %u.", current->pid, GetScanPeriodConfig());
         }
-        current = current->next;
     }
     EnvMutexUnlock(&manager->lock);
 }
 
-static void RestoreNewPidScanTime(ThreadCtx *ctx)
+// 标记在本轮DisableTracking之前已存在的新PID为可恢复，
+// 确保本轮执行过程中新增的PID不会被恢复，从而保证至少经历一个完整的高频扫描周期
+static void MarkEligibleForRestore(struct ProcessManager *manager)
+{
+    EnvMutexLock(&manager->lock);
+    for (ProcessAttr *current = manager->processes; current; current = current->next) {
+        if (current->isFirstScan) {
+            current->eligibleForRestore = true;
+            SMAP_LOGGER_INFO("Mark pid %d eligible for scan cycle restore.", current->pid);
+        }
+    }
+    EnvMutexUnlock(&manager->lock);
+}
+
+// 每周期无条件恢复已标记eligible的新PID扫描周期，
+// 不依赖配置变更触发，确保新PID在完成高频扫描后能及时恢复
+static void RestoreEligibleProcessScanTime(ThreadCtx *ctx)
 {
     int ret;
     struct ProcessManager *manager = ctx->processManager;
-    ProcessAttr *current;
-    uint32_t scanPeriod;
-    struct AccessAddPidPayload payload;
-
     EnvMutexLock(&manager->lock);
-    for (current = manager->processes; current; current = current->next) {
-        if (!current->isFirstScan) {
-            continue;
-        }
-        scanPeriod = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : current->sceneInfo.cycles.scanCycle;
-        payload.pid = current->pid;
-        payload.numaNodes = current->numaAttr.numaNodes;
-        payload.type = current->scanType;
-        payload.duration = current->duration;
-        payload.scanTime = scanPeriod;
-        ret = AccessIoctlAddPid(1, &payload);
-        if (ret) {
-            SMAP_LOGGER_WARNING("Restore pid %d scan cycle failed, ret=%d.", current->pid, ret);
-        } else {
-            current->scanTime = scanPeriod;
-            SMAP_LOGGER_INFO("Restore pid %d scan cycle to %ums.", current->pid, scanPeriod);
+    for (ProcessAttr *current = manager->processes; current; current = current->next) {
+        if (current->isFirstScan && current->eligibleForRestore) {
+            if (current->walkPage.nrPage == 0) {
+                // 扫描还没就绪，保持高频扫描，同时确保内存scanTime与高频扫描一致
+                current->scanTime = DEFAULT_SCAN_PERIOD;
+                SMAP_LOGGER_INFO("Skip pid %d scan cycle restore, nrPage=0, keeping high-freq scan.", current->pid);
+                continue;
+            }
             current->isFirstScan = false;
+            current->eligibleForRestore = false;
+            if (current->scanType == NORMAL_SCAN) {
+                ret = UpdateScanTime(current);
+                uint32_t targetScanTime = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : current->sceneInfo.cycles.scanCycle;
+                if (ret) {
+                    SMAP_LOGGER_WARNING("Restore pid %d scan cycle failed, ret=%d.", current->pid, ret);
+                } else {
+                    current->scanTime = targetScanTime;
+                }
+                SMAP_LOGGER_INFO("Restore pid %d scan cycle to %u.", current->pid, targetScanTime);
+            }
         }
     }
     EnvMutexUnlock(&manager->lock);
@@ -647,6 +690,9 @@ static void UpdatePeriodFromConfig(ThreadCtx *ctx)
     if (!GetFileConfSwitchConfig()) {
         return;
     }
+
+    // 每周期无条件恢复eligible进程的扫描周期
+    RestoreEligibleProcessScanTime(ctx);
 
     if (GetMigratePeriodChanged()) {
         SMAP_LOGGER_INFO("Start update migrate period time from config to %u.", GetMigratePeriodConfig());
@@ -675,6 +721,7 @@ int ScanMigrateWork(ThreadCtx *ctx)
         goto out;
     }
     SMAP_LOGGER_INFO("Tracking disabled.");
+    MarkEligibleForRestore(manager);
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
     ret = PerformMigrationPreparation(manager);
@@ -703,8 +750,6 @@ int ScanMigrateWork(ThreadCtx *ctx)
     }
     ret = PerformMigration(manager);
     SMAP_LOGGER_INFO("Migration result: %d.", ret);
-    // 只在迁移成功时恢复新PID的扫描周期
-    RestoreNewPidScanTime(ctx);
 out:
     // 启动扫描
     EnableTracking(manager);
