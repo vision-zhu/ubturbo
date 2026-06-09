@@ -24,7 +24,7 @@ static void MockLogCallback(int level, const char *str, const char *moduleName)
     if (moduleName) g_lastLogModule = moduleName;
 }
 
-class SmapUserLog : public ::testing::Test {
+class SmapUserLogTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -44,7 +44,7 @@ protected:
     }
 };
 
-TEST_F(SmapUserLog, TestUpstreamSubscribeLogger)
+TEST_F(SmapUserLogTest, TestUpstreamSubscribeLogger)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "test message");
@@ -53,27 +53,27 @@ TEST_F(SmapUserLog, TestUpstreamSubscribeLogger)
     EXPECT_TRUE(g_lastLogModule.find("SMAP") != string::npos);
 }
 
-TEST_F(SmapUserLog, TestUpstreamSubscribeLoggerNull)
+TEST_F(SmapUserLogTest, TestUpstreamSubscribeLoggerNull)
 {
     UpstreamSubscribeLogger(NULL);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "test message");
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLog, TestSmapStartULogNullPath)
+TEST_F(SmapUserLogTest, TestSmapStartULogNullPath)
 {
     int ret = SmapStartULog(NULL);
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(SmapUserLog, TestSmapStartULogValidPath)
+TEST_F(SmapUserLogTest, TestSmapStartULogValidPath)
 {
     int ret = SmapStartULog("/tmp/test_smap_ulog");
     EXPECT_EQ(0, ret);
     SmapLoggerExit();
 }
 
-TEST_F(SmapUserLog, TestSMAP_UlogDebug)
+TEST_F(SmapUserLogTest, TestSMAP_UlogDebug)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_DEBUG, "testFunc", 10, "test.c", "debug message");
@@ -81,7 +81,7 @@ TEST_F(SmapUserLog, TestSMAP_UlogDebug)
     EXPECT_EQ(0, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLog, TestSMAP_UlogWarning)
+TEST_F(SmapUserLogTest, TestSMAP_UlogWarning)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_WARNING, "testFunc", 10, "test.c", "warning message");
@@ -89,7 +89,7 @@ TEST_F(SmapUserLog, TestSMAP_UlogWarning)
     EXPECT_EQ(2, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLog, TestSMAP_UlogError)
+TEST_F(SmapUserLogTest, TestSMAP_UlogError)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_ERROR, "testFunc", 10, "test.c", "error message");
@@ -97,14 +97,14 @@ TEST_F(SmapUserLog, TestSMAP_UlogError)
     EXPECT_EQ(3, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLog, TestSMAP_UlogInvalidLevel)
+TEST_F(SmapUserLogTest, TestSMAP_UlogInvalidLevel)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(999, "testFunc", 10, "test.c", "invalid level message");
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLog, TestSmapLoggerExitWithSubscriber)
+TEST_F(SmapUserLogTest, TestSmapLoggerExitWithSubscriber)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SmapLoggerExit();
@@ -112,7 +112,7 @@ TEST_F(SmapUserLog, TestSmapLoggerExitWithSubscriber)
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLog, TestSMAP_UlogWithFormat)
+TEST_F(SmapUserLogTest, TestSMAP_UlogWithFormat)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "format test %d %s", 42, "string");
@@ -121,7 +121,7 @@ TEST_F(SmapUserLog, TestSMAP_UlogWithFormat)
     EXPECT_TRUE(g_lastLogMsg.find("string") != string::npos);
 }
 
-TEST_F(SmapUserLog, TestUpstreamSubscribeLoggerReplace)
+TEST_F(SmapUserLogTest, TestUpstreamSubscribeLoggerReplace)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "first message");

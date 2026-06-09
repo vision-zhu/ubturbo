@@ -26,7 +26,7 @@ static int fake_sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask)
     return 0;
 }
 
-class Manage : public ::testing::Test {
+class ManageTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -45,7 +45,7 @@ extern "C" struct ProcessManager g_processManager;
 extern "C" uint32_t g_pageSizeHuge;
 extern "C" RunMode g_runMode;
 extern "C" void RemoteNumaInfoInit();
-TEST_F(Manage, TestRemoteNumaInfoInit)
+TEST_F(ManageTest, TestRemoteNumaInfoInit)
 {
     g_processManager.remoteNumaInfo.usedInfo[0].size = 10;
     RemoteNumaInfoInit();
@@ -55,7 +55,7 @@ TEST_F(Manage, TestRemoteNumaInfoInit)
 extern "C" errno_t memset_s(void *dest, size_t destMax, int c, size_t count);
 extern "C" int ProcessManagerInit(uint32_t pageType);
 extern "C" int EnvMutexInit(EnvMutex *mutex);
-TEST_F(Manage, TestProcessManagerInit)
+TEST_F(ManageTest, TestProcessManagerInit)
 {
     uint32_t period;
     int ret = 0;
@@ -69,7 +69,7 @@ TEST_F(Manage, TestProcessManagerInit)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestProcessManagerInitTwo)
+TEST_F(ManageTest, TestProcessManagerInitTwo)
 {
     uint32_t period;
     int ret = 0;
@@ -82,14 +82,14 @@ TEST_F(Manage, TestProcessManagerInitTwo)
     EXPECT_EQ(nullptr, g_processManager.processes);
 }
 
-TEST_F(Manage, TestLoadMangerNrProcessNum)
+TEST_F(ManageTest, TestLoadMangerNrProcessNum)
 {
     g_processManager.nr[PROCESS_TYPE] = 1;
     int ret = LoadMangerNrProcessNum();
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(Manage, TestLoadMangerNrVmNum)
+TEST_F(ManageTest, TestLoadMangerNrVmNum)
 {
     g_processManager.nr[VM_TYPE] = 1;
     int ret = LoadMangerNrVmNum();
@@ -99,7 +99,7 @@ TEST_F(Manage, TestLoadMangerNrVmNum)
 extern "C" int sscanf_s(const char *buffer, const char *format, ...);
 extern "C" int snprintf_s(char *strDest, unsigned long destMax, unsigned long count, const char *format, ...);
 extern "C" int access(const char *__name, int __type);
-TEST_F(Manage, TestPidIsValid)
+TEST_F(ManageTest, TestPidIsValid)
 {
     bool ret;
 
@@ -121,7 +121,7 @@ extern "C" char *fgets(char *__restrict __s, int __n, FILE *__restrict __stream)
 extern "C" int fclose(FILE *__stream);
 extern "C" int strncmp(const char *cs, const char *ct, size_t count);
 extern "C" int IsQemuTask(pid_t pid);
-TEST_F(Manage, TestIsQemuTaskPath)
+TEST_F(ManageTest, TestIsQemuTaskPath)
 {
     int ret;
     MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
@@ -137,7 +137,7 @@ TEST_F(Manage, TestIsQemuTaskPath)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Manage, TestIsQemuTaskFile)
+TEST_F(ManageTest, TestIsQemuTaskFile)
 {
     int ret;
 
@@ -161,7 +161,7 @@ TEST_F(Manage, TestIsQemuTaskFile)
 
 extern "C" void LinkedListRemove(ProcessAttr **remove, ProcessAttr **head);
 extern "C" void FreeProceccesAttr(ProcessAttr *attr);
-TEST_F(Manage, TestLinkedListRemoveInputNull)
+TEST_F(ManageTest, TestLinkedListRemoveInputNull)
 {
     ProcessAttr *remove = nullptr;
     ProcessAttr *head = nullptr;
@@ -196,7 +196,7 @@ TEST_F(Manage, TestLinkedListRemoveInputNull)
     EXPECT_EQ(nullptr, head);
 }
 
-TEST_F(Manage, TestLinkedListRemove)
+TEST_F(ManageTest, TestLinkedListRemove)
 {
     MOCKER(FreeProceccesAttr).stubs().will(ignoreReturnValue());
     ProcessAttr *head = (ProcessAttr *)malloc(sizeof(ProcessAttr));
@@ -233,7 +233,7 @@ TEST_F(Manage, TestLinkedListRemove)
 }
 
 extern "C" int CheckPid(pid_t pid);
-TEST_F(Manage, TestCheckPid)
+TEST_F(ManageTest, TestCheckPid)
 {
     int ret;
     pid_t pid;
@@ -251,7 +251,7 @@ TEST_F(Manage, TestCheckPid)
 }
 
 extern "C" ProcessAttr *GetProcessAttr(pid_t pid);
-TEST_F(Manage, TestGetProcessAttr)
+TEST_F(ManageTest, TestGetProcessAttr)
 {
     ProcessAttr *ret, current;
     g_processManager.processes = &current;
@@ -261,7 +261,7 @@ TEST_F(Manage, TestGetProcessAttr)
 }
 
 extern "C" ProcessAttr *GetProcessAttrLocked(pid_t pid);
-TEST_F(Manage, TestGetProcessAttrLocked)
+TEST_F(ManageTest, TestGetProcessAttrLocked)
 {
     ProcessAttr pid1 = { .pid = 1 };
     ProcessAttr pid2 = { .pid = 2, .next = &pid1 };
@@ -272,7 +272,7 @@ TEST_F(Manage, TestGetProcessAttrLocked)
 }
 
 extern "C" int ParseMmapType(int domainId, MmapType *mmapType);
-TEST_F(Manage, TestParseMmapTypeFailed)
+TEST_F(ManageTest, TestParseMmapTypeFailed)
 {
     int domainId = 0;
     MmapType mmapType;
@@ -284,7 +284,7 @@ TEST_F(Manage, TestParseMmapTypeFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Manage, TestParseMmapTypePrivate)
+TEST_F(ManageTest, TestParseMmapTypePrivate)
 {
     int domainId = 0;
     MmapType mmapType = (MmapType)0;
@@ -302,7 +302,7 @@ TEST_F(Manage, TestParseMmapTypePrivate)
     EXPECT_EQ(0, mmapType);
 }
 
-TEST_F(Manage, TestParseMmapTypeShared)
+TEST_F(ManageTest, TestParseMmapTypeShared)
 {
     int domainId = 0;
     MmapType mmapType;
@@ -321,7 +321,7 @@ TEST_F(Manage, TestParseMmapTypeShared)
 }
 
 extern "C" int VMPreprocess(pid_t pid, ProcessAttr *attr);
-TEST_F(Manage, TestVMProcessNormal)
+TEST_F(ManageTest, TestVMProcessNormal)
 {
     pid_t pid;
     ProcessAttr attr;
@@ -333,7 +333,7 @@ TEST_F(Manage, TestVMProcessNormal)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestVMProcessReadDomainIdFailed)
+TEST_F(ManageTest, TestVMProcessReadDomainIdFailed)
 {
     pid_t pid;
     ProcessAttr attr;
@@ -346,7 +346,7 @@ TEST_F(Manage, TestVMProcessReadDomainIdFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Manage, TestVMProcessParseMmapTypeFailed)
+TEST_F(ManageTest, TestVMProcessParseMmapTypeFailed)
 {
     pid_t pid;
     ProcessAttr attr;
@@ -361,7 +361,7 @@ TEST_F(Manage, TestVMProcessParseMmapTypeFailed)
 }
 
 extern "C" void SetProcessConfig(ProcessAttr *attr, ProcessParam *param);
-TEST_F(Manage, TestSetProcessConfig)
+TEST_F(ManageTest, TestSetProcessConfig)
 {
     g_processManager.nrLocalNuma = 4;
     ProcessAttr attr;
@@ -379,7 +379,7 @@ TEST_F(Manage, TestSetProcessConfig)
 }
 
 extern "C" FILE *OpenNumaMaps(pid_t pid);
-TEST_F(Manage, TestOpenNumaMaps)
+TEST_F(ManageTest, TestOpenNumaMaps)
 {
     int pid = 1;
     MOCKER(fopen).stubs().will(returnValue(reinterpret_cast<FILE *>(0x1234)));
@@ -389,7 +389,7 @@ TEST_F(Manage, TestOpenNumaMaps)
 }
 
 extern "C" int GetPidNumaPagesFromNumaMaps(pid_t pid, uint64_t numaPages[MAX_NODES], bool onlyHuge);
-TEST_F(Manage, TestGetPidNumaPagesFromNumaMapsOpenFailure)
+TEST_F(ManageTest, TestGetPidNumaPagesFromNumaMapsOpenFailure)
 {
     uint64_t numaPages[MAX_NODES] = { 0 };
     MOCKER(OpenNumaMaps).expects(once()).will(returnValue(static_cast<FILE *>(nullptr)));
@@ -398,7 +398,7 @@ TEST_F(Manage, TestGetPidNumaPagesFromNumaMapsOpenFailure)
 }
 
 extern "C" bool IsNumaMapLineHuge(char *line);
-TEST_F(Manage, TestIsNumaMapLineHuge)
+TEST_F(ManageTest, TestIsNumaMapLineHuge)
 {
     char line[] = "abcdesgsasdfskernelpagesize_kB=2048";
     bool ret = IsNumaMapLineHuge(line);
@@ -407,7 +407,7 @@ TEST_F(Manage, TestIsNumaMapLineHuge)
 
 extern "C" void SetLocalByNumaMaps(char *line, uint32_t *nodeBitmap, bool hugeFlag);
 #define BIT(i) (1U << (i))
-TEST_F(Manage, TestSetLocalByNumaMaps)
+TEST_F(ManageTest, TestSetLocalByNumaMaps)
 {
     char line[] = "00100000 N0=1 N2=3 kernelpagesize_kB=2048";
     uint32_t nodeBitmap = 0;
@@ -418,7 +418,7 @@ TEST_F(Manage, TestSetLocalByNumaMaps)
 extern "C" int SetProcessLocalNuma(pid_t pid, uint32_t *nodeBitmap, bool hugeFlag);
 extern "C" int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 extern "C" int GetNodeFromCpu(int cpu);
-TEST_F(Manage, TestSetProcessLocalNuma)
+TEST_F(ManageTest, TestSetProcessLocalNuma)
 {
     int pid = 1;
     uint32_t nodeBitmap = 0;
@@ -434,7 +434,7 @@ TEST_F(Manage, TestSetProcessLocalNuma)
 
 extern "C" int ProcessAddManage(ProcessParam *param, uint32_t *nodeBitmap);
 extern "C" int IsQemuTask(pid_t pid);
-TEST_F(Manage, TestProcessAddManageResetPidConfig)
+TEST_F(ManageTest, TestProcessAddManageResetPidConfig)
 {
     int ret;
     pid_t pid = 123;
@@ -469,7 +469,7 @@ TEST_F(Manage, TestProcessAddManageResetPidConfig)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Manage, TestProcessAddManageNewPid)
+TEST_F(ManageTest, TestProcessAddManageNewPid)
 {
     int ret;
     ProcessParam param = {
@@ -519,7 +519,7 @@ TEST_F(Manage, TestProcessAddManageNewPid)
     EXPECT_EQ(PROC_MOVE, g_processManager.processes->state);
 }
 
-TEST_F(Manage, TestProcessAddManageNewPidFailed)
+TEST_F(ManageTest, TestProcessAddManageNewPidFailed)
 {
     int ret;
     ProcessParam param = {
@@ -553,7 +553,7 @@ static void FillPolicyForManage(GroupMigrationPolicy *policy)
 }
 
 extern "C" int ProcessAddGroupedManage(pid_t pid, uint32_t nodeBitmap, const GroupMigrationPolicy *policy);
-TEST_F(Manage, TestProcessAddGroupedManageNewPid)
+TEST_F(ManageTest, TestProcessAddGroupedManageNewPid)
 {
     GroupMigrationPolicy policy = {};
     FillPolicyForManage(&policy);
@@ -579,7 +579,7 @@ TEST_F(Manage, TestProcessAddGroupedManageNewPid)
     g_processManager.nr[VM_TYPE] = 0;
 }
 
-TEST_F(Manage, TestProcessAddGroupedManageUpdateExistingPid)
+TEST_F(ManageTest, TestProcessAddGroupedManageUpdateExistingPid)
 {
     ProcessAttr current = {};
     GroupMigrationPolicy policy = {};
@@ -603,7 +603,7 @@ TEST_F(Manage, TestProcessAddGroupedManageUpdateExistingPid)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Manage, TestProcessAddGroupedManageRejectsInvalidInputs)
+TEST_F(ManageTest, TestProcessAddGroupedManageRejectsInvalidInputs)
 {
     GroupMigrationPolicy policy = {};
     FillPolicyForManage(&policy);
@@ -625,7 +625,7 @@ TEST_F(Manage, TestProcessAddGroupedManageRejectsInvalidInputs)
 }
 
 extern "C" int ProcessSetPendingGroupedManage(pid_t pid, uint32_t nodeBitmap, const GroupMigrationPolicy *policy);
-TEST_F(Manage, TestProcessSetPendingGroupedManage)
+TEST_F(ManageTest, TestProcessSetPendingGroupedManage)
 {
     ProcessAttr current = {};
     GroupMigrationPolicy policy = {};
@@ -663,7 +663,7 @@ static int FillPendingGroupedNumaPages(pid_t pid, uint64_t numaPages[MAX_NODES],
 }
 
 extern "C" int ApplyPendingGroupedPolicy(ProcessAttr *attr);
-TEST_F(Manage, TestApplyPendingGroupedPolicy)
+TEST_F(ManageTest, TestApplyPendingGroupedPolicy)
 {
     ProcessAttr current = {};
     GroupMigrationPolicy active = {};
@@ -691,7 +691,7 @@ TEST_F(Manage, TestApplyPendingGroupedPolicy)
     EXPECT_EQ((uint8_t)0, current.groupPolicy.groups[0].swapCandidateRounds);
 }
 
-TEST_F(Manage, TestProcessAddGroupedManageRejectsLimitAndPreprocessFailure)
+TEST_F(ManageTest, TestProcessAddGroupedManageRejectsLimitAndPreprocessFailure)
 {
     GroupMigrationPolicy policy = {};
     FillPolicyForManage(&policy);
@@ -716,7 +716,7 @@ TEST_F(Manage, TestProcessAddGroupedManageRejectsLimitAndPreprocessFailure)
 
 extern "C" void CalcActcStats(ProcessAttr *attr);
 extern "C" uint32_t GetRemoteHotThreshold(void);
-TEST_F(Manage, TestCalcActcStats)
+TEST_F(ManageTest, TestCalcActcStats)
 {
     ProcessAttr attr = {};
     ActcData data[3] = {};
@@ -743,7 +743,7 @@ TEST_F(Manage, TestCalcActcStats)
 }
 
 extern "C" int DistributeActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, ActcData *buf);
-TEST_F(Manage, TestDistributeActcData)
+TEST_F(ManageTest, TestDistributeActcData)
 {
     ProcessAttr attr = {};
     struct ProcessMemBitmap pmb = {};
@@ -776,7 +776,7 @@ TEST_F(Manage, TestDistributeActcData)
     attr.scanAttr.actcData[2] = nullptr;
 }
 
-TEST_F(Manage, TestCheckAndRemoveInvalidProcess)
+TEST_F(ManageTest, TestCheckAndRemoveInvalidProcess)
 {
     ProcessAttr attr = { .pid = 1025 };
     EnvMutexInit(&g_processManager.lock);
@@ -790,7 +790,7 @@ TEST_F(Manage, TestCheckAndRemoveInvalidProcess)
     EXPECT_EQ(1, g_processManager.nr[VM_TYPE]);
 }
 
-TEST_F(Manage, TestCheckAndRemoveInvalidProcessTwo)
+TEST_F(ManageTest, TestCheckAndRemoveInvalidProcessTwo)
 {
     EnvMutexInit(&g_processManager.lock);
     g_processManager.processes = nullptr;
@@ -799,7 +799,7 @@ TEST_F(Manage, TestCheckAndRemoveInvalidProcessTwo)
 }
 
 extern "C" void CalRemoteMemUsed(void);
-TEST_F(Manage, TestCalRemoteMemUsed)
+TEST_F(ManageTest, TestCalRemoteMemUsed)
 {
     ProcessAttr attr;
     attr.next = nullptr;
@@ -814,7 +814,7 @@ TEST_F(Manage, TestCalRemoteMemUsed)
 extern "C" void RemoveManagedProcess(int nr, pid_t *pidArr);
 extern "C" struct ProcessManager g_processManager;
 extern "C" PidType GetPidType(struct ProcessManager *manager);
-TEST_F(Manage, TestRemoveManagedProcessInvalidPid)
+TEST_F(ManageTest, TestRemoveManagedProcessInvalidPid)
 {
     pid_t pid = 123;
     ProcessAttr mockProcess;
@@ -830,7 +830,7 @@ TEST_F(Manage, TestRemoveManagedProcessInvalidPid)
     EXPECT_EQ(1, g_processManager.nr[PROCESS_TYPE]);
 }
 
-TEST_F(Manage, TestRemoveManagedProcessValidPid)
+TEST_F(ManageTest, TestRemoveManagedProcessValidPid)
 {
     pid_t pid = 123;
     ProcessAttr mockProcess;
@@ -860,7 +860,7 @@ TEST_F(Manage, TestRemoveManagedProcessValidPid)
 }
 
 extern "C" void RemoveAllManagedProcess(void);
-TEST_F(Manage, TestRemoveAllManagedProcess)
+TEST_F(ManageTest, TestRemoveAllManagedProcess)
 {
     int ret;
 
@@ -888,7 +888,7 @@ TEST_F(Manage, TestRemoveAllManagedProcess)
 }
 
 extern "C" int DestroyProcessManager();
-TEST_F(Manage, TestDestroyProcessManager)
+TEST_F(ManageTest, TestDestroyProcessManager)
 {
     int ret;
     MOCKER(memset_s).stubs().will(ignoreReturnValue());
@@ -897,14 +897,14 @@ TEST_F(Manage, TestDestroyProcessManager)
 }
 
 extern "C" struct ProcessManager *GetProcessManager(void);
-TEST_F(Manage, TestGetProcessManager)
+TEST_F(ManageTest, TestGetProcessManager)
 {
     struct ProcessManager *ret = GetProcessManager();
     EXPECT_EQ(&g_processManager, ret);
 }
 
 extern "C" void ResetActcData(ActcData *actcData[], int len);
-TEST_F(Manage, TestResetActcData)
+TEST_F(ManageTest, TestResetActcData)
 {
     int len = 10;
     ActcData **data = (ActcData **)malloc(sizeof(ActcData *) * len);
@@ -921,7 +921,7 @@ TEST_F(Manage, TestResetActcData)
 
 extern "C" errno_t memcpy_s(void *dest, size_t numberOfElements, const void *src, size_t count);
 
-TEST_F(Manage, TestFreeProceccesAttr)
+TEST_F(ManageTest, TestFreeProceccesAttr)
 {
     ProcessAttr *attr = nullptr;
 
@@ -936,7 +936,7 @@ TEST_F(Manage, TestFreeProceccesAttr)
 }
 
 extern "C" unsigned long ProcessSmapsFile(pid_t pid, const char *targetLinePrefix, size_t prefixLength, size_t divisor);
-TEST_F(Manage, TestProcessSmapsFile)
+TEST_F(ManageTest, TestProcessSmapsFile)
 {
     int pid = 1234;
     char targetLinePrefix[] = "test";
@@ -959,7 +959,7 @@ TEST_F(Manage, TestProcessSmapsFile)
 }
 
 extern "C" unsigned long GetNormalPageCount(pid_t pid);
-TEST_F(Manage, TestGetNormalPageCount)
+TEST_F(ManageTest, TestGetNormalPageCount)
 {
     int pid = 1234;
     unsigned long ret = GetNormalPageCount(pid);
@@ -967,7 +967,7 @@ TEST_F(Manage, TestGetNormalPageCount)
 }
 
 extern "C" unsigned long GetHugePageCount(pid_t pid);
-TEST_F(Manage, TestGetHugePageCount)
+TEST_F(ManageTest, TestGetHugePageCount)
 {
     int pid = 1234;
     unsigned long ret = GetHugePageCount(pid);
@@ -975,7 +975,7 @@ TEST_F(Manage, TestGetHugePageCount)
 }
 
 extern "C" unsigned long GetPidNrPages(pid_t pid);
-TEST_F(Manage, TestGetPidNrPages)
+TEST_F(ManageTest, TestGetPidNrPages)
 {
     int pid = 1234;
     unsigned long ret = GetPidNrPages(pid);
@@ -983,7 +983,7 @@ TEST_F(Manage, TestGetPidNrPages)
 }
 
 extern "C" int GetNodeFromCpu(int cpu);
-TEST_F(Manage, TestGetNodeFromCpu)
+TEST_F(ManageTest, TestGetNodeFromCpu)
 {
     int cpu = 1234;
     int ret = GetNodeFromCpu(cpu);
@@ -997,7 +997,7 @@ TEST_F(Manage, TestGetNodeFromCpu)
 #undef CPU_ISSET
 #endif
 #define CPU_ISSET(x, y) ((x) == 0 ? 1 : 0)
-TEST_F(Manage, TestGetNumaNodesForPid)
+TEST_F(ManageTest, TestGetNumaNodesForPid)
 {
     int pid = 1234;
     int node = 0;
@@ -1010,14 +1010,14 @@ TEST_F(Manage, TestGetNumaNodesForPid)
 }
 
 extern "C" bool IsHugeAligned(uint64_t addr);
-TEST_F(Manage, TestIsHugeAligned)
+TEST_F(ManageTest, TestIsHugeAligned)
 {
     uint64_t addr = 0;
     bool ret = IsHugeAligned(addr);
     EXPECT_EQ(ret, true);
 }
 
-TEST_F(Manage, TestIsHugePageRange)
+TEST_F(ManageTest, TestIsHugePageRange)
 {
     const char *line = "hugepage";
     int ret = IsHugePageRange(line);
@@ -1029,7 +1029,7 @@ extern "C" ssize_t read(int fd, void *buf, size_t count);
 extern "C" int open(const char *pathname, int flags);
 
 extern "C" void SetPidNrPages(ProcessAttr *attr, size_t *nrPages, int len);
-TEST_F(Manage, TestSetPidNrPages)
+TEST_F(ManageTest, TestSetPidNrPages)
 {
     ProcessAttr *attr = (ProcessAttr *)malloc(sizeof(ProcessAttr));
     size_t *nrPages = (size_t *)malloc(sizeof(size_t) * 2);
@@ -1044,7 +1044,7 @@ TEST_F(Manage, TestSetPidNrPages)
 }
 
 extern "C" void ClearRemoteMemUsed();
-TEST_F(Manage, TestClearRemoteMemUsed)
+TEST_F(ManageTest, TestClearRemoteMemUsed)
 {
     g_processManager.remoteNumaInfo.usedInfo[1].used = 10;
     ClearRemoteMemUsed();
@@ -1052,7 +1052,7 @@ TEST_F(Manage, TestClearRemoteMemUsed)
 }
 
 extern "C" uint64_t CalcRemoteBorrowPages(uint64_t size);
-TEST_F(Manage, TestCalcRemoteBorrowPages)
+TEST_F(ManageTest, TestCalcRemoteBorrowPages)
 {
     uint32_t ret;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1065,7 +1065,7 @@ TEST_F(Manage, TestCalcRemoteBorrowPages)
 }
 
 extern "C" void NoAccountAlloc(int remoteNid, ProcessAttr *attr);
-TEST_F(Manage, TestNoAccountAlloc)
+TEST_F(ManageTest, TestNoAccountAlloc)
 {
     ProcessAttr attr;
     attr.walkPage.nrPages[1] = 1;
@@ -1076,7 +1076,7 @@ TEST_F(Manage, TestNoAccountAlloc)
     EXPECT_EQ(1, attr.strategyAttr.allocRemoteNrPages[0][0]);
 }
 
-TEST_F(Manage, TestNoAccountAllocLocalNumaLen2)
+TEST_F(ManageTest, TestNoAccountAllocLocalNumaLen2)
 {
     ProcessAttr attr;
     attr.walkPage.nrPages[2] = 2;
@@ -1089,7 +1089,7 @@ TEST_F(Manage, TestNoAccountAllocLocalNumaLen2)
 }
 
 extern "C" void CalRemotePerLocalWithAccount(int j, ProcessAttr *attr);
-TEST_F(Manage, TestCalRemotePerLocalWithAccount)
+TEST_F(ManageTest, TestCalRemotePerLocalWithAccount)
 {
     uint32_t ret;
     ProcessAttr attr;
@@ -1103,7 +1103,7 @@ TEST_F(Manage, TestCalRemotePerLocalWithAccount)
 }
 
 extern "C" void CalNrPagesLocalTotalPerPid(ProcessAttr *attr);
-TEST_F(Manage, TestCalNrPagesLocalTotalPerPid)
+TEST_F(ManageTest, TestCalNrPagesLocalTotalPerPid)
 {
     ProcessAttr attr = {};
     g_processManager.nrLocalNuma = 4;
@@ -1125,7 +1125,7 @@ TEST_F(Manage, TestCalNrPagesLocalTotalPerPid)
     EXPECT_EQ(8, attr.strategyAttr.nrPagesPerLocalNuma[3]);
 }
 
-TEST_F(Manage, TestCalNrPagesLocalTotalPerPidTwo)
+TEST_F(ManageTest, TestCalNrPagesLocalTotalPerPidTwo)
 {
     ProcessAttr attr = {};
     g_processManager.nrLocalNuma = 4;
@@ -1149,7 +1149,7 @@ TEST_F(Manage, TestCalNrPagesLocalTotalPerPidTwo)
 }
 
 extern "C" void CalNrPagesLocalTotal(void);
-TEST_F(Manage, TestCalNrPagesLocalTotal)
+TEST_F(ManageTest, TestCalNrPagesLocalTotal)
 {
     ProcessAttr attr = {};
     g_processManager.processes = &attr;
@@ -1162,7 +1162,7 @@ TEST_F(Manage, TestCalNrPagesLocalTotal)
 
 extern "C" void CalRemoteNumaAllocPerPid(int i, int j, uint32_t tmpNrPagesToUse,
                                          uint32_t tmpMaxAllocNrPages[LOCAL_NUMA_NUM][REMOTE_NUMA_NUM]);
-TEST_F(Manage, TestCalRemoteNumaAllocPerPid)
+TEST_F(ManageTest, TestCalRemoteNumaAllocPerPid)
 {
     uint32_t tmp[LOCAL_NUMA_NUM][REMOTE_NUMA_NUM] = { 0 };
 
@@ -1183,7 +1183,7 @@ TEST_F(Manage, TestCalRemoteNumaAllocPerPid)
 }
 
 extern "C" void CalRemoteNumaSizeAllocPerNuma(void);
-TEST_F(Manage, TestCalRemoteNumaSizeAllocPerNuma)
+TEST_F(ManageTest, TestCalRemoteNumaSizeAllocPerNuma)
 {
     ProcessAttr attr = {};
     g_processManager.processes = &attr;
@@ -1198,7 +1198,7 @@ TEST_F(Manage, TestCalRemoteNumaSizeAllocPerNuma)
 }
 
 extern "C" void CalcMigrateNrPagesPerPIDMuiltNuma(void);
-TEST_F(Manage, TestCalcMigrateNrPagesPerPIDMuiltNuma)
+TEST_F(ManageTest, TestCalcMigrateNrPagesPerPIDMuiltNuma)
 {
     g_runMode = WATERLINE_MODE;
     ProcessAttr attr = {};
@@ -1214,7 +1214,7 @@ TEST_F(Manage, TestCalcMigrateNrPagesPerPIDMuiltNuma)
     EXPECT_EQ(0, g_processManager.processes->strategyAttr.l2RemoteMemRatio[0][0]);
 }
 
-TEST_F(Manage, TestSetRemoteNumaInfo)
+TEST_F(ManageTest, TestSetRemoteNumaInfo)
 {
     int ret;
     struct RemoteNumaInfo *borrowMem = &g_processManager.remoteNumaInfo;
@@ -1239,7 +1239,7 @@ TEST_F(Manage, TestSetRemoteNumaInfo)
     borrowMem->usedInfo[1].size = 0;
 }
 
-TEST_F(Manage, TestSetRemoteNumaInfoError)
+TEST_F(ManageTest, TestSetRemoteNumaInfoError)
 {
     int ret;
     struct RemoteNumaInfo *borrowMem = &g_processManager.remoteNumaInfo;
@@ -1256,7 +1256,7 @@ TEST_F(Manage, TestSetRemoteNumaInfoError)
     EXPECT_EQ(0, borrowMem->usedInfo[1].size);
 }
 
-TEST_F(Manage, TestSetRemoteNumaInfoShared)
+TEST_F(ManageTest, TestSetRemoteNumaInfoShared)
 {
     int ret;
     struct RemoteNumaInfo *borrowMem = &g_processManager.remoteNumaInfo;
@@ -1286,7 +1286,7 @@ TEST_F(Manage, TestSetRemoteNumaInfoShared)
     borrowMem->usedInfo[1].size = 0;
 }
 
-TEST_F(Manage, TestSetRemoteNumaInfoInvalidDestNid)
+TEST_F(ManageTest, TestSetRemoteNumaInfoInvalidDestNid)
 {
     int ret;
     struct RemoteNumaInfo *borrowMem = &g_processManager.remoteNumaInfo;
@@ -1300,7 +1300,7 @@ TEST_F(Manage, TestSetRemoteNumaInfoInvalidDestNid)
     EXPECT_EQ(0, borrowMem->privateSize[0][2]);
 }
 
-TEST_F(Manage, TestSetRemoteNumaInfoInvalidSrcNid)
+TEST_F(ManageTest, TestSetRemoteNumaInfoInvalidSrcNid)
 {
     int ret;
     struct RemoteNumaInfo *borrowMem = &g_processManager.remoteNumaInfo;
@@ -1313,7 +1313,7 @@ TEST_F(Manage, TestSetRemoteNumaInfoInvalidSrcNid)
 }
 
 extern "C" bool CheckBorrowUsed(int destNid);
-TEST_F(Manage, TestCheckBorrowUsed)
+TEST_F(ManageTest, TestCheckBorrowUsed)
 {
     bool ret;
     g_processManager.nrLocalNuma = 4;
@@ -1324,7 +1324,7 @@ TEST_F(Manage, TestCheckBorrowUsed)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Manage, TestCheckBorrowUsedTwo)
+TEST_F(ManageTest, TestCheckBorrowUsedTwo)
 {
     bool ret;
     g_processManager.nrLocalNuma = 1;
@@ -1337,7 +1337,7 @@ TEST_F(Manage, TestCheckBorrowUsedTwo)
 }
 
 extern "C" bool CheckPrivateBorrowUsed(int destNid);
-TEST_F(Manage, CheckPrivateBorrowUsedWithoutNuma)
+TEST_F(ManageTest, CheckPrivateBorrowUsedWithoutNuma)
 {
     g_processManager.nrLocalNuma = 1;
     g_processManager.remoteNumaInfo = {};
@@ -1346,7 +1346,7 @@ TEST_F(Manage, CheckPrivateBorrowUsedWithoutNuma)
 }
 
 extern "C" bool CheckPrivateBorrowUsed(int destNid);
-TEST_F(Manage, CheckPrivateBorrowUsed)
+TEST_F(ManageTest, CheckPrivateBorrowUsed)
 {
     g_processManager.nrLocalNuma = 1;
     g_processManager.remoteNumaInfo.privateUsedInfo[0][1].ifUsedFreshed = true;
@@ -1355,7 +1355,7 @@ TEST_F(Manage, CheckPrivateBorrowUsed)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Manage, TestCheckReadyMigrateBack)
+TEST_F(ManageTest, TestCheckReadyMigrateBack)
 {
     bool ret;
     ProcessAttr attr = {};
@@ -1377,7 +1377,7 @@ TEST_F(Manage, TestCheckReadyMigrateBack)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Manage, TestCheckReadyMigrateBackTwo)
+TEST_F(ManageTest, TestCheckReadyMigrateBackTwo)
 {
     bool ret;
     g_processManager.processes = nullptr;
@@ -1388,7 +1388,7 @@ TEST_F(Manage, TestCheckReadyMigrateBackTwo)
 
 extern "C" int IsPidArrInState(pid_t *pidArr, int len, enum ProcessState state);
 extern "C" int IsPidArrayStateChangeReady(pid_t *pidArr, int len, int enable);
-TEST_F(Manage, TestIsPidArrInStateInvalid)
+TEST_F(ManageTest, TestIsPidArrInStateInvalid)
 {
     ProcessAttr pid = { .state = PROC_IDLE };
     pid_t pidArr[] = { 1, 2 };
@@ -1400,7 +1400,7 @@ TEST_F(Manage, TestIsPidArrInStateInvalid)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(Manage, TestIsPidArrInStateNormal)
+TEST_F(ManageTest, TestIsPidArrInStateNormal)
 {
     ProcessAttr pid1 = { .state = PROC_MIGRATE };
     ProcessAttr pid2 = { .state = PROC_MOVE };
@@ -1417,7 +1417,7 @@ TEST_F(Manage, TestIsPidArrInStateNormal)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(Manage, TestIsPidArrInState)
+TEST_F(ManageTest, TestIsPidArrInState)
 {
     ProcessAttr pid1 = { .state = PROC_MOVE };
     ProcessAttr pid2 = { .state = PROC_MOVE };
@@ -1435,7 +1435,7 @@ TEST_F(Manage, TestIsPidArrInState)
 }
 
 extern "C" void SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable);
-TEST_F(Manage, TestSetPidArrState)
+TEST_F(ManageTest, TestSetPidArrState)
 {
     ProcessAttr pid1 = { .state = PROC_IDLE };
     ProcessAttr pid2 = { .state = PROC_IDLE };
@@ -1447,7 +1447,7 @@ TEST_F(Manage, TestSetPidArrState)
     EXPECT_EQ(PROC_MOVE, pid2.state);
 }
 
-TEST_F(Manage, TestChangePidRemoteByNuma)
+TEST_F(ManageTest, TestChangePidRemoteByNuma)
 {
     int srcNid = 4;
     int destNid = 6;
@@ -1471,7 +1471,7 @@ TEST_F(Manage, TestChangePidRemoteByNuma)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestChangePidRemoteByNumaTwo)
+TEST_F(ManageTest, TestChangePidRemoteByNumaTwo)
 {
     g_processManager.processes = nullptr;
     int srcNid = 4;
@@ -1480,7 +1480,7 @@ TEST_F(Manage, TestChangePidRemoteByNumaTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestChangePidRemoteByNumaSyncAllProcessConfigFail)
+TEST_F(ManageTest, TestChangePidRemoteByNumaSyncAllProcessConfigFail)
 {
     int srcNid = 4;
     int destNid = 6;
@@ -1499,7 +1499,7 @@ TEST_F(Manage, TestChangePidRemoteByNumaSyncAllProcessConfigFail)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestChangePidRemoteByPid)
+TEST_F(ManageTest, TestChangePidRemoteByPid)
 {
     int srcNid = 4;
     int destNid = 6;
@@ -1531,7 +1531,7 @@ TEST_F(Manage, TestChangePidRemoteByPid)
     free(msg.payloads);
 }
 
-TEST_F(Manage, TestEnableProcessMigrateDisableInvalid)
+TEST_F(ManageTest, TestEnableProcessMigrateDisableInvalid)
 {
     pid_t pidArr[] = { 1 };
 
@@ -1541,7 +1541,7 @@ TEST_F(Manage, TestEnableProcessMigrateDisableInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Manage, TestEnableProcessMigrateDisableRetryFail)
+TEST_F(ManageTest, TestEnableProcessMigrateDisableRetryFail)
 {
     pid_t pidArr[] = { 1 };
 
@@ -1551,7 +1551,7 @@ TEST_F(Manage, TestEnableProcessMigrateDisableRetryFail)
     EXPECT_EQ(-ETIMEDOUT, ret);
 }
 
-TEST_F(Manage, TestEnableProcessMigrateDisableRetrySuccess)
+TEST_F(ManageTest, TestEnableProcessMigrateDisableRetrySuccess)
 {
     pid_t pidArr[] = { 1 };
 
@@ -1563,7 +1563,7 @@ TEST_F(Manage, TestEnableProcessMigrateDisableRetrySuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestEnableProcessMigrateDisableNormal)
+TEST_F(ManageTest, TestEnableProcessMigrateDisableNormal)
 {
     pid_t pidArr[] = { 1 };
 
@@ -1575,7 +1575,7 @@ TEST_F(Manage, TestEnableProcessMigrateDisableNormal)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestEnableProcessMigrateEnableNormal)
+TEST_F(ManageTest, TestEnableProcessMigrateEnableNormal)
 {
     pid_t pidArr[] = { 1 };
 
@@ -1587,7 +1587,7 @@ TEST_F(Manage, TestEnableProcessMigrateEnableNormal)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedInvalid)
+TEST_F(ManageTest, TestIsRemoteNumaMigrateBackAllowedInvalid)
 {
     g_processManager.nrLocalNuma = 4;
     EnvMutexInit(&g_processManager.lock);
@@ -1595,7 +1595,7 @@ TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedFail)
+TEST_F(ManageTest, TestIsRemoteNumaMigrateBackAllowedFail)
 {
     int destNid = 4;
     ProcessAttr pid1 = {};
@@ -1608,7 +1608,7 @@ TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedFail)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedSuccess)
+TEST_F(ManageTest, TestIsRemoteNumaMigrateBackAllowedSuccess)
 {
     int destNid = 4;
     int anotherNid = 5;
@@ -1632,7 +1632,7 @@ TEST_F(Manage, TestIsRemoteNumaMigrateBackAllowedSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedInvalid)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedInvalid)
 {
     g_processManager.nrLocalNuma = 4;
     EnvMutexInit(&g_processManager.lock);
@@ -1640,7 +1640,7 @@ TEST_F(Manage, TestIsRemoteNumaMoveAllowedInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedFail)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedFail)
 {
     int destNid = 4;
     ProcessAttr pid1;
@@ -1654,7 +1654,7 @@ TEST_F(Manage, TestIsRemoteNumaMoveAllowedFail)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccess)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedSuccess)
 {
     int destNid = 4;
     ProcessAttr pid1;
@@ -1673,7 +1673,7 @@ TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccess)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccessTwo)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedSuccessTwo)
 {
     int destNid = 4;
     ProcessAttr pid1;
@@ -1692,7 +1692,7 @@ TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccessTwo)
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccessThree)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedSuccessThree)
 {
     int destNid = 7;
     ProcessAttr pid1;
@@ -1711,7 +1711,7 @@ TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccessThree)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(Manage, TestIsRemoteNumaMoveAllowedSuccessFour)
+TEST_F(ManageTest, TestIsRemoteNumaMoveAllowedSuccessFour)
 {
     int destNid = 4;
     ProcessAttr pid1;
@@ -1734,7 +1734,7 @@ extern "C" bool MigOutIsDone(ProcessAttr *attr, bool *isMultiNumaPid);
 const int NR_PAGES_L1 = 5;
 const int NR_PAGE = 10;
 const pid_t PID = 123;
-TEST_F(Manage, TestMigOutIsDoneSuccess)
+TEST_F(ManageTest, TestMigOutIsDoneSuccess)
 {
     bool ret;
     pid_t pid = PID;
@@ -1782,7 +1782,7 @@ extern "C" void RecallPagesFromRemote(ProcessAttr *attr, int l2Index, uint64_t p
  * Scenario: Process with 3GB memory, first migration set to 2GB
  * Expected: memSize[0][0] should be 2GB (pages based on local NUMA 0)
  */
-TEST_F(Manage, TestSetSingleRemoteNumaConfig_FirstMigration)
+TEST_F(ManageTest, TestSetSingleRemoteNumaConfig_FirstMigration)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1821,7 +1821,7 @@ TEST_F(Manage, TestSetSingleRemoteNumaConfig_FirstMigration)
  * Scenario: Remote already has 2GB, user sets new target to 3GB
  * Expected: memSize should increase by 1GB (using +=)
  */
-TEST_F(Manage, TestSetSingleRemoteNumaConfig_IncreaseMigration)
+TEST_F(ManageTest, TestSetSingleRemoteNumaConfig_IncreaseMigration)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1864,7 +1864,7 @@ TEST_F(Manage, TestSetSingleRemoteNumaConfig_IncreaseMigration)
  * Scenario: Remote already has 2GB, user sets new target to 2GB
  * Expected: memSize should remain unchanged
  */
-TEST_F(Manage, TestSetSingleRemoteNumaConfig_NoChange)
+TEST_F(ManageTest, TestSetSingleRemoteNumaConfig_NoChange)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1905,7 +1905,7 @@ TEST_F(Manage, TestSetSingleRemoteNumaConfig_NoChange)
  * Scenario: Remote already has 2GB, user sets new target to 1GB
  * Expected: memSize should decrease by 1GB (using -=)
  */
-TEST_F(Manage, TestSetSingleRemoteNumaConfig_DecreaseMigration)
+TEST_F(ManageTest, TestSetSingleRemoteNumaConfig_DecreaseMigration)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1948,7 +1948,7 @@ TEST_F(Manage, TestSetSingleRemoteNumaConfig_DecreaseMigration)
  * Scenario: NUMA0 has 2GB, NUMA1 has 1GB on remote, recall 2GB
  * Expected: Recall from NUMA1 first (1GB), then from NUMA0 (1GB), remaining: NUMA0 has 1GB
  */
-TEST_F(Manage, TestRecallPagesFromRemote_MultiLocalNuma)
+TEST_F(ManageTest, TestRecallPagesFromRemote_MultiLocalNuma)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -1988,7 +1988,7 @@ TEST_F(Manage, TestRecallPagesFromRemote_MultiLocalNuma)
  * Scenario: NUMA0 has 3GB, NUMA1 has 2GB, migrate 4GB
  * Expected: Allocate from NUMA0 first (3GB), then NUMA1 (1GB)
  */
-TEST_F(Manage, TestMigratePagesToRemote_MultiLocalNuma)
+TEST_F(ManageTest, TestMigratePagesToRemote_MultiLocalNuma)
 {
     g_processManager.nrLocalNuma = 4;
     g_processManager.tracking.pageSize = PAGESIZE_4K;

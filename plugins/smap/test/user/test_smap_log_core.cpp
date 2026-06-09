@@ -15,7 +15,7 @@
 
 using namespace std;
 
-class SmapLogCore : public ::testing::Test {
+class SmapLogCoreTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -43,7 +43,7 @@ protected:
     string testLogFile;
 };
 
-TEST_F(SmapLogCore, TestInitWithValidConfig)
+TEST_F(SmapLogCoreTest, TestInitWithValidConfig)
 {
     SmapLogConfig config;
     strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
@@ -57,13 +57,13 @@ TEST_F(SmapLogCore, TestInitWithValidConfig)
     SmapLogCoreExit();
 }
 
-TEST_F(SmapLogCore, TestInitWithNullConfig)
+TEST_F(SmapLogCoreTest, TestInitWithNullConfig)
 {
     int ret = SmapLogCoreInit(NULL);
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(SmapLogCore, TestInitWithEmptyPath)
+TEST_F(SmapLogCoreTest, TestInitWithEmptyPath)
 {
     SmapLogConfig config;
     config.filePath[0] = '\0';
@@ -75,7 +75,7 @@ TEST_F(SmapLogCore, TestInitWithEmptyPath)
     EXPECT_EQ(-22, ret);
 }
 extern "C" int GetTimestamp(char *buffer, size_t bufSize);
-TEST_F(SmapLogCore, TestWriteLog)
+TEST_F(SmapLogCoreTest, TestWriteLog)
 {
     SmapLogConfig config;
     strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
@@ -101,7 +101,7 @@ TEST_F(SmapLogCore, TestWriteLog)
     }
 }
 
-TEST_F(SmapLogCore, TestWriteWithNullPrefix)
+TEST_F(SmapLogCoreTest, TestWriteWithNullPrefix)
 {
     SmapLogConfig config;
     strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
@@ -118,14 +118,14 @@ TEST_F(SmapLogCore, TestWriteWithNullPrefix)
     SmapLogCoreExit();
 }
 
-TEST_F(SmapLogCore, TestWriteWithoutInit)
+TEST_F(SmapLogCoreTest, TestWriteWithoutInit)
 {
     SmapLogCoreExit();
     int ret = SmapLogCoreWrite(SMAP_LOG_CORE_INFO, "test_prefix", "test_message");
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(SmapLogCore, TestDoubleInit)
+TEST_F(SmapLogCoreTest, TestDoubleInit)
 {
     SmapLogConfig config;
     strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
@@ -142,7 +142,7 @@ TEST_F(SmapLogCore, TestDoubleInit)
     SmapLogCoreExit();
 }
 
-TEST_F(SmapLogCore, TestGetMinLogLevel)
+TEST_F(SmapLogCoreTest, TestGetMinLogLevel)
 {
     SmapLogConfig config;
     strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);

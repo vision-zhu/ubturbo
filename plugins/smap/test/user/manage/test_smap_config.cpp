@@ -17,7 +17,7 @@
 
 using namespace std;
 
-class SmapConfig : public ::testing::Test {
+class SmapConfigTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -33,7 +33,7 @@ protected:
 };
 
 extern "C" size_t CalcNumaPayloadNum(void);
-TEST_F(SmapConfig, TestCalcNumaPayloadNum)
+TEST_F(SmapConfigTest, TestCalcNumaPayloadNum)
 {
     int ret;
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(2));
@@ -42,7 +42,7 @@ TEST_F(SmapConfig, TestCalcNumaPayloadNum)
 }
 
 extern "C" size_t CalcNumaPayloadLen(void);
-TEST_F(SmapConfig, TestCalcNumaPayloadLen)
+TEST_F(SmapConfigTest, TestCalcNumaPayloadLen)
 {
     int ret;
     int nr = 2;
@@ -52,7 +52,7 @@ TEST_F(SmapConfig, TestCalcNumaPayloadLen)
 }
 
 extern "C" size_t CalcNumaConfigLen(void);
-TEST_F(SmapConfig, TestCalcNumaConfigLen)
+TEST_F(SmapConfigTest, TestCalcNumaConfigLen)
 {
     int ret;
     int len = 10;
@@ -62,7 +62,7 @@ TEST_F(SmapConfig, TestCalcNumaConfigLen)
 }
 
 extern "C" size_t CalcProcessConfigLen(int nrProcess);
-TEST_F(SmapConfig, TestCalcProcessConfigLen)
+TEST_F(SmapConfigTest, TestCalcProcessConfigLen)
 {
     int ret;
     int nrProcess = 4;
@@ -75,7 +75,7 @@ TEST_F(SmapConfig, TestCalcProcessConfigLen)
 }
 
 extern "C" size_t GetProcessConfigLen(struct PayloadHeader *header);
-TEST_F(SmapConfig, TestGetProcessConfigLen)
+TEST_F(SmapConfigTest, TestGetProcessConfigLen)
 {
     int ret;
     struct PayloadHeader header = { .len = 20 };
@@ -85,7 +85,7 @@ TEST_F(SmapConfig, TestGetProcessConfigLen)
 }
 
 extern "C" size_t CalcConfigLen(int nrProcess);
-TEST_F(SmapConfig, TestCalcConfigLen)
+TEST_F(SmapConfigTest, TestCalcConfigLen)
 {
     int ret;
     int nrProcess = 2;
@@ -99,7 +99,7 @@ TEST_F(SmapConfig, TestCalcConfigLen)
 }
 
 extern "C" char *JumpToNumaConfig(char *base);
-TEST_F(SmapConfig, TestJumpToNumaConfig)
+TEST_F(SmapConfigTest, TestJumpToNumaConfig)
 {
     char addr;
     char *ret;
@@ -109,7 +109,7 @@ TEST_F(SmapConfig, TestJumpToNumaConfig)
 }
 
 extern "C" char *JumpToNumaPayload(char *numaBase);
-TEST_F(SmapConfig, TestJumpToNumaPayload)
+TEST_F(SmapConfigTest, TestJumpToNumaPayload)
 {
     char addr;
     char *ret;
@@ -119,7 +119,7 @@ TEST_F(SmapConfig, TestJumpToNumaPayload)
 }
 
 extern "C" char *JumpToProcessConfig(char *base);
-TEST_F(SmapConfig, TestJumpToProcessConfig)
+TEST_F(SmapConfigTest, TestJumpToProcessConfig)
 {
     size_t numaConfigLen = 20;
     char addr;
@@ -134,7 +134,7 @@ TEST_F(SmapConfig, TestJumpToProcessConfig)
 extern "C" int RemoveConfig(void);
 extern "C" int OpenConfig(void);
 extern "C" char *JumpToProcessPayload(char *processBase);
-TEST_F(SmapConfig, TestJumpToProcessPayload)
+TEST_F(SmapConfigTest, TestJumpToProcessPayload)
 {
     char addr;
     char *ret;
@@ -144,7 +144,7 @@ TEST_F(SmapConfig, TestJumpToProcessPayload)
 }
 
 extern "C" bool DoesConfigExist(void);
-TEST_F(SmapConfig, TestDoesConfigExist)
+TEST_F(SmapConfigTest, TestDoesConfigExist)
 {
     bool ret;
 
@@ -159,7 +159,7 @@ TEST_F(SmapConfig, TestDoesConfigExist)
 }
 
 extern "C" int RemoveConfig(void);
-TEST_F(SmapConfig, TestRemoveConfig)
+TEST_F(SmapConfigTest, TestRemoveConfig)
 {
     int ret;
 
@@ -176,7 +176,7 @@ TEST_F(SmapConfig, TestRemoveConfig)
 }
 
 extern "C" int OpenConfig(void);
-TEST_F(SmapConfig, TestOpenConfig)
+TEST_F(SmapConfigTest, TestOpenConfig)
 {
     int ret;
 
@@ -192,7 +192,7 @@ TEST_F(SmapConfig, TestOpenConfig)
 }
 
 extern "C" int RemoveAndOpenConfig(bool remove);
-TEST_F(SmapConfig, TestRemoveAndOpenConfig)
+TEST_F(SmapConfigTest, TestRemoveAndOpenConfig)
 {
     int ret;
 
@@ -202,7 +202,7 @@ TEST_F(SmapConfig, TestRemoveAndOpenConfig)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SmapConfig, TestRemoveAndOpenConfigTwo)
+TEST_F(SmapConfigTest, TestRemoveAndOpenConfigTwo)
 {
     int ret;
 
@@ -218,7 +218,7 @@ TEST_F(SmapConfig, TestRemoveAndOpenConfigTwo)
 }
 
 extern "C" int TruncateConfig(int fd, size_t len);
-TEST_F(SmapConfig, TestTruncateConfig)
+TEST_F(SmapConfigTest, TestTruncateConfig)
 {
     int ret;
     int fd;
@@ -236,7 +236,7 @@ TEST_F(SmapConfig, TestTruncateConfig)
 }
 
 extern "C" char *MapConfig(int fd, size_t len, int prot, int flags);
-TEST_F(SmapConfig, TestMapConfig)
+TEST_F(SmapConfigTest, TestMapConfig)
 {
     char *ret;
     char addr;
@@ -256,7 +256,7 @@ TEST_F(SmapConfig, TestMapConfig)
 }
 
 extern "C" void WriteRunMode(char *addr, RunMode mode);
-TEST_F(SmapConfig, TestWriteRunMode)
+TEST_F(SmapConfigTest, TestWriteRunMode)
 {
     struct SmapConfigHeader header = { .runMode = WATERLINE_MODE };
     RunMode runMode = MEM_POOL_MODE;
@@ -265,7 +265,7 @@ TEST_F(SmapConfig, TestWriteRunMode)
 }
 
 extern "C" void WriteHeader(char *addr, RunMode mode, size_t len);
-TEST_F(SmapConfig, TestWriteHeader)
+TEST_F(SmapConfigTest, TestWriteHeader)
 {
     int ret;
     RunMode runMode = MEM_POOL_MODE;
@@ -284,7 +284,7 @@ TEST_F(SmapConfig, TestWriteHeader)
 
 extern "C" char *JumpToNumaPayload(char *numaBase);
 extern "C" void WriteNumaConfig(char *base);
-TEST_F(SmapConfig, TestWriteNumaConfig)
+TEST_F(SmapConfigTest, TestWriteNumaConfig)
 {
     int ret;
     int nrLocal = 4;
@@ -306,7 +306,7 @@ TEST_F(SmapConfig, TestWriteNumaConfig)
 extern "C" void UnmapConfig(char *addr, size_t len);
 extern "C" void WriteEmptyProcessConfigs(char *base);
 extern "C" int InitSmapConfig(int fd);
-TEST_F(SmapConfig, TestInitSmapConfigErrOne)
+TEST_F(SmapConfigTest, TestInitSmapConfigErrOne)
 {
     int ret;
     int fd;
@@ -318,7 +318,7 @@ TEST_F(SmapConfig, TestInitSmapConfigErrOne)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestInitSmapConfigErrTwo)
+TEST_F(SmapConfigTest, TestInitSmapConfigErrTwo)
 {
     int ret;
     int fd;
@@ -330,7 +330,7 @@ TEST_F(SmapConfig, TestInitSmapConfigErrTwo)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(SmapConfig, TestInitSmapConfig)
+TEST_F(SmapConfigTest, TestInitSmapConfig)
 {
     int ret;
     int fd;
@@ -347,7 +347,7 @@ TEST_F(SmapConfig, TestInitSmapConfig)
 }
 
 extern "C" bool IsConfigHeaderValid(struct SmapConfigHeader *header);
-TEST_F(SmapConfig, TestIsConfigHeaderValid)
+TEST_F(SmapConfigTest, TestIsConfigHeaderValid)
 {
     bool ret;
     size_t numaConfigLen = 20;
@@ -363,7 +363,7 @@ TEST_F(SmapConfig, TestIsConfigHeaderValid)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(SmapConfig, TestIsConfigHeaderInValid)
+TEST_F(SmapConfigTest, TestIsConfigHeaderInValid)
 {
     bool ret;
     struct SmapConfigHeader header = { .ver = 0 };
@@ -372,7 +372,7 @@ TEST_F(SmapConfig, TestIsConfigHeaderInValid)
 }
 
 extern "C" bool IsRunModeValid(RunMode runMode);
-TEST_F(SmapConfig, TestIsConfigHeaderValidTwo)
+TEST_F(SmapConfigTest, TestIsConfigHeaderValidTwo)
 {
     bool ret;
     struct SmapConfigHeader header = { .ver = SMAP_CONFIG_VER };
@@ -388,7 +388,7 @@ TEST_F(SmapConfig, TestIsConfigHeaderValidTwo)
 }
 
 extern "C" void ReadHeader(char *addr, struct SmapConfigHeader *header);
-TEST_F(SmapConfig, TestReadHeader)
+TEST_F(SmapConfigTest, TestReadHeader)
 {
     struct SmapConfigHeader src = {
         .ver = SMAP_CONFIG_VER,
@@ -406,7 +406,7 @@ TEST_F(SmapConfig, TestReadHeader)
 }
 
 extern "C" int ParseHeader(int fd, struct SmapConfigHeader *header);
-TEST_F(SmapConfig, TestParseHeader)
+TEST_F(SmapConfigTest, TestParseHeader)
 {
     int ret;
     int fd;
@@ -427,7 +427,7 @@ TEST_F(SmapConfig, TestParseHeader)
 }
 
 extern "C" bool IsRunModeValid(RunMode runMode);
-TEST_F(SmapConfig, TestIsRunModeValidErr)
+TEST_F(SmapConfigTest, TestIsRunModeValidErr)
 {
     int ret;
     int runMode = -1;
@@ -440,7 +440,7 @@ TEST_F(SmapConfig, TestIsRunModeValidErr)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(SmapConfig, TestIsRunModeValidNormal)
+TEST_F(SmapConfigTest, TestIsRunModeValidNormal)
 {
     int ret;
     int runMode = WATERLINE_MODE;
@@ -454,7 +454,7 @@ TEST_F(SmapConfig, TestIsRunModeValidNormal)
 }
 
 extern "C" void RecoverRunMode(RunMode runMode);
-TEST_F(SmapConfig, TestRecoverRunMode)
+TEST_F(SmapConfigTest, TestRecoverRunMode)
 {
     RunMode runMode = MEM_POOL_MODE;
 
@@ -466,7 +466,7 @@ TEST_F(SmapConfig, TestRecoverRunMode)
 extern "C" size_t CalcNumaPayloadLen(void);
 extern "C" size_t CalcNumaConfigLen(void);
 extern "C" bool IsNumaConfigValid(char *numaBase, size_t totalLen);
-TEST_F(SmapConfig, TestIsNumaConfigValid)
+TEST_F(SmapConfigTest, TestIsNumaConfigValid)
 {
     bool ret;
     size_t totalLen;
@@ -486,7 +486,7 @@ TEST_F(SmapConfig, TestIsNumaConfigValid)
 }
 
 extern "C" int RecoverNumaConfig(char *numaBase);
-TEST_F(SmapConfig, TestRecoverNumaConfig)
+TEST_F(SmapConfigTest, TestRecoverNumaConfig)
 {
     int ret;
     int nrLocal = 2;
@@ -510,7 +510,7 @@ TEST_F(SmapConfig, TestRecoverNumaConfig)
 }
 
 extern "C" void WriteOneNumaConfig(char *numaBase, struct NumaPayload *np);
-TEST_F(SmapConfig, TestWriteOneNumaConfig)
+TEST_F(SmapConfigTest, TestWriteOneNumaConfig)
 {
     int nrLocal = 2;
     int index;
@@ -542,7 +542,7 @@ TEST_F(SmapConfig, TestWriteOneNumaConfig)
 }
 
 extern "C" void AssignProcessAttr(ProcessAttr *attr, struct ProcessPayload *payload);
-TEST_F(SmapConfig, TestAssignProcessAttr)
+TEST_F(SmapConfigTest, TestAssignProcessAttr)
 {
     ProcessAttr attr;
     struct ProcessPayload payload = {
@@ -574,7 +574,7 @@ TEST_F(SmapConfig, TestAssignProcessAttr)
 
 extern "C" size_t CalcNumaConfigLen(void);
 extern "C" bool IsProcessConfigValid(char *processBase, size_t totalLen);
-TEST_F(SmapConfig, TestIsProcessConfigValid)
+TEST_F(SmapConfigTest, TestIsProcessConfigValid)
 {
     bool ret;
     int nrProcess = 2;
@@ -594,7 +594,7 @@ TEST_F(SmapConfig, TestIsProcessConfigValid)
 }
 
 extern "C" bool HasProcessConfig(size_t totalLen);
-TEST_F(SmapConfig, TestHasProcessConfig)
+TEST_F(SmapConfigTest, TestHasProcessConfig)
 {
     bool ret;
     size_t numaConfigLen = 10;
@@ -611,7 +611,7 @@ TEST_F(SmapConfig, TestHasProcessConfig)
 
 extern "C" char *JumpToProcessPayload(char *processBase);
 extern "C" int RecoverProcessConfig(char *processBase);
-TEST_F(SmapConfig, TestRecoverProcessConfig)
+TEST_F(SmapConfigTest, TestRecoverProcessConfig)
 {
     int ret;
     int nrProcess = 2;
@@ -639,7 +639,7 @@ TEST_F(SmapConfig, TestRecoverProcessConfig)
     ASSERT_EQ(nullptr, manager.processes);
 }
 
-TEST_F(SmapConfig, TestRecoverProcessConfigTwo)
+TEST_F(SmapConfigTest, TestRecoverProcessConfigTwo)
 {
     int ret;
     int nrProcess = 1;
@@ -658,7 +658,7 @@ TEST_F(SmapConfig, TestRecoverProcessConfigTwo)
 }
 
 extern "C" int WriteProcessConfig(char *processBase, struct ProcessPayload *p, int nrPayload);
-TEST_F(SmapConfig, TestWriteProcessConfig)
+TEST_F(SmapConfigTest, TestWriteProcessConfig)
 {
     int ret;
     int nrProcess = 2;
@@ -682,7 +682,7 @@ TEST_F(SmapConfig, TestWriteProcessConfig)
 }
 
 extern "C" int BuildAllProcessPayload(struct ProcessPayload **payload, int *len);
-TEST_F(SmapConfig, TestBuildAllProcessPayload)
+TEST_F(SmapConfigTest, TestBuildAllProcessPayload)
 {
     int ret;
     int nrProcess = 2;
@@ -737,7 +737,7 @@ TEST_F(SmapConfig, TestBuildAllProcessPayload)
     free(payload);
 }
 
-TEST_F(SmapConfig, TestBuildAllProcessPayloadTwo)
+TEST_F(SmapConfigTest, TestBuildAllProcessPayloadTwo)
 {
     int ret;
     int len;
@@ -792,7 +792,7 @@ TEST_F(SmapConfig, TestBuildAllProcessPayloadTwo)
 }
 
 extern "C" int MapAndWriteProcessConfig(int fd, size_t mapLen, struct ProcessPayload *payload, int nrPayload);
-TEST_F(SmapConfig, TestMapAndWriteProcessConfig)
+TEST_F(SmapConfigTest, TestMapAndWriteProcessConfig)
 {
     int ret;
     int fd;
@@ -823,7 +823,7 @@ TEST_F(SmapConfig, TestMapAndWriteProcessConfig)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SmapConfig, TestMapAndWriteProcessConfigZeroPayload)
+TEST_F(SmapConfigTest, TestMapAndWriteProcessConfigZeroPayload)
 {
     int ret;
     int fd;
@@ -843,7 +843,7 @@ TEST_F(SmapConfig, TestMapAndWriteProcessConfigZeroPayload)
 }
 
 extern "C" int ChangeProcessConfig(int fd);
-TEST_F(SmapConfig, TestChangeProcessConfigExtendFile)
+TEST_F(SmapConfigTest, TestChangeProcessConfigExtendFile)
 {
     int ret;
     int fd;
@@ -860,7 +860,7 @@ TEST_F(SmapConfig, TestChangeProcessConfigExtendFile)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestChangeProcessConfigShrinkFile)
+TEST_F(SmapConfigTest, TestChangeProcessConfigShrinkFile)
 {
     int ret;
     int fd;
@@ -877,7 +877,7 @@ TEST_F(SmapConfig, TestChangeProcessConfigShrinkFile)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SmapConfig, TestChangeProcessConfig)
+TEST_F(SmapConfigTest, TestChangeProcessConfig)
 {
     int fd;
     MOCKER(ParseHeader).stubs().will(returnValue(-EBADF));
@@ -893,7 +893,7 @@ TEST_F(SmapConfig, TestChangeProcessConfig)
 
 extern "C" char *JumpToNumaConfig(char *base);
 extern "C" int ParseConfig(int fd, struct SmapConfigHeader *header);
-TEST_F(SmapConfig, TestParseConfigOne)
+TEST_F(SmapConfigTest, TestParseConfigOne)
 {
     int ret;
     int fd;
@@ -918,7 +918,7 @@ TEST_F(SmapConfig, TestParseConfigOne)
 }
 
 extern "C" char *JumpToProcessConfig(char *base);
-TEST_F(SmapConfig, TestParseConfigTwo)
+TEST_F(SmapConfigTest, TestParseConfigTwo)
 {
     int ret;
     int fd;
@@ -956,7 +956,7 @@ TEST_F(SmapConfig, TestParseConfigTwo)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(SmapConfig, TestParseConfigThree)
+TEST_F(SmapConfigTest, TestParseConfigThree)
 {
     int ret;
     int fd;
@@ -979,7 +979,7 @@ TEST_F(SmapConfig, TestParseConfigThree)
 }
 
 extern "C" int ReadConfig(int fd);
-TEST_F(SmapConfig, TestReadConfig)
+TEST_F(SmapConfigTest, TestReadConfig)
 {
     int ret;
     int fd;
@@ -997,7 +997,7 @@ TEST_F(SmapConfig, TestReadConfig)
 }
 
 extern "C" int ChangeRunMode(int fd, RunMode runMode);
-TEST_F(SmapConfig, TestChangeRunMode)
+TEST_F(SmapConfigTest, TestChangeRunMode)
 {
     int ret;
     int fd;
@@ -1017,7 +1017,7 @@ TEST_F(SmapConfig, TestChangeRunMode)
 }
 
 extern "C" int ChangeOneNumaConfig(int fd, struct NumaPayload *payload);
-TEST_F(SmapConfig, TestChangeOneNumaConfig)
+TEST_F(SmapConfigTest, TestChangeOneNumaConfig)
 {
     int ret;
     int fd;
@@ -1029,7 +1029,7 @@ TEST_F(SmapConfig, TestChangeOneNumaConfig)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestChangeOneNumaConfigTwo)
+TEST_F(SmapConfigTest, TestChangeOneNumaConfigTwo)
 {
     int ret;
     int fd;
@@ -1053,7 +1053,7 @@ TEST_F(SmapConfig, TestChangeOneNumaConfigTwo)
     free(numaBase);
 }
 
-TEST_F(SmapConfig, TestChangeOneNumaConfigThree)
+TEST_F(SmapConfigTest, TestChangeOneNumaConfigThree)
 {
     int ret;
     int fd;
@@ -1075,7 +1075,7 @@ TEST_F(SmapConfig, TestChangeOneNumaConfigThree)
 
 extern "C" bool DoesConfigExist(void);
 extern "C" int RemoveAndOpenConfig(bool remove);
-TEST_F(SmapConfig, TestRecoverFromConfig)
+TEST_F(SmapConfigTest, TestRecoverFromConfig)
 {
     int ret;
     int fd = 1;
@@ -1097,7 +1097,7 @@ TEST_F(SmapConfig, TestRecoverFromConfig)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SmapConfig, TestRecoverFromConfigTwo)
+TEST_F(SmapConfigTest, TestRecoverFromConfigTwo)
 {
     int ret;
     int fd = 1;
@@ -1115,7 +1115,7 @@ TEST_F(SmapConfig, TestRecoverFromConfigTwo)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncRunModeInvalidRunMode)
+TEST_F(SmapConfigTest, TestSyncRunModeInvalidRunMode)
 {
     int ret;
     int fd = 1;
@@ -1129,7 +1129,7 @@ TEST_F(SmapConfig, TestSyncRunModeInvalidRunMode)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(SmapConfig, TestSyncRunMode)
+TEST_F(SmapConfigTest, TestSyncRunMode)
 {
     int ret;
     int fd = 1;
@@ -1144,7 +1144,7 @@ TEST_F(SmapConfig, TestSyncRunMode)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncRunModeTwo)
+TEST_F(SmapConfigTest, TestSyncRunModeTwo)
 {
     int ret;
     RunMode runMode = MEM_POOL_MODE;
@@ -1155,7 +1155,7 @@ TEST_F(SmapConfig, TestSyncRunModeTwo)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncRunModeThree)
+TEST_F(SmapConfigTest, TestSyncRunModeThree)
 {
     int ret;
     int fd = 1;
@@ -1169,7 +1169,7 @@ TEST_F(SmapConfig, TestSyncRunModeThree)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfigInvalidLocal)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfigInvalidLocal)
 {
     int ret;
     int nrLocal = 2;
@@ -1182,7 +1182,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfigInvalidLocal)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfigInvalidRemote)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfigInvalidRemote)
 {
     int ret;
     int nrLocal = 2;
@@ -1199,7 +1199,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfigInvalidRemote)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfig)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfig)
 {
     int ret;
     int fd = 1;
@@ -1218,7 +1218,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfig)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfigTwo)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfigTwo)
 {
     int ret;
     int nrLocal = 2;
@@ -1233,7 +1233,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfigTwo)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfigSuccess)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfigSuccess)
 {
     int ret;
     int fd = 1;
@@ -1251,7 +1251,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfigSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SmapConfig, TestSyncOneNumaConfigThree)
+TEST_F(SmapConfigTest, TestSyncOneNumaConfigThree)
 {
     int ret;
     int nrLocal = 2;
@@ -1268,7 +1268,7 @@ TEST_F(SmapConfig, TestSyncOneNumaConfigThree)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncAllProcessConfig)
+TEST_F(SmapConfigTest, TestSyncAllProcessConfig)
 {
     int ret;
     int fd = 1;
@@ -1282,7 +1282,7 @@ TEST_F(SmapConfig, TestSyncAllProcessConfig)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(SmapConfig, TestSyncAllProcessConfigTwo)
+TEST_F(SmapConfigTest, TestSyncAllProcessConfigTwo)
 {
     int ret;
     int fd = 1;

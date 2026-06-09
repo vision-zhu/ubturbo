@@ -13,7 +13,7 @@
 using namespace std;
 
 
-class Thread : public ::testing::Test {
+class ThreadTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -37,7 +37,7 @@ int TmpWorkFunc(ThreadCtx *priv)
     return 0;
 }
 
-TEST_F(Thread, TestThreadMainStoped)
+TEST_F(ThreadTest, TestThreadMainStoped)
 {
     ThreadCtx *ctx = (ThreadCtx *)malloc(sizeof(*ctx));
     ctx->workFunc = IdleWork;
@@ -48,7 +48,7 @@ TEST_F(Thread, TestThreadMainStoped)
     EXPECT_EQ(nullptr, ret);
 }
 
-TEST_F(Thread, TestInitThread)
+TEST_F(ThreadTest, TestInitThread)
 {
     struct ProcessManager pm = {
         .nrThread = 0
@@ -65,7 +65,7 @@ TEST_F(Thread, TestInitThread)
     free(pm.threadCtx[0]);
 }
 
-TEST_F(Thread, TestDestroyAllThread)
+TEST_F(ThreadTest, TestDestroyAllThread)
 {
     int ret;
     struct ProcessManager pm = { .nrThread = 2 };

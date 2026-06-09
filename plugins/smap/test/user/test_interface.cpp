@@ -25,7 +25,7 @@ using namespace std;
 extern "C" EnvAtomic g_status;
 extern "C" struct ProcessManager g_processManager;
 
-class Interface : public ::testing::Test {
+class InterfaceTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -42,7 +42,7 @@ protected:
     bool EnvMutexIsRelease(EnvMutex *mutex);
 };
 
-bool Interface::EnvMutexIsRelease(EnvMutex *mutex)
+bool InterfaceTest::EnvMutexIsRelease(EnvMutex *mutex)
 {
     if (pthread_mutex_trylock(&mutex->lock)) {
         return false;
@@ -52,7 +52,7 @@ bool Interface::EnvMutexIsRelease(EnvMutex *mutex)
 }
 
 extern "C" bool IsRatioValid(int ratio);
-TEST_F(Interface, TestIsRatioValidOne)
+TEST_F(InterfaceTest, TestIsRatioValidOne)
 {
     int ratio = 25;
     bool ret = IsRatioValid(ratio);
@@ -61,7 +61,7 @@ TEST_F(Interface, TestIsRatioValidOne)
 
 extern "C" bool IsMigOutCountValid(pid_t *pidArr, int len, int pidType);
 extern "C" ProcessAttr *GetProcessAttrLocked(pid_t pid);
-TEST_F(Interface, TestIsMigOutCountValid)
+TEST_F(InterfaceTest, TestIsMigOutCountValid)
 {
     int maxNum = MAX_4K_PROCESSES_CNT;
     ProcessManager manager;
@@ -86,7 +86,7 @@ TEST_F(Interface, TestIsMigOutCountValid)
 }
 
 extern "C" bool IsCountValid(int count, int max);
-TEST_F(Interface, TestIsCountValid)
+TEST_F(InterfaceTest, TestIsCountValid)
 {
     int count = 0;
     bool ret = IsCountValid(count, 0);
@@ -97,7 +97,7 @@ TEST_F(Interface, TestIsCountValid)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsCountValidTwo)
+TEST_F(InterfaceTest, TestIsCountValidTwo)
 {
     int ret;
     int count = MAX_NR_MIGOUT;
@@ -108,7 +108,7 @@ TEST_F(Interface, TestIsCountValidTwo)
 
 extern "C" int CheckPidtype(uint32_t pageType);
 extern "C" int snprintf_s(char *strDest, unsigned long destMax, unsigned long count, char const *format, ...);
-TEST_F(Interface, TestCheckPidtypeOne)
+TEST_F(InterfaceTest, TestCheckPidtypeOne)
 {
     int ret;
     uint32_t pageType;
@@ -126,7 +126,7 @@ TEST_F(Interface, TestCheckPidtypeOne)
 }
 
 extern "C" int open(const char *pathname, int flags);
-TEST_F(Interface, TestCheckPidtypeTwo)
+TEST_F(InterfaceTest, TestCheckPidtypeTwo)
 {
     int ret;
     uint32_t pageType;
@@ -138,7 +138,7 @@ TEST_F(Interface, TestCheckPidtypeTwo)
     EXPECT_EQ(-ENODEV, ret);
 }
 
-TEST_F(Interface, TestCheckPidtypeThree)
+TEST_F(InterfaceTest, TestCheckPidtypeThree)
 {
     int ret;
     uint32_t pageType;
@@ -152,7 +152,7 @@ TEST_F(Interface, TestCheckPidtypeThree)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestCheckPidtypeFour)
+TEST_F(InterfaceTest, TestCheckPidtypeFour)
 {
     int ret;
     uint32_t pageType;
@@ -167,7 +167,7 @@ TEST_F(Interface, TestCheckPidtypeFour)
 }
 
 extern "C" bool IsPidTypeValid(int pidType);
-TEST_F(Interface, TestIsPidTypeValid)
+TEST_F(InterfaceTest, TestIsPidTypeValid)
 {
     bool ret;
     int pidType = PAGETYPE_NORMAL;
@@ -180,7 +180,7 @@ TEST_F(Interface, TestIsPidTypeValid)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, TestIsPidTypeInValidOne)
+TEST_F(InterfaceTest, TestIsPidTypeInValidOne)
 {
     bool ret;
     int pidType = PAGETYPE_NORMAL;
@@ -192,7 +192,7 @@ TEST_F(Interface, TestIsPidTypeInValidOne)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsPidTypeInValidTwo)
+TEST_F(InterfaceTest, TestIsPidTypeInValidTwo)
 {
     bool ret;
     int pidType = PAGETYPE_NORMAL;
@@ -203,7 +203,7 @@ TEST_F(Interface, TestIsPidTypeInValidTwo)
 }
 
 extern "C" bool IsLocalNidValid(int nid);
-TEST_F(Interface, TestIsLocalNidValid)
+TEST_F(InterfaceTest, TestIsLocalNidValid)
 {
     bool ret;
     struct ProcessManager manager;
@@ -222,14 +222,14 @@ extern "C" void EnvMutexUnlock(EnvMutex *mutex);
 extern "C" int ScanMigrateWork(ThreadCtx *ctx);
 extern "C" int InitAllThreads(struct ProcessManager *manager);
 extern "C" int InitThread(struct ProcessManager *manager, uint32_t period, WorkFunc workFunc);
-TEST_F(Interface, TestIsRatioValidTwo)
+TEST_F(InterfaceTest, TestIsRatioValidTwo)
 {
     int ratio = 101;
     bool ret = IsRatioValid(ratio);
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsRatioValidThree)
+TEST_F(InterfaceTest, TestIsRatioValidThree)
 {
     int ratio = -1;
     int ret = IsRatioValid(ratio);
@@ -237,7 +237,7 @@ TEST_F(Interface, TestIsRatioValidThree)
 }
 
 extern "C" int InitVirAPI(void);
-TEST_F(Interface, TestInitVirAPI)
+TEST_F(InterfaceTest, TestInitVirAPI)
 {
     int ret;
     MOCKER(OpenVirHandler).stubs().will(returnValue(-1));
@@ -251,7 +251,7 @@ TEST_F(Interface, TestInitVirAPI)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestInitAllThreads)
+TEST_F(InterfaceTest, TestInitAllThreads)
 {
     int ret;
     struct ProcessManager pm;
@@ -266,7 +266,7 @@ TEST_F(Interface, TestInitAllThreads)
 
 extern "C" bool GetFileConfSwitchConfig(void);
 extern "C" uint32_t GetMigratePeriodConfig(void);
-TEST_F(Interface, TestInitAllThreadsHugeMode)
+TEST_F(InterfaceTest, TestInitAllThreadsHugeMode)
 {
     int ret;
     struct ProcessManager pm;
@@ -279,7 +279,7 @@ TEST_F(Interface, TestInitAllThreadsHugeMode)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestInitAllThreadsProcessMode)
+TEST_F(InterfaceTest, TestInitAllThreadsProcessMode)
 {
     int ret;
     struct ProcessManager pm;
@@ -295,7 +295,7 @@ TEST_F(Interface, TestInitAllThreadsProcessMode)
 extern "C" bool IsNidInNumastat(int nid);
 extern "C" bool IsRemoteNidValid(int nid);
 extern "C" bool IsOnlineRemoteNidValid(int nid);
-TEST_F(Interface, IsRemoteNidValid)
+TEST_F(InterfaceTest, IsRemoteNidValid)
 {
     int nid = -1;
     struct ProcessManager pm = { .nrLocalNuma = 2 };
@@ -304,7 +304,7 @@ TEST_F(Interface, IsRemoteNidValid)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsRemoteNidValidOne)
+TEST_F(InterfaceTest, IsRemoteNidValidOne)
 {
     int nid = 3;
     struct ProcessManager pm = {
@@ -315,7 +315,7 @@ TEST_F(Interface, IsRemoteNidValidOne)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, IsRemoteNidValidTwo)
+TEST_F(InterfaceTest, IsRemoteNidValidTwo)
 {
     int nid = 4;
     struct ProcessManager pm = {
@@ -326,7 +326,7 @@ TEST_F(Interface, IsRemoteNidValidTwo)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, IsRemoteNidValidThree)
+TEST_F(InterfaceTest, IsRemoteNidValidThree)
 {
     int nid = 11;
     MOCKER(GetProcessManager).stubs().will(returnValue(static_cast<ProcessManager *>(nullptr)));
@@ -334,7 +334,7 @@ TEST_F(Interface, IsRemoteNidValidThree)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsNidInNumastat)
+TEST_F(InterfaceTest, IsNidInNumastat)
 {
     bool ret;
     int nid = 0;
@@ -343,7 +343,7 @@ TEST_F(Interface, IsNidInNumastat)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsNidInNumastatOne)
+TEST_F(InterfaceTest, IsNidInNumastatOne)
 {
     bool ret;
     int nid = -1;
@@ -351,7 +351,7 @@ TEST_F(Interface, IsNidInNumastatOne)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsNidInNumastatTrue)
+TEST_F(InterfaceTest, IsNidInNumastatTrue)
 {
     bool ret;
     FILE fp;
@@ -378,7 +378,7 @@ TEST_F(Interface, IsNidInNumastatTrue)
 extern "C" bool IsMigParaValid(struct MigrateOutPayload *payload);
 extern "C" bool IsPidRemoteNidValid(int *nidArray, int nidCnt, pid_t pid, uint32_t *nodeBitmap, int pidType);
 extern "C" bool IsDestNidVaild(int nid, pid_t pid);
-TEST_F(Interface, IsMigParaValid)
+TEST_F(InterfaceTest, IsMigParaValid)
 {
     struct MigrateOutPayload payload = {
         .pid = 123,
@@ -396,7 +396,7 @@ TEST_F(Interface, IsMigParaValid)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, IsMigParaValidGreaterThanMigrateMode)
+TEST_F(InterfaceTest, IsMigParaValidGreaterThanMigrateMode)
 {
     struct MigrateOutPayload payload = {
         .pid = 123,
@@ -414,7 +414,7 @@ TEST_F(Interface, IsMigParaValidGreaterThanMigrateMode)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsMigParaValidPassNullPtr)
+TEST_F(InterfaceTest, IsMigParaValidPassNullPtr)
 {
     bool ret;
     struct MigrateOutPayload *payload = nullptr;
@@ -424,7 +424,7 @@ TEST_F(Interface, IsMigParaValidPassNullPtr)
     free(payload);
 }
 
-TEST_F(Interface, IsMigParaValidLessThanMigrateMode)
+TEST_F(InterfaceTest, IsMigParaValidLessThanMigrateMode)
 {
     bool ret;
     struct MigrateOutPayload payload = {
@@ -442,7 +442,7 @@ TEST_F(Interface, IsMigParaValidLessThanMigrateMode)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsMigParaValidWaterlineModeAndMigMemsizeMode)
+TEST_F(InterfaceTest, IsMigParaValidWaterlineModeAndMigMemsizeMode)
 {
     bool ret;
     struct MigrateOutPayload payload = {
@@ -461,7 +461,7 @@ TEST_F(Interface, IsMigParaValidWaterlineModeAndMigMemsizeMode)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, IsMigParaValidMemPoolModeAndMigRatioMode)
+TEST_F(InterfaceTest, IsMigParaValidMemPoolModeAndMigRatioMode)
 {
     bool ret;
     struct MigrateOutPayload payload = {
@@ -480,7 +480,7 @@ TEST_F(Interface, IsMigParaValidMemPoolModeAndMigRatioMode)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsMigParaValidMigRatioModeWithInvalidRatio)
+TEST_F(InterfaceTest, IsMigParaValidMigRatioModeWithInvalidRatio)
 {
     bool ret;
     struct MigrateOutPayload payload = {
@@ -499,7 +499,7 @@ TEST_F(Interface, IsMigParaValidMigRatioModeWithInvalidRatio)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, IsMigParaValidInvalidMemSize)
+TEST_F(InterfaceTest, IsMigParaValidInvalidMemSize)
 {
     bool ret;
     struct MigrateOutPayload payload = {
@@ -519,7 +519,7 @@ TEST_F(Interface, IsMigParaValidInvalidMemSize)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsDestNidVaild)
+TEST_F(InterfaceTest, TestIsDestNidVaild)
 {
     ProcessAttr attr = {};
     attr.pid = 1;
@@ -541,7 +541,7 @@ TEST_F(Interface, TestIsDestNidVaild)
 extern uint32_t g_pageSizeNormal;
 extern uint32_t g_pageSizeHuge;
 extern "C" int CheckMigrateOutMsg(struct MigrateOutMsg *msg, int pidType, int *pidCount);
-TEST_F(Interface, TestCheckMigrateOutMsgInvalidPidTypeAndMsgCount)
+TEST_F(InterfaceTest, TestCheckMigrateOutMsgInvalidPidTypeAndMsgCount)
 {
     struct MigrateOutMsg msg;
     int pidType = PAGETYPE_NORMAL;
@@ -566,7 +566,7 @@ TEST_F(Interface, TestCheckMigrateOutMsgInvalidPidTypeAndMsgCount)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckMigrateOutMsgMigOutCount)
+TEST_F(InterfaceTest, TestCheckMigrateOutMsgMigOutCount)
 {
     struct MigrateOutMsg msg = { .count = 1 };
     msg.payload[0].pid = 1234;
@@ -589,7 +589,7 @@ TEST_F(Interface, TestCheckMigrateOutMsgMigOutCount)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestCheckMigrateOutMsgInvalidDestNid)
+TEST_F(InterfaceTest, TestCheckMigrateOutMsgInvalidDestNid)
 {
     struct MigrateOutMsg msg = { .count = 1 };
     int pidType = PAGETYPE_HUGE;
@@ -615,7 +615,7 @@ TEST_F(Interface, TestCheckMigrateOutMsgInvalidDestNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckMigrateOutMsgInvalidMigrateMode)
+TEST_F(InterfaceTest, TestCheckMigrateOutMsgInvalidMigrateMode)
 {
     struct MigrateOutMsg msg = { .count = 1 };
     msg.payload[0].pid = 1234;
@@ -643,7 +643,7 @@ TEST_F(Interface, TestCheckMigrateOutMsgInvalidMigrateMode)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckMigrateOutMsgCheckMigrateMode)
+TEST_F(InterfaceTest, TestCheckMigrateOutMsgCheckMigrateMode)
 {
     struct MigrateOutMsg msg = { .count = 1 };
     int pidType = PAGETYPE_HUGE;
@@ -697,7 +697,7 @@ extern "C" int AddProcessNumaBitMap(struct MigrateOutMsg *msg, uint32_t *nodeBit
 extern "C" int AddProcessesToGlobalManager(struct MigrateOutMsg *msg, int pidType, uint32_t *nodeBitmap,
                                            bool *hasInvalidPid);
 extern "C" int ProcessAddTrackingManage(struct MigrateOutMsg *msg, int pidType);
-TEST_F(Interface, TestSmapMigrateOut)
+TEST_F(InterfaceTest, TestSmapMigrateOut)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -715,7 +715,7 @@ TEST_F(Interface, TestSmapMigrateOut)
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
 }
 
-TEST_F(Interface, TestSmapMigrateOutTwo)
+TEST_F(InterfaceTest, TestSmapMigrateOutTwo)
 {
     int ret;
 
@@ -726,7 +726,7 @@ TEST_F(Interface, TestSmapMigrateOutTwo)
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
 }
 
-TEST_F(Interface, TestSmapMigrateOutThree)
+TEST_F(InterfaceTest, TestSmapMigrateOutThree)
 {
     int ret;
     struct MigrateOutMsg msgc;
@@ -739,7 +739,7 @@ TEST_F(Interface, TestSmapMigrateOutThree)
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
 }
 
-TEST_F(Interface, TestSmapMigrateOutFour)
+TEST_F(InterfaceTest, TestSmapMigrateOutFour)
 {
     int ret;
     struct MigrateOutMsg msgc;
@@ -758,7 +758,7 @@ TEST_F(Interface, TestSmapMigrateOutFour)
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
 }
 
-TEST_F(Interface, TestSmapMigrateOutFive)
+TEST_F(InterfaceTest, TestSmapMigrateOutFive)
 {
     int ret;
     struct MigrateOutMsg msgc;
@@ -776,7 +776,7 @@ TEST_F(Interface, TestSmapMigrateOutFive)
 
 extern "C" int BuildGroupPolicy(const struct GroupedMigrateOutPayload *payload, const uint64_t numaPages[MAX_NODES],
                                 GroupMigrationPolicy *policy);
-TEST_F(Interface, TestBuildGroupPolicyInitSharedTargetUsedPages)
+TEST_F(InterfaceTest, TestBuildGroupPolicyInitSharedTargetUsedPages)
 {
     struct GroupedMigrateOutPayload payload = {};
     GroupMigrationPolicy policy = {};
@@ -806,7 +806,7 @@ TEST_F(Interface, TestBuildGroupPolicyInitSharedTargetUsedPages)
     EXPECT_EQ((uint64_t)2, policy.groups[1].targets[0].usedPages);
 }
 
-TEST_F(Interface, TestBuildGroupPolicyRejectUnmanagedRemotePages)
+TEST_F(InterfaceTest, TestBuildGroupPolicyRejectUnmanagedRemotePages)
 {
     struct GroupedMigrateOutPayload payload = {};
     GroupMigrationPolicy policy = {};
@@ -828,7 +828,7 @@ TEST_F(Interface, TestBuildGroupPolicyRejectUnmanagedRemotePages)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestBuildGroupPolicyRejectRemotePagesExceedQuota)
+TEST_F(InterfaceTest, TestBuildGroupPolicyRejectRemotePagesExceedQuota)
 {
     struct GroupedMigrateOutPayload payload = {};
     GroupMigrationPolicy policy = {};
@@ -852,7 +852,7 @@ TEST_F(Interface, TestBuildGroupPolicyRejectRemotePagesExceedQuota)
 
 extern "C" int CheckGroupedTarget(const struct MigrationGroup *group, int payloadIdx, int groupIdx);
 extern "C" bool IsRemoteNidValid(int nid);
-TEST_F(Interface, TestCheckGroupedTargetRejectForbiddenTarget)
+TEST_F(InterfaceTest, TestCheckGroupedTargetRejectForbiddenTarget)
 {
     struct MigrationGroup group = {};
 
@@ -867,7 +867,7 @@ TEST_F(Interface, TestCheckGroupedTargetRejectForbiddenTarget)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestCheckGroupedTargetInvalidCases)
+TEST_F(InterfaceTest, TestCheckGroupedTargetInvalidCases)
 {
     struct MigrationGroup group = {};
 
@@ -904,7 +904,7 @@ TEST_F(Interface, TestCheckGroupedTargetInvalidCases)
 
 extern "C" int CheckGroupedPayload(struct GroupedMigrateOutPayload *payload, int payloadIdx);
 static void FillGroupedPayload(struct GroupedMigrateOutPayload *payload, pid_t pid, int localNid, int targetNid);
-TEST_F(Interface, TestCheckGroupedPayloadAcceptsHigherLocalNid)
+TEST_F(InterfaceTest, TestCheckGroupedPayloadAcceptsHigherLocalNid)
 {
     struct GroupedMigrateOutPayload payload = {};
     int oldNrLocalNuma = g_processManager.nrLocalNuma;
@@ -926,7 +926,7 @@ TEST_F(Interface, TestCheckGroupedPayloadAcceptsHigherLocalNid)
     g_processManager.nrLocalNuma = oldNrLocalNuma;
 }
 
-TEST_F(Interface, TestCheckGroupedPayloadInvalidLocalCases)
+TEST_F(InterfaceTest, TestCheckGroupedPayloadInvalidLocalCases)
 {
     struct GroupedMigrateOutPayload payload = {};
 
@@ -956,7 +956,7 @@ TEST_F(Interface, TestCheckGroupedPayloadInvalidLocalCases)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckGroupedPayloadAllowsMigratePendingUpdate)
+TEST_F(InterfaceTest, TestCheckGroupedPayloadAllowsMigratePendingUpdate)
 {
     struct GroupedMigrateOutPayload payload = {};
     ProcessAttr current = {};
@@ -1005,7 +1005,7 @@ static void FillGroupedPayload(struct GroupedMigrateOutPayload *payload, pid_t p
     payload->groups[0].targets[0].size = 4096;
 }
 
-TEST_F(Interface, TestCheckGroupedMigrateOutMsgValidAndDuplicatePid)
+TEST_F(InterfaceTest, TestCheckGroupedMigrateOutMsgValidAndDuplicatePid)
 {
     struct GroupedMigrateOutMsg msg = {};
 
@@ -1030,7 +1030,7 @@ TEST_F(Interface, TestCheckGroupedMigrateOutMsgValidAndDuplicatePid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckGroupedMigrateOutMsgRejectsInvalidInputs)
+TEST_F(InterfaceTest, TestCheckGroupedMigrateOutMsgRejectsInvalidInputs)
 {
     struct GroupedMigrateOutMsg msg = {};
 
@@ -1050,7 +1050,7 @@ TEST_F(Interface, TestCheckGroupedMigrateOutMsgRejectsInvalidInputs)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestBuildGroupedPoliciesForInvalidPidSkipsNumaMaps)
+TEST_F(InterfaceTest, TestBuildGroupedPoliciesForInvalidPidSkipsNumaMaps)
 {
     struct GroupedMigrateOutMsg msg = {};
     GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT] = {};
@@ -1083,7 +1083,7 @@ static int CheckGroupedAccessAddPidPayload(int len, struct AccessAddPidPayload *
     return 0;
 }
 
-TEST_F(Interface, TestProcessAddGroupedTrackingManageBuildsPayload)
+TEST_F(InterfaceTest, TestProcessAddGroupedTrackingManageBuildsPayload)
 {
     struct GroupedMigrateOutMsg msg = {};
     uint32_t nodeBitmap[MAX_NR_GROUPED_MIGOUT] = { 0x11, 0x22 };
@@ -1098,7 +1098,7 @@ TEST_F(Interface, TestProcessAddGroupedTrackingManageBuildsPayload)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestGroupedMigrateOutRollsBackTrackingWhenManageFailed)
+TEST_F(InterfaceTest, TestGroupedMigrateOutRollsBackTrackingWhenManageFailed)
 {
     struct GroupedMigrateOutMsg msg = {};
 
@@ -1118,7 +1118,7 @@ TEST_F(Interface, TestGroupedMigrateOutRollsBackTrackingWhenManageFailed)
     EnvAtomicSet(&g_status, 0);
 }
 
-TEST_F(Interface, TestGroupedManageFailureKeepsExistingPidTracking)
+TEST_F(InterfaceTest, TestGroupedManageFailureKeepsExistingPidTracking)
 {
     struct GroupedMigrateOutMsg msg = {};
     uint32_t nodeBitmap[MAX_NR_GROUPED_MIGOUT] = { 0 };
@@ -1138,7 +1138,7 @@ TEST_F(Interface, TestGroupedManageFailureKeepsExistingPidTracking)
     EXPECT_FALSE(keepTracking[1]);
 }
 
-TEST_F(Interface, TestGroupedManageFailureKeepsPendingPidTracking)
+TEST_F(InterfaceTest, TestGroupedManageFailureKeepsPendingPidTracking)
 {
     struct GroupedMigrateOutMsg msg = {};
     uint32_t nodeBitmap[MAX_NR_GROUPED_MIGOUT] = { 0 };
@@ -1166,7 +1166,7 @@ static int CheckGroupedRollbackRemovePayload(int len, struct AccessRemovePidPayl
     return 0;
 }
 
-TEST_F(Interface, TestGroupedTrackingRollbackSkipsKeptPid)
+TEST_F(InterfaceTest, TestGroupedTrackingRollbackSkipsKeptPid)
 {
     struct GroupedMigrateOutMsg msg = {};
     bool keepTracking[MAX_NR_GROUPED_MIGOUT] = { 0 };
@@ -1181,7 +1181,7 @@ TEST_F(Interface, TestGroupedTrackingRollbackSkipsKeptPid)
     RollbackGroupedTrackingManage(&msg, keepTracking);
 }
 
-TEST_F(Interface, TestSmapMigrateBackWithSmapIsNotRunning)
+TEST_F(InterfaceTest, TestSmapMigrateBackWithSmapIsNotRunning)
 {
     int ret;
     EnvAtomicSet(&g_status, 0);
@@ -1189,7 +1189,7 @@ TEST_F(Interface, TestSmapMigrateBackWithSmapIsNotRunning)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateBackWithoutMessage)
+TEST_F(InterfaceTest, TestSmapMigrateBackWithoutMessage)
 {
     int ret;
     EnvAtomicSet(&g_status, 1);
@@ -1198,7 +1198,7 @@ TEST_F(Interface, TestSmapMigrateBackWithoutMessage)
 }
 
 extern "C" int CheckMigrateBackMsg(struct MigrateBackMsg *msg);
-TEST_F(Interface, TestSmapMigrateBackWithMessageCheckFailed)
+TEST_F(InterfaceTest, TestSmapMigrateBackWithMessageCheckFailed)
 {
     int ret;
     struct MigrateBackMsg msg = {};
@@ -1210,7 +1210,7 @@ TEST_F(Interface, TestSmapMigrateBackWithMessageCheckFailed)
 extern "C" bool CheckProcessIdle(int nid);
 extern "C" bool IsAllL2NodePidInState(ProcessState state, int l2Node);
 extern "C" int CheckMigrateBackReadyMsg(struct MigrateBackMsg *msg);
-TEST_F(Interface, TestCheckProcessIdle)
+TEST_F(InterfaceTest, TestCheckProcessIdle)
 {
     MOCKER(IsAllL2NodePidInState).stubs().will(returnValue(true));
     bool ret = CheckProcessIdle(1234);
@@ -1218,7 +1218,7 @@ TEST_F(Interface, TestCheckProcessIdle)
 }
 
 extern "C" int CheckMigrateBackMsg(struct MigrateBackMsg *msg);
-TEST_F(Interface, TestCheckMigrateBackMsg)
+TEST_F(InterfaceTest, TestCheckMigrateBackMsg)
 {
     MigrateBackMsg msg = {};
     msg.count = -1;
@@ -1226,7 +1226,7 @@ TEST_F(Interface, TestCheckMigrateBackMsg)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateBackWithProcessIdleCheckFailed)
+TEST_F(InterfaceTest, TestSmapMigrateBackWithProcessIdleCheckFailed)
 {
     int ret;
     struct MigrateBackMsg msg = {};
@@ -1243,7 +1243,7 @@ TEST_F(Interface, TestSmapMigrateBackWithProcessIdleCheckFailed)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestSmapMigrateBackSuccess)
+TEST_F(InterfaceTest, TestSmapMigrateBackSuccess)
 {
     int ret;
     struct MigrateBackMsg msgc = { .taskID = 1, .count = 1, .payload = { { 4, 5, 1 } } };
@@ -1261,7 +1261,7 @@ TEST_F(Interface, TestSmapMigrateBackSuccess)
     EnvAtomicSet(&g_status, 0);
 }
 
-TEST_F(Interface, TestSmapMigrateBackReadyFailedClearBusyOnly)
+TEST_F(InterfaceTest, TestSmapMigrateBackReadyFailedClearBusyOnly)
 {
     struct MigrateBackMsg msg = { .taskID = 1, .count = 1, .payload = { { 4, 5, 1 } } };
 
@@ -1276,7 +1276,7 @@ TEST_F(Interface, TestSmapMigrateBackReadyFailedClearBusyOnly)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestSmapMigrateBackIoctlFailedClearBusyOnly)
+TEST_F(InterfaceTest, TestSmapMigrateBackIoctlFailedClearBusyOnly)
 {
     struct MigrateBackMsg msg = { .taskID = 1, .count = 1, .payload = { { 4, 5, 1 } } };
 
@@ -1293,7 +1293,7 @@ TEST_F(Interface, TestSmapMigrateBackIoctlFailedClearBusyOnly)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestSmapMigrateBackRejectBusyNode)
+TEST_F(InterfaceTest, TestSmapMigrateBackRejectBusyNode)
 {
     struct MigrateBackMsg msg = { .taskID = 1, .count = 1, .payload = { { 4, 5, 1 } } };
 
@@ -1309,7 +1309,7 @@ TEST_F(Interface, TestSmapMigrateBackRejectBusyNode)
 }
 
 extern "C" int CheckSmapRemoveMsg(struct RemoveMsg *msg, int pidType);
-TEST_F(Interface, TestCheckSmapRemoveMsgWithIsCountValidFailed)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgWithIsCountValidFailed)
 {
     int ret;
     struct RemoveMsg msg;
@@ -1319,7 +1319,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgWithIsCountValidFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgWithIsPidTypeValidFailed)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgWithIsPidTypeValidFailed)
 {
     int ret;
     struct RemoveMsg msg;
@@ -1330,7 +1330,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgWithIsPidTypeValidFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgIgnoresNidFields)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgIgnoresNidFields)
 {
     struct RemoveMsg msg = {};
     msg.count = 1;
@@ -1346,7 +1346,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgIgnoresNidFields)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgAcceptsPartialRemoteRemove)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgAcceptsPartialRemoteRemove)
 {
     struct RemoveMsg msg = {};
     struct ProcessManager manager = {};
@@ -1366,7 +1366,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgAcceptsPartialRemoteRemove)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgRejectsInvalidPartialRemoteNid)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgRejectsInvalidPartialRemoteNid)
 {
     struct RemoveMsg msg = {};
     struct ProcessManager manager = {};
@@ -1385,7 +1385,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgRejectsInvalidPartialRemoteNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgRejectsDuplicatePartialRemoteNid)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgRejectsDuplicatePartialRemoteNid)
 {
     struct RemoveMsg msg = {};
     struct ProcessManager manager = {};
@@ -1405,7 +1405,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgRejectsDuplicatePartialRemoteNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckSmapRemoveMsgRejectsDuplicatePid)
+TEST_F(InterfaceTest, TestCheckSmapRemoveMsgRejectsDuplicatePid)
 {
     struct RemoveMsg msg = {};
     msg.count = 2;
@@ -1421,7 +1421,7 @@ TEST_F(Interface, TestCheckSmapRemoveMsgRejectsDuplicatePid)
 }
 
 extern "C" int CheckSmapRemoveGroupedPidLocked(struct RemoveMsg *msg);
-TEST_F(Interface, TestCheckSmapRemoveGroupedPidLockedRejectsPartialRemove)
+TEST_F(InterfaceTest, TestCheckSmapRemoveGroupedPidLockedRejectsPartialRemove)
 {
     struct RemoveMsg msg = {};
     ProcessAttr attr = {};
@@ -1441,14 +1441,14 @@ TEST_F(Interface, TestCheckSmapRemoveGroupedPidLockedRejectsPartialRemove)
     g_processManager.processes = oldProcesses;
 }
 
-TEST_F(Interface, TestSmapRemoveWithSmapIsNotRunning)
+TEST_F(InterfaceTest, TestSmapRemoveWithSmapIsNotRunning)
 {
     EnvAtomicSet(&g_status, 0);
     int ret = ubturbo_smap_remove(nullptr, 0);
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapRemoveWithoutMessage)
+TEST_F(InterfaceTest, TestSmapRemoveWithoutMessage)
 {
     EnvAtomicSet(&g_status, 1);
     int ret = ubturbo_smap_remove(nullptr, 0);
@@ -1456,7 +1456,7 @@ TEST_F(Interface, TestSmapRemoveWithoutMessage)
 }
 
 extern "C" int CheckSmapRemoveMsg(struct RemoveMsg *msg, int pidType);
-TEST_F(Interface, TestSmapRemoveWithoutMessageCheckFailed)
+TEST_F(InterfaceTest, TestSmapRemoveWithoutMessageCheckFailed)
 {
     struct RemoveMsg msg = {};
     MOCKER(CheckSmapRemoveMsg).stubs().will(returnValue(-EINVAL));
@@ -1466,7 +1466,7 @@ TEST_F(Interface, TestSmapRemoveWithoutMessageCheckFailed)
 }
 
 extern "C" int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
-TEST_F(Interface, TestSmapRemoveWithoutAccessIoctlRemoveFailed)
+TEST_F(InterfaceTest, TestSmapRemoveWithoutAccessIoctlRemoveFailed)
 {
     struct RemoveMsg msg = {};
     msg.count = 1;
@@ -1478,7 +1478,7 @@ TEST_F(Interface, TestSmapRemoveWithoutAccessIoctlRemoveFailed)
     EXPECT_EQ(-ENOMEM, ret);
 }
 
-TEST_F(Interface, TestSmapRemove)
+TEST_F(InterfaceTest, TestSmapRemove)
 {
     int ret;
     struct RemoveMsg msg = {};
@@ -1493,7 +1493,7 @@ TEST_F(Interface, TestSmapRemove)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithoutSmapIsRunning)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithoutSmapIsRunning)
 {
     int ret;
     struct EnableNodeMsg msg;
@@ -1502,7 +1502,7 @@ TEST_F(Interface, TestSmapEnableNodeWithoutSmapIsRunning)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithoutMessage)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithoutMessage)
 {
     int ret;
     struct EnableNodeMsg msg;
@@ -1511,7 +1511,7 @@ TEST_F(Interface, TestSmapEnableNodeWithoutMessage)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithInvalidNid)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithInvalidNid)
 {
     int ret;
     struct EnableNodeMsg msg = {};
@@ -1521,7 +1521,7 @@ TEST_F(Interface, TestSmapEnableNodeWithInvalidNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithEnable)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithEnable)
 {
     int ret;
     struct EnableNodeMsg msg = {};
@@ -1534,7 +1534,7 @@ TEST_F(Interface, TestSmapEnableNodeWithEnable)
     EXPECT_EQ(g_forbiddenNodes[4].counter, 0);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithDisable)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithDisable)
 {
     int ret;
     struct EnableNodeMsg msg = {};
@@ -1547,7 +1547,7 @@ TEST_F(Interface, TestSmapEnableNodeWithDisable)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestSmapEnableNodeRejectMigrateBackBusy)
+TEST_F(InterfaceTest, TestSmapEnableNodeRejectMigrateBackBusy)
 {
     int ret;
     struct EnableNodeMsg msg = {};
@@ -1562,7 +1562,7 @@ TEST_F(Interface, TestSmapEnableNodeRejectMigrateBackBusy)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
-TEST_F(Interface, TestSmapEnableNodeWithInvalidEnable)
+TEST_F(InterfaceTest, TestSmapEnableNodeWithInvalidEnable)
 {
     int ret;
     struct EnableNodeMsg msg = {};
@@ -1579,7 +1579,7 @@ void FakeLog(int level, const char *str, const char *moduleName)
 }
 
 extern "C" int InitLog(Logfunc extlog);
-TEST_F(Interface, TestInitLog)
+TEST_F(InterfaceTest, TestInitLog)
 {
     int ret;
     Logfunc extlog = FakeLog;
@@ -1589,7 +1589,7 @@ TEST_F(Interface, TestInitLog)
 }
 
 extern "C" void RecoverRemoveInvalidProcess(void);
-TEST_F(Interface, TestRecoverRemoveInvalidProcess)
+TEST_F(InterfaceTest, TestRecoverRemoveInvalidProcess)
 {
     int ret;
     struct ProcessManager manager = { .nr = { 0, 2 } };
@@ -1627,7 +1627,7 @@ TEST_F(Interface, TestRecoverRemoveInvalidProcess)
 }
 
 extern "C" void RecoverAllMMapType(void);
-TEST_F(Interface, TestRecoverAllMMapType)
+TEST_F(InterfaceTest, TestRecoverAllMMapType)
 {
     ProcessManager manager = {};
     ProcessAttr attr = {};
@@ -1643,7 +1643,7 @@ TEST_F(Interface, TestRecoverAllMMapType)
 extern "C" int Recover(void);
 extern "C" void RecoverRemoveInvalidProcess(void);
 extern "C" int SyncProcessToKernel(void);
-TEST_F(Interface, TestRecover)
+TEST_F(InterfaceTest, TestRecover)
 {
     int ret;
 
@@ -1659,14 +1659,14 @@ TEST_F(Interface, TestRecover)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithSmapIsNotRunning)
+TEST_F(InterfaceTest, TestSmapInitWithSmapIsNotRunning)
 {
     EnvAtomicSet(&g_status, RUNNING);
     int ret = ubturbo_smap_start(PAGETYPE_NORMAL, nullptr);
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithInitLogFailed)
+TEST_F(InterfaceTest, TestSmapInitWithInitLogFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(-EINVAL));
@@ -1675,7 +1675,7 @@ TEST_F(Interface, TestSmapInitWithInitLogFailed)
 }
 
 extern "C" int CheckPidtype(uint32_t pageType);
-TEST_F(Interface, TestSmapInitWithCheckPidTypeFailed)
+TEST_F(InterfaceTest, TestSmapInitWithCheckPidTypeFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1684,7 +1684,7 @@ TEST_F(Interface, TestSmapInitWithCheckPidTypeFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithProcessManagerInitFailed)
+TEST_F(InterfaceTest, TestSmapInitWithProcessManagerInitFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1694,7 +1694,7 @@ TEST_F(Interface, TestSmapInitWithProcessManagerInitFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithInitTrackingDevFailed)
+TEST_F(InterfaceTest, TestSmapInitWithInitTrackingDevFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1708,7 +1708,7 @@ TEST_F(Interface, TestSmapInitWithInitTrackingDevFailed)
 }
 
 extern "C" int CreateProcfs(void);
-TEST_F(Interface, TestSmapInitWithAccessIoctlRemoveAllPidFailed)
+TEST_F(InterfaceTest, TestSmapInitWithAccessIoctlRemoveAllPidFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1723,7 +1723,7 @@ TEST_F(Interface, TestSmapInitWithAccessIoctlRemoveAllPidFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithInitVirAPIFailed)
+TEST_F(InterfaceTest, TestSmapInitWithInitVirAPIFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1740,7 +1740,7 @@ TEST_F(Interface, TestSmapInitWithInitVirAPIFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithRecoverFailed)
+TEST_F(InterfaceTest, TestSmapInitWithRecoverFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1757,7 +1757,7 @@ TEST_F(Interface, TestSmapInitWithRecoverFailed)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(Interface, TestSmapInitWithInitAllThreadsFailed)
+TEST_F(InterfaceTest, TestSmapInitWithInitAllThreadsFailed)
 {
     EnvAtomicSet(&g_status, 0);
     MOCKER(InitLog).stubs().will(returnValue(0));
@@ -1775,7 +1775,7 @@ TEST_F(Interface, TestSmapInitWithInitAllThreadsFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapInit)
+TEST_F(InterfaceTest, TestSmapInit)
 {
     int ret;
 
@@ -1797,7 +1797,7 @@ TEST_F(Interface, TestSmapInit)
 }
 
 extern "C" int EnvAtomicCmpAndSwap(int oldValue, int newValue, EnvAtomic *a);
-TEST_F(Interface, TestSmapStop)
+TEST_F(InterfaceTest, TestSmapStop)
 {
     int ret;
     EnvAtomicSet(&g_status, 1);
@@ -1812,7 +1812,7 @@ TEST_F(Interface, TestSmapStop)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapStopOne)
+TEST_F(InterfaceTest, TestSmapStopOne)
 {
     int ret;
     EnvAtomicSet(&g_status, 1);
@@ -1827,7 +1827,7 @@ TEST_F(Interface, TestSmapStopOne)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestIoctlHandlerOne)
+TEST_F(InterfaceTest, TestIoctlHandlerOne)
 {
     int ret;
     const void *msg;
@@ -1839,7 +1839,7 @@ TEST_F(Interface, TestIoctlHandlerOne)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(Interface, TestIoctlHandlerTwo)
+TEST_F(InterfaceTest, TestIoctlHandlerTwo)
 {
     int ret;
     const void *msg;
@@ -1852,7 +1852,7 @@ TEST_F(Interface, TestIoctlHandlerTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestIoctlHandlerThree)
+TEST_F(InterfaceTest, TestIoctlHandlerThree)
 {
     int ret;
     const void *msg;
@@ -1866,7 +1866,7 @@ TEST_F(Interface, TestIoctlHandlerThree)
 }
 
 extern "C" void ubturbo_smap_urgent_migrate_out(uint64_t size);
-TEST_F(Interface, TestSmapUrgentMigrateOut)
+TEST_F(InterfaceTest, TestSmapUrgentMigrateOut)
 {
     int ret;
     uint64_t size = 1;
@@ -1878,7 +1878,7 @@ TEST_F(Interface, TestSmapUrgentMigrateOut)
     EnvAtomicSet(&g_status, 1);
 }
 
-TEST_F(Interface, TestNullptrError)
+TEST_F(InterfaceTest, TestNullptrError)
 {
     int ret;
     EnvAtomicSet(&g_status, 1);
@@ -1900,7 +1900,7 @@ TEST_F(Interface, TestNullptrError)
 }
 
 extern "C" int SyncProcessToKernel(void);
-TEST_F(Interface, TestSyncProcessToKernel)
+TEST_F(InterfaceTest, TestSyncProcessToKernel)
 {
     ProcessAttr attr = {};
     attr.pid = 123;
@@ -1918,7 +1918,7 @@ TEST_F(Interface, TestSyncProcessToKernel)
     EXPECT_EQ(ret, 0);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfo)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfo)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB;
@@ -1934,7 +1934,7 @@ TEST_F(Interface, TestSetSmapRemoteNumaInfo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfoTwo)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfoTwo)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB;
@@ -1947,7 +1947,7 @@ TEST_F(Interface, TestSetSmapRemoteNumaInfoTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfoThree)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfoThree)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB;
@@ -1958,7 +1958,7 @@ TEST_F(Interface, TestSetSmapRemoteNumaInfoThree)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfoFour)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfoFour)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB;
@@ -1971,7 +1971,7 @@ TEST_F(Interface, TestSetSmapRemoteNumaInfoFour)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfoFive)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfoFive)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB;
@@ -1986,7 +1986,7 @@ TEST_F(Interface, TestSetSmapRemoteNumaInfoFive)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Interface, TestSetSmapRemoteNumaInfoMsgSizeInvalid)
+TEST_F(InterfaceTest, TestSetSmapRemoteNumaInfoMsgSizeInvalid)
 {
     int ret;
     uint32_t size = 1 * TIB / MIB + 1;
@@ -2008,7 +2008,7 @@ extern "C" int CheckQueryVMFreqMsgValid(int pid, uint16_t *data, uint16_t length
 extern "C" int QueryVMFreqFromKernel(int pid, uint16_t *data, uint16_t lengthIn, uint16_t *lengthOut);
 extern "C" int QueryVMFreqFromUser(int pid, uint16_t *data, uint16_t lengthIn, uint16_t *lengthOut);
 extern "C" int ubturbo_smap_freq_query(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut, int dataSource);
-TEST_F(Interface, TestSmapQueryVmFreqAbnormalOne)
+TEST_F(InterfaceTest, TestSmapQueryVmFreqAbnormalOne)
 {
     int ret;
     uint32_t lengthOut;
@@ -2023,7 +2023,7 @@ TEST_F(Interface, TestSmapQueryVmFreqAbnormalOne)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryVmFreqAbnormalTwo)
+TEST_F(InterfaceTest, TestSmapQueryVmFreqAbnormalTwo)
 {
     int ret;
     uint32_t lengthOut;
@@ -2040,7 +2040,7 @@ TEST_F(Interface, TestSmapQueryVmFreqAbnormalTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromKernel)
+TEST_F(InterfaceTest, TestQueryVMFreqFromKernel)
 {
     uint16_t data;
     uint16_t lengthOut;
@@ -2056,7 +2056,7 @@ TEST_F(Interface, TestQueryVMFreqFromKernel)
     EXPECT_EQ(1, lengthOut);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromUser)
+TEST_F(InterfaceTest, TestQueryVMFreqFromUser)
 {
     int ret;
     int pid = 1;
@@ -2083,7 +2083,7 @@ TEST_F(Interface, TestQueryVMFreqFromUser)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromUserActcLenZero)
+TEST_F(InterfaceTest, TestQueryVMFreqFromUserActcLenZero)
 {
     int ret;
     int pid = 1;
@@ -2110,7 +2110,7 @@ TEST_F(Interface, TestQueryVMFreqFromUserActcLenZero)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromUserNormalOne)
+TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalOne)
 {
     int pid = 1;
     uint16_t lengthOut;
@@ -2139,7 +2139,7 @@ TEST_F(Interface, TestQueryVMFreqFromUserNormalOne)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromUserNormalTwo)
+TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalTwo)
 {
     int pid = 1;
     uint16_t lengthOut;
@@ -2170,7 +2170,7 @@ TEST_F(Interface, TestQueryVMFreqFromUserNormalTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestQueryVMFreqFromUserNormalThree)
+TEST_F(InterfaceTest, TestQueryVMFreqFromUserNormalThree)
 {
     int ret;
     int pid = 1;
@@ -2201,7 +2201,7 @@ TEST_F(Interface, TestQueryVMFreqFromUserNormalThree)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, DataNull)
+TEST_F(InterfaceTest, DataNull)
 {
     int pid = 123;
     uint16_t *data = nullptr;
@@ -2214,7 +2214,7 @@ TEST_F(Interface, DataNull)
     EXPECT_EQ(-EINVAL, result);
 }
 
-TEST_F(Interface, LengthInZero)
+TEST_F(InterfaceTest, LengthInZero)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2227,7 +2227,7 @@ TEST_F(Interface, LengthInZero)
     EXPECT_EQ(-EINVAL, result);
 }
 
-TEST_F(Interface, DataSourceInvalid)
+TEST_F(InterfaceTest, DataSourceInvalid)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2240,7 +2240,7 @@ TEST_F(Interface, DataSourceInvalid)
     EXPECT_EQ(-EINVAL, result);
 }
 
-TEST_F(Interface, PidNotManaged)
+TEST_F(InterfaceTest, PidNotManaged)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2256,7 +2256,7 @@ TEST_F(Interface, PidNotManaged)
     EXPECT_EQ(-EINVAL, result);
 }
 
-TEST_F(Interface, DataSourceMismatch)
+TEST_F(InterfaceTest, DataSourceMismatch)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2275,7 +2275,7 @@ TEST_F(Interface, DataSourceMismatch)
     EXPECT_EQ(-EINVAL, result);
 }
 
-TEST_F(Interface, TimeCheckFailed)
+TEST_F(InterfaceTest, TimeCheckFailed)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2296,7 +2296,7 @@ TEST_F(Interface, TimeCheckFailed)
     EXPECT_EQ(-EAGAIN, result);
 }
 
-TEST_F(Interface, TimeCheckSuccess)
+TEST_F(InterfaceTest, TimeCheckSuccess)
 {
     int pid = 123;
     uint16_t data[10] = { 0 };
@@ -2318,7 +2318,7 @@ TEST_F(Interface, TimeCheckSuccess)
 }
 
 extern "C" bool IsPidArrValid(pid_t *pidArr, int len, bool ignoreUnmanaged);
-TEST_F(Interface, TestSmapEnableProcessMigrateNotRun)
+TEST_F(InterfaceTest, TestSmapEnableProcessMigrateNotRun)
 {
     pid_t pidArr[] = { 1 };
     EnvAtomicSet(&g_status, 0);
@@ -2326,7 +2326,7 @@ TEST_F(Interface, TestSmapEnableProcessMigrateNotRun)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapEnableProcessMigrateInvalidPidType)
+TEST_F(InterfaceTest, TestSmapEnableProcessMigrateInvalidPidType)
 {
     pid_t pidArr[] = { 1 };
     EnvAtomicSet(&g_status, 1);
@@ -2336,7 +2336,7 @@ TEST_F(Interface, TestSmapEnableProcessMigrateInvalidPidType)
     GlobalMockObject::verify();
 }
 
-TEST_F(Interface, TestSmapEnableProcessMigrateInvalidEnable)
+TEST_F(InterfaceTest, TestSmapEnableProcessMigrateInvalidEnable)
 {
     pid_t pidArr[] = { 1 };
     EnvAtomicSet(&g_status, 1);
@@ -2347,7 +2347,7 @@ TEST_F(Interface, TestSmapEnableProcessMigrateInvalidEnable)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapEnableProcessMigrateIsPidArrValid)
+TEST_F(InterfaceTest, TestSmapEnableProcessMigrateIsPidArrValid)
 {
     pid_t pidArr[] = { 1 };
     EnvAtomicSet(&g_status, 1);
@@ -2357,7 +2357,7 @@ TEST_F(Interface, TestSmapEnableProcessMigrateIsPidArrValid)
 }
 
 extern "C" bool PidIsValid(pid_t pid);
-TEST_F(Interface, TestSmapEnableProcessMigrateNormal)
+TEST_F(InterfaceTest, TestSmapEnableProcessMigrateNormal)
 {
     pid_t pidArr[] = { 1 };
     EnvAtomicSet(&g_status, 1);
@@ -2367,7 +2367,7 @@ TEST_F(Interface, TestSmapEnableProcessMigrateNormal)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(Interface, TestIsPidArrValid)
+TEST_F(InterfaceTest, TestIsPidArrValid)
 {
     pid_t pidArr[] = { 1 };
     bool ret = IsPidArrValid(pidArr, 0, true);
@@ -2377,7 +2377,7 @@ TEST_F(Interface, TestIsPidArrValid)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsPidArrValidNormal)
+TEST_F(InterfaceTest, TestIsPidArrValidNormal)
 {
     pid_t pidArr[] = { 1 };
     ProcessAttr pid1;
@@ -2387,14 +2387,14 @@ TEST_F(Interface, TestIsPidArrValidNormal)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(Interface, TestIsPidArrValidOne)
+TEST_F(InterfaceTest, TestIsPidArrValidOne)
 {
     pid_t pidArr[] = { 1 };
     bool ret = IsPidArrValid(nullptr, 1, true);
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsPidArrValidTwo)
+TEST_F(InterfaceTest, TestIsPidArrValidTwo)
 {
     pid_t pidArr[] = { 1 };
     ProcessAttr pid1;
@@ -2404,7 +2404,7 @@ TEST_F(Interface, TestIsPidArrValidTwo)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(Interface, TestIsPidArrValidThree)
+TEST_F(InterfaceTest, TestIsPidArrValidThree)
 {
     pid_t pidArr[] = { 1, 1 };
     ProcessAttr pid1;
@@ -2415,7 +2415,7 @@ TEST_F(Interface, TestIsPidArrValidThree)
 }
 
 extern "C" int CheckMigrateNumaMsg(struct MigrateNumaMsg *msg);
-TEST_F(Interface, CheckMigrateNumaMsgFail)
+TEST_F(InterfaceTest, CheckMigrateNumaMsgFail)
 {
     // msg is nullptr
     struct MigrateNumaMsg msg;
@@ -2473,7 +2473,7 @@ TEST_F(Interface, CheckMigrateNumaMsgFail)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, CheckMigrateNumaMsgSuccess)
+TEST_F(InterfaceTest, CheckMigrateNumaMsgSuccess)
 {
     struct MigrateNumaMsg msg;
     msg.srcNid = 5;
@@ -2486,7 +2486,7 @@ TEST_F(Interface, CheckMigrateNumaMsgSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNotRun)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNotRun)
 {
     struct MigrateNumaMsg msg;
     EnvAtomicSet(&g_status, 0);
@@ -2494,7 +2494,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNotRun)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaInvalidMsg)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaInvalidMsg)
 {
     struct MigrateNumaMsg msg;
     EnvAtomicSet(&g_status, 1);
@@ -2503,7 +2503,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaInvalidMsg)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaFailMigrateRemoteNuma)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaFailMigrateRemoteNuma)
 {
     struct MigrateNumaMsg msg;
     EnvAtomicSet(&g_status, 1);
@@ -2513,7 +2513,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaFailMigrateRemoteNuma)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaSuccess)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaSuccess)
 {
     struct MigrateNumaMsg msg;
     EnvAtomicSet(&g_status, 1);
@@ -2527,7 +2527,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNotAllowedTwo)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNotAllowedTwo)
 {
     int srcNid = 4;
     int destNid = 100;
@@ -2546,7 +2546,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNotAllowedTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNotAllowedThree)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNotAllowedThree)
 {
     int srcNid = 100;
     int destNid = 99;
@@ -2565,7 +2565,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNotAllowedThree)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNormal)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNormal)
 {
     struct MigrateNumaMsg msg = { .srcNid = 4, .destNid = 5, .count = 1 };
     EnvAtomicSet(&g_status, 1);
@@ -2589,7 +2589,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNormal)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNormalTwo)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNormalTwo)
 {
     struct MigrateNumaMsg msg = { .srcNid = 4, .destNid = 100, .count = 10 };
     EnvAtomicSet(&g_status, 1);
@@ -2606,7 +2606,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNormalTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateRemoteNumaNormalThree)
+TEST_F(InterfaceTest, TestSmapMigrateRemoteNumaNormalThree)
 {
     struct MigrateNumaMsg msg = { .srcNid = 100, .destNid = 5, .count = 10000 };
     EnvAtomicSet(&g_status, 1);
@@ -2628,7 +2628,7 @@ TEST_F(Interface, TestSmapMigrateRemoteNumaNormalThree)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaNotRun)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaNotRun)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2641,7 +2641,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaNotRun)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteEqSrcDst)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteEqSrcDst)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2654,7 +2654,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteEqSrcDst)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidSrcNid)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvalidSrcNid)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2675,7 +2675,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidSrcNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaInvaliDestNid)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvaliDestNid)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2697,7 +2697,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaInvaliDestNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidLenPid)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvalidLenPid)
 {
     struct MigrateEscapeMsg msg = {
         .count = 0,
@@ -2721,7 +2721,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidLenPid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidScan)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvalidScan)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2745,7 +2745,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaInvalidScan)
 }
 
 extern "C" int IsPidArrRemoteNumaMatch(struct MigrateEscapeMsg *msg);
-TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrRemoteNumaMatchFail)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrRemoteNumaMatchFail)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2771,7 +2771,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrRemoteNumaMatchFail)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrIsPidArrInStateFail)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrIsPidArrInStateFail)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2797,7 +2797,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrIsPidArrInStateFail)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrMigratePidRemoteNumaFail)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrMigratePidRemoteNumaFail)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2829,7 +2829,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrMigratePidRemoteNumaFail)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrChangePidRemoteByPid)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrChangePidRemoteByPid)
 {
     struct MigrateEscapeMsg msg = {
         .count = 1,
@@ -2866,7 +2866,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaIsPidArrChangePidRemoteByPid)
 extern "C" bool GetAdaptMem(void);
 extern "C" bool MigOutIsDone(ProcessAttr *attr, bool *isMultiNumaPid);
 extern "C" int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pidType, uint64_t maxWaitTime);
-TEST_F(Interface, TestSmapMigrateOutSyncErrMaxWaitTime)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncErrMaxWaitTime)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2876,7 +2876,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncErrMaxWaitTime)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateOutSyncErrRunMode)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncErrRunMode)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2887,7 +2887,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncErrRunMode)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateOutSyncErrPidType)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncErrPidType)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2898,7 +2898,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncErrPidType)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateOutSyncFailSmapMigrateOut)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncFailSmapMigrateOut)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2910,7 +2910,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncFailSmapMigrateOut)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateOutSyncSuccess)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncSuccess)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2935,7 +2935,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapMigrateOutSyncFail)
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncFail)
 {
     int ret;
     struct MigrateOutMsg msg;
@@ -2963,7 +2963,7 @@ TEST_F(Interface, TestSmapMigrateOutSyncFail)
 extern "C" bool ubturbo_smap_is_running(void);
 extern "C" int SyncRunMode(RunMode runMode);
 extern "C" int ubturbo_smap_run_mode_set(int runMode);
-TEST_F(Interface, TestSetSmapRunModeOne)
+TEST_F(InterfaceTest, TestSetSmapRunModeOne)
 {
     int runMode = 1;
     MOCKER(ubturbo_smap_is_running).stubs().will(returnValue(false));
@@ -2971,7 +2971,7 @@ TEST_F(Interface, TestSetSmapRunModeOne)
     EXPECT_EQ(-EPERM, ret);
 }
 
-TEST_F(Interface, TestSetSmapRunModeTwo)
+TEST_F(InterfaceTest, TestSetSmapRunModeTwo)
 {
     int runMode = -1;
     MOCKER(ubturbo_smap_is_running).stubs().will(returnValue(true));
@@ -2979,7 +2979,7 @@ TEST_F(Interface, TestSetSmapRunModeTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSetSmapRunMode4KSuccess)
+TEST_F(InterfaceTest, TestSetSmapRunMode4KSuccess)
 {
     int runMode = 0;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -2990,7 +2990,7 @@ TEST_F(Interface, TestSetSmapRunMode4KSuccess)
     g_processManager.tracking.pageSize = 0;
 }
 
-TEST_F(Interface, TestSetSmapRunMode4KFail)
+TEST_F(InterfaceTest, TestSetSmapRunMode4KFail)
 {
     int runMode = 0;
     g_processManager.tracking.pageSize = PAGESIZE_4K;
@@ -3001,7 +3001,7 @@ TEST_F(Interface, TestSetSmapRunMode4KFail)
     g_processManager.tracking.pageSize = 0;
 }
 
-TEST_F(Interface, TestSetSmapRunMode2MSuccess)
+TEST_F(InterfaceTest, TestSetSmapRunMode2MSuccess)
 {
     int runMode = 1;
     g_processManager.tracking.pageSize = PAGESIZE_2M;
@@ -3012,7 +3012,7 @@ TEST_F(Interface, TestSetSmapRunMode2MSuccess)
     g_processManager.tracking.pageSize = 0;
 }
 
-TEST_F(Interface, TestSetSmapRunMode2MFail)
+TEST_F(InterfaceTest, TestSetSmapRunMode2MFail)
 {
     int runMode = 1;
     g_processManager.tracking.pageSize = PAGESIZE_2M;
@@ -3024,7 +3024,7 @@ TEST_F(Interface, TestSetSmapRunMode2MFail)
 }
 
 extern "C" int CheckAddProcessTrackingMsg(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType);
-TEST_F(Interface, TestCheckAddProcessTrackingMsgNullPtr)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgNullPtr)
 {
     struct ProcessManager manager;
     pid_t pidArr[1] = { 1 };
@@ -3034,7 +3034,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgNullPtr)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgLenCheck)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgLenCheck)
 {
     ProcessAttr current;
     pid_t pidArr[1] = { 1 };
@@ -3047,7 +3047,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgLenCheck)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgPidInvalid)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgPidInvalid)
 {
     struct ProcessManager manager;
     manager.processes = nullptr;
@@ -3064,7 +3064,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgPidInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgStateInvalid)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgStateInvalid)
 {
     struct ProcessManager manager;
     ProcessAttr current;
@@ -3084,7 +3084,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgStateInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgScanTimeInvalid)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgScanTimeInvalid)
 {
     struct ProcessManager manager;
     manager.processes = nullptr;
@@ -3108,7 +3108,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgScanTimeInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgDurationInvalid)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgDurationInvalid)
 {
     struct ProcessManager manager;
     manager.processes = nullptr;
@@ -3129,7 +3129,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgDurationInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgScanTypeInvalid)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgScanTypeInvalid)
 {
     struct ProcessManager manager;
     manager.processes = nullptr;
@@ -3147,7 +3147,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgScanTypeInvalid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckAddProcessTrackingMsgSuccess)
+TEST_F(InterfaceTest, TestCheckAddProcessTrackingMsgSuccess)
 {
     struct ProcessManager *manager = (struct ProcessManager *)malloc(sizeof(struct ProcessManager));
     ASSERT_NE(nullptr, manager);
@@ -3172,7 +3172,7 @@ TEST_F(Interface, TestCheckAddProcessTrackingMsgSuccess)
 }
 
 extern "C" int AddProcessTracking(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType);
-TEST_F(Interface, AddProcessTrackingLenEqulasZero)
+TEST_F(InterfaceTest, AddProcessTrackingLenEqulasZero)
 {
     int ret;
     int len = 0;
@@ -3190,7 +3190,7 @@ TEST_F(Interface, AddProcessTrackingLenEqulasZero)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingSetProcessLocalNumaZero)
+TEST_F(InterfaceTest, AddProcessTrackingSetProcessLocalNumaZero)
 {
     int ret;
     int len = 1;
@@ -3210,7 +3210,7 @@ TEST_F(Interface, AddProcessTrackingSetProcessLocalNumaZero)
     EXPECT_EQ(-2, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingNormalScanNullPtr)
+TEST_F(InterfaceTest, AddProcessTrackingNormalScanNullPtr)
 {
     int ret;
     int len = 1;
@@ -3231,7 +3231,7 @@ TEST_F(Interface, AddProcessTrackingNormalScanNullPtr)
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingNormalScanInvalidRemoteValid)
+TEST_F(InterfaceTest, AddProcessTrackingNormalScanInvalidRemoteValid)
 {
     int ret;
     int len = 1;
@@ -3253,7 +3253,7 @@ TEST_F(Interface, AddProcessTrackingNormalScanInvalidRemoteValid)
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingNormalScanSuccess)
+TEST_F(InterfaceTest, AddProcessTrackingNormalScanSuccess)
 {
     int ret;
     int len = 1;
@@ -3275,7 +3275,7 @@ TEST_F(Interface, AddProcessTrackingNormalScanSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingHAMScanNullPtrFailed)
+TEST_F(InterfaceTest, AddProcessTrackingHAMScanNullPtrFailed)
 {
     int ret;
     int len = 1;
@@ -3296,7 +3296,7 @@ TEST_F(Interface, AddProcessTrackingHAMScanNullPtrFailed)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingHAMScanFailed)
+TEST_F(InterfaceTest, AddProcessTrackingHAMScanFailed)
 {
     int ret;
     int len = 1;
@@ -3317,7 +3317,7 @@ TEST_F(Interface, AddProcessTrackingHAMScanFailed)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Interface, AddProcessTrackingHAMScanSuccess)
+TEST_F(InterfaceTest, AddProcessTrackingHAMScanSuccess)
 {
     int ret;
     int len = 1;
@@ -3338,7 +3338,7 @@ TEST_F(Interface, AddProcessTrackingHAMScanSuccess)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapAddProcessTrackingFailed)
+TEST_F(InterfaceTest, TestSmapAddProcessTrackingFailed)
 {
     pid_t pidArr[] = { 1 };
     uint32_t scanTime[] = { MIN_SCAN_TIME };
@@ -3360,7 +3360,7 @@ TEST_F(Interface, TestSmapAddProcessTrackingFailed)
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.lock));
 }
 
-TEST_F(Interface, TestSmapAddProcessTrackingCheckAddManage)
+TEST_F(InterfaceTest, TestSmapAddProcessTrackingCheckAddManage)
 {
     g_processManager.tracking.pageSize = PAGESIZE_2M;
     pid_t pidArr[] = { 1 };
@@ -3388,7 +3388,7 @@ TEST_F(Interface, TestSmapAddProcessTrackingCheckAddManage)
 }
 
 extern "C" int CheckRemoveProcessTrackingMsg(pid_t *pidArr, int len);
-TEST_F(Interface, TestCheckRemoveProcessTrackingMsgFailed)
+TEST_F(InterfaceTest, TestCheckRemoveProcessTrackingMsgFailed)
 {
     // null ptr input
     pid_t pidArr[] = { 1 };
@@ -3402,7 +3402,7 @@ TEST_F(Interface, TestCheckRemoveProcessTrackingMsgFailed)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestCheckRemoveProcessTrackingMsgCheckProcess)
+TEST_F(InterfaceTest, TestCheckRemoveProcessTrackingMsgCheckProcess)
 {
     struct ProcessManager manager;
     ProcessAttr current;
@@ -3433,7 +3433,7 @@ TEST_F(Interface, TestCheckRemoveProcessTrackingMsgCheckProcess)
     free(pidArr);
 }
 
-TEST_F(Interface, TestCheckRemoveProcessTrackingMsgPidStateCheck)
+TEST_F(InterfaceTest, TestCheckRemoveProcessTrackingMsgPidStateCheck)
 {
     struct ProcessManager manager;
     ProcessAttr current;
@@ -3454,7 +3454,7 @@ TEST_F(Interface, TestCheckRemoveProcessTrackingMsgPidStateCheck)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapRemoveProcessTrackingOne)
+TEST_F(InterfaceTest, TestSmapRemoveProcessTrackingOne)
 {
     pid_t pidArr[] = { 1 };
     struct ProcessManager manager;
@@ -3468,7 +3468,7 @@ TEST_F(Interface, TestSmapRemoveProcessTrackingOne)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Interface, TestSmapRemoveProcessTrackingTwo)
+TEST_F(InterfaceTest, TestSmapRemoveProcessTrackingTwo)
 {
     pid_t pidArr[] = { 1 };
     struct ProcessManager manager;
@@ -3488,7 +3488,7 @@ TEST_F(Interface, TestSmapRemoveProcessTrackingTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigInvalidNid)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigInvalidNid)
 {
     int ret;
     int nid;
@@ -3502,7 +3502,7 @@ TEST_F(Interface, TestSmapQueryProcessConfigInvalidNid)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigNullResult)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigNullResult)
 {
     int ret;
     int nid;
@@ -3516,7 +3516,7 @@ TEST_F(Interface, TestSmapQueryProcessConfigNullResult)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigInvalidLen)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigInvalidLen)
 {
     int ret;
     int nid;
@@ -3534,7 +3534,7 @@ TEST_F(Interface, TestSmapQueryProcessConfigInvalidLen)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigNormal)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormal)
 {
     int ret;
     int inLen;
@@ -3604,13 +3604,13 @@ TEST_F(Interface, TestSmapQueryProcessConfigNormal)
     }
 }
 
-TEST_F(Interface, TestProcessAddTrackingManageNullMsg)
+TEST_F(InterfaceTest, TestProcessAddTrackingManageNullMsg)
 {
     int ret = ProcessAddTrackingManage(nullptr, VM_TYPE);
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigNormalTwo)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormalTwo)
 {
     int ret;
     int inLen;
@@ -3667,7 +3667,7 @@ TEST_F(Interface, TestSmapQueryProcessConfigNormalTwo)
     free(attr2);
 }
 
-TEST_F(Interface, TestSmapQueryProcessConfigNormalThree)
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormalThree)
 {
     int ret;
     int inLen;
@@ -3724,7 +3724,7 @@ TEST_F(Interface, TestSmapQueryProcessConfigNormalThree)
     free(attr2);
 }
 
-TEST_F(Interface, TestSmapQueryRemoteNumaFreqExceptionBranch)
+TEST_F(InterfaceTest, TestSmapQueryRemoteNumaFreqExceptionBranch)
 {
     EnvAtomicSet(&g_status, 0);
     int ret = ubturbo_smap_remote_numa_freq_query(nullptr, nullptr, 1);
@@ -3740,7 +3740,7 @@ TEST_F(Interface, TestSmapQueryRemoteNumaFreqExceptionBranch)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Interface, TestSmapQueryRemoteNumaFreq)
+TEST_F(InterfaceTest, TestSmapQueryRemoteNumaFreq)
 {
     uint64_t freq[2] = { 0 };
     uint16_t numa[2] = { 4, 5 };
@@ -3768,7 +3768,7 @@ TEST_F(Interface, TestSmapQueryRemoteNumaFreq)
     EXPECT_EQ(0, freq[1]);
 }
 
-TEST_F(Interface, TestIsPidArrRemoteNumaMatch)
+TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatch)
 {
     int ret;
     struct MigrateEscapeMsg msg = {
@@ -3785,7 +3785,7 @@ TEST_F(Interface, TestIsPidArrRemoteNumaMatch)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Interface, TestIsPidArrRemoteNumaMatchTwo)
+TEST_F(InterfaceTest, TestIsPidArrRemoteNumaMatchTwo)
 {
     int ret;
     struct MigrateEscapeMsg msg = {
@@ -3817,7 +3817,7 @@ extern "C" int BuildMigRemoteNumaMsg(struct MigrateEscapeMsg *msg, struct MigPid
 extern "C" int CheckSameMigrateNumaMsg(struct MigrateNumaMsg *msg);
 extern "C" bool IsScanTypeValid(pid_t *pidArr, int len);
 
-TEST_F(Interface, TestGetAttrNidInitRatio)
+TEST_F(InterfaceTest, TestGetAttrNidInitRatio)
 {
     ProcessAttr attr = { .pid = 1 };
     attr.strategyAttr.initRemoteMemRatio[0][0] = 50.0;
@@ -3834,7 +3834,7 @@ TEST_F(Interface, TestGetAttrNidInitRatio)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestGetAttrNidInitMemSize)
+TEST_F(InterfaceTest, TestGetAttrNidInitMemSize)
 {
     ProcessAttr attr = { .pid = 1 };
     attr.strategyAttr.memSize[0][0] = 1024;
@@ -3851,7 +3851,7 @@ TEST_F(Interface, TestGetAttrNidInitMemSize)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestIsRemoteNidMemSizeValid)
+TEST_F(InterfaceTest, TestIsRemoteNidMemSizeValid)
 {
     ProcessAttr attr = { .pid = 1 };
     attr.strategyAttr.memSize[0][0] = 2048;
@@ -3868,7 +3868,7 @@ TEST_F(Interface, TestIsRemoteNidMemSizeValid)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestSmapMigratePidRemoteNumaCheckInner)
+TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaCheckInner)
 {
     struct MigrateEscapeMsg msg = { .count = 1 };
     msg.payload[0].pid = 1;
@@ -3895,7 +3895,7 @@ TEST_F(Interface, TestSmapMigratePidRemoteNumaCheckInner)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestBuildMigRemoteNumaMsg)
+TEST_F(InterfaceTest, TestBuildMigRemoteNumaMsg)
 {
     struct MigrateEscapeMsg msg = { .count = 1 };
     msg.payload[0].pid = 1;
@@ -3924,7 +3924,7 @@ TEST_F(Interface, TestBuildMigRemoteNumaMsg)
     g_processManager.processes = nullptr;
 }
 
-TEST_F(Interface, TestCheckSameMigrateNumaMsg)
+TEST_F(InterfaceTest, TestCheckSameMigrateNumaMsg)
 {
     struct MigrateNumaMsg msg = { .count = 1 };
     msg.srcNid = 4;
@@ -3934,7 +3934,7 @@ TEST_F(Interface, TestCheckSameMigrateNumaMsg)
     CheckSameMigrateNumaMsg(&msg);
 }
 
-TEST_F(Interface, TestIsScanTypeValid)
+TEST_F(InterfaceTest, TestIsScanTypeValid)
 {
     pid_t pidArr[1] = { 1 };
     ProcessAttr attr = { .pid = 1, .scanType = NORMAL_SCAN };

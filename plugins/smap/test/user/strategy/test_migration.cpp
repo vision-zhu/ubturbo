@@ -20,7 +20,7 @@
 
 using namespace std;
 
-class Migration : public ::testing::Test {
+class MigrationTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -37,7 +37,7 @@ protected:
 
 extern "C" struct ProcessManager g_processManager;
 
-TEST_F(Migration, TestAddMigListAddMultiSuccess)
+TEST_F(MigrationTest, TestAddMigListAddMultiSuccess)
 {
     int i;
     int ret;
@@ -62,7 +62,7 @@ TEST_F(Migration, TestAddMigListAddMultiSuccess)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestAddMigListAddMultiAndMoreThanFreePagesSuccess)
+TEST_F(MigrationTest, TestAddMigListAddMultiAndMoreThanFreePagesSuccess)
 {
     int i;
     int ret;
@@ -87,7 +87,7 @@ TEST_F(Migration, TestAddMigListAddMultiAndMoreThanFreePagesSuccess)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestAddMigListNoPageToMig)
+TEST_F(MigrationTest, TestAddMigListNoPageToMig)
 {
     int i;
     int ret;
@@ -100,7 +100,7 @@ TEST_F(Migration, TestAddMigListNoPageToMig)
     EXPECT_EQ(0, mMsg.cnt);
 }
 
-TEST_F(Migration, TestAddMigListNoFreePages)
+TEST_F(MigrationTest, TestAddMigListNoFreePages)
 {
     int ret;
     uint64_t freePageNum = 0;
@@ -114,7 +114,7 @@ TEST_F(Migration, TestAddMigListNoFreePages)
 }
 
 extern "C" void FreeMigList(struct MigList mList[MAX_NODES][MAX_NODES]);
-TEST_F(Migration, TestFreeMigList)
+TEST_F(MigrationTest, TestFreeMigList)
 {
     struct MigList mlist[MAX_NODES][MAX_NODES] = { 0 };
     mlist[0][0].addr = (uint64_t *)malloc(sizeof(uint64_t));
@@ -123,7 +123,7 @@ TEST_F(Migration, TestFreeMigList)
 }
 
 extern "C" void strategy_InitMigList(struct MigList mList[MAX_NODES][MAX_NODES], int pid);
-TEST_F(Migration, TestInitMigList)
+TEST_F(MigrationTest, TestInitMigList)
 {
     struct MigList mlist[MAX_NODES][MAX_NODES] = { 0 };
     printf("MAX_NODES in test = %d\n", MAX_NODES);
@@ -145,7 +145,7 @@ TEST_F(Migration, TestInitMigList)
 extern "C" int BuildMigrationMsg(ProcessAttr *process, struct MigrateMsg *mMsg, uint64_t *migratePage);
 extern "C" bool IsNodeForbidden(int nid);
 
-TEST_F(Migration, TestBuildMigrationMsgActcDataInvalid)
+TEST_F(MigrationTest, TestBuildMigrationMsgActcDataInvalid)
 {
     int ret;
     uint64_t pages;
@@ -156,7 +156,7 @@ TEST_F(Migration, TestBuildMigrationMsgActcDataInvalid)
     EXPECT_EQ(-ENODATA, ret);
 }
 
-TEST_F(Migration, TestBuildMigrationMsgRunStrategyFail)
+TEST_F(MigrationTest, TestBuildMigrationMsgRunStrategyFail)
 {
     int ret;
     int nid = 4;
@@ -175,7 +175,7 @@ TEST_F(Migration, TestBuildMigrationMsgRunStrategyFail)
     EXPECT_EQ(-ENOENT, ret);
 }
 
-TEST_F(Migration, TestBuildMigrationMsgNullPtrOfMigratePage)
+TEST_F(MigrationTest, TestBuildMigrationMsgNullPtrOfMigratePage)
 {
     int ret;
     int nid = 4;
@@ -194,7 +194,7 @@ TEST_F(Migration, TestBuildMigrationMsgNullPtrOfMigratePage)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Migration, TestBuildMigrationMsgNoPage)
+TEST_F(MigrationTest, TestBuildMigrationMsgNoPage)
 {
     int ret;
     int nid = 4;
@@ -213,7 +213,7 @@ TEST_F(Migration, TestBuildMigrationMsgNoPage)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Migration, TestBuildMigrationMsgL2NodeForbidden)
+TEST_F(MigrationTest, TestBuildMigrationMsgL2NodeForbidden)
 {
     int ret;
     int nid = 4;
@@ -233,7 +233,7 @@ TEST_F(Migration, TestBuildMigrationMsgL2NodeForbidden)
 
 extern "C" uint64_t CalcMigrateNumByFreq(ProcessAttr *process);
 extern "C" int RunStrategyStub(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], size_t mlistSize);
-TEST_F(Migration, TestBuildMigrationMsgSuccess)
+TEST_F(MigrationTest, TestBuildMigrationMsgSuccess)
 {
     int ret;
     uint64_t pages = 0;
@@ -257,7 +257,7 @@ TEST_F(Migration, TestBuildMigrationMsgSuccess)
 }
 
 extern "C" int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager);
-TEST_F(Migration, TestDoMigration)
+TEST_F(MigrationTest, TestDoMigration)
 {
     struct MigList migList = { .nr = 0 };
     struct MigrateMsg mMsg = { .cnt = 1, .migList = &migList };
@@ -267,7 +267,7 @@ TEST_F(Migration, TestDoMigration)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Migration, TestDoMigrationInitialized)
+TEST_F(MigrationTest, TestDoMigrationInitialized)
 {
     struct MigList migList = { .nr = 2 };
 
@@ -284,7 +284,7 @@ TEST_F(Migration, TestDoMigrationInitialized)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Migration, DoMigrationMinusCnt)
+TEST_F(MigrationTest, DoMigrationMinusCnt)
 {
     struct MigList migList = { .nr = 0 };
     struct MigrateMsg mMsg = { .cnt = -1, .migList = &migList };
@@ -295,7 +295,7 @@ TEST_F(Migration, DoMigrationMinusCnt)
 }
 
 extern "C" int InitMigrateMsg(struct MigrateMsg *mMsg, struct ProcessManager *manager);
-TEST_F(Migration, TestInitMigrateMsg)
+TEST_F(MigrationTest, TestInitMigrateMsg)
 {
     struct MigrateMsg mMsg = { .cnt = 1 };
     struct ProcessManager manager = { .nr = { 0, 1 }, .tracking = { .pageSize = 4096 } };
@@ -311,7 +311,7 @@ TEST_F(Migration, TestInitMigrateMsg)
 extern "C" int PerformMigrationPreparation(struct ProcessManager *manager);
 extern "C" int BuildAllPidData(void);
 extern "C" int CleanStrategyAttribute(struct ProcessManager *manager);
-TEST_F(Migration, TestPerformMigrationPreparationOK)
+TEST_F(MigrationTest, TestPerformMigrationPreparationOK)
 {
     int ret;
     ThreadCtx *ctx = (ThreadCtx *)malloc(sizeof(ThreadCtx));
@@ -329,7 +329,7 @@ TEST_F(Migration, TestPerformMigrationPreparationOK)
     free(ctx);
 }
 
-TEST_F(Migration, TestPerformMigrationPreparationEmptyProcesses)
+TEST_F(MigrationTest, TestPerformMigrationPreparationEmptyProcesses)
 {
     int ret;
     struct ProcessManager manager = { .processes = nullptr };
@@ -340,7 +340,7 @@ TEST_F(Migration, TestPerformMigrationPreparationEmptyProcesses)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(Migration, TestPerformMigrationPreparationBuildError)
+TEST_F(MigrationTest, TestPerformMigrationPreparationBuildError)
 {
     int ret;
     ProcessAttr process;
@@ -357,7 +357,7 @@ extern "C" int PerformMigration(struct ProcessManager *manager);
 extern "C" int HandleScene(ThreadCtx *ctx);
 extern "C" void UpdateScene(struct ProcessManager *manager);
 extern "C" void UpdatePeriodFromConfig(ThreadCtx *ctx);
-TEST_F(Migration, TestScanMigrateWorkFileConfOn)
+TEST_F(MigrationTest, TestScanMigrateWorkFileConfOn)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -380,7 +380,7 @@ TEST_F(Migration, TestScanMigrateWorkFileConfOn)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Migration, TestScanMigrateWorkFileConfOff)
+TEST_F(MigrationTest, TestScanMigrateWorkFileConfOff)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -401,7 +401,7 @@ TEST_F(Migration, TestScanMigrateWorkFileConfOff)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Migration, TestScanMigrateWorkOne)
+TEST_F(MigrationTest, TestScanMigrateWorkOne)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -413,7 +413,7 @@ TEST_F(Migration, TestScanMigrateWorkOne)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Migration, TestScanMigrateWorkTwo)
+TEST_F(MigrationTest, TestScanMigrateWorkTwo)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -428,7 +428,7 @@ TEST_F(Migration, TestScanMigrateWorkTwo)
 }
 
 extern "C" int SetMigrateThreadNum(struct MigrateMsg *mMsg, uint64_t migratePages, bool isForcedSingleThread);
-TEST_F(Migration, TestSetMigrateThreadNum)
+TEST_F(MigrationTest, TestSetMigrateThreadNum)
 {
     int ret;
     struct MigrateMsg mMsg = { 0 };
@@ -445,7 +445,7 @@ TEST_F(Migration, TestSetMigrateThreadNum)
     EXPECT_EQ(MORE_THREAD_MIG_OUT, mMsg.mulMig.nrThread);
 }
 
-TEST_F(Migration, TestSetMigrateThreadNumTwo)
+TEST_F(MigrationTest, TestSetMigrateThreadNumTwo)
 {
     int ret;
     struct MigrateMsg mMsg = { 0 };
@@ -460,7 +460,7 @@ TEST_F(Migration, TestSetMigrateThreadNumTwo)
     EXPECT_EQ(SIG_THREAD_MIG_OUT, mMsg.mulMig.nrThread);
 }
 
-TEST_F(Migration, TestSetMigrateThreadNumThree)
+TEST_F(MigrationTest, TestSetMigrateThreadNumThree)
 {
     int ret;
     struct MigrateMsg mMsg = { 0 };
@@ -472,7 +472,7 @@ TEST_F(Migration, TestSetMigrateThreadNumThree)
     EXPECT_EQ(1, mMsg.mulMig.nrThread);
 }
 
-TEST_F(Migration, TestSetMigrateThreadNumPage2M)
+TEST_F(MigrationTest, TestSetMigrateThreadNumPage2M)
 {
     int ret;
     struct MigrateMsg mMsg = { 0 };
@@ -484,7 +484,7 @@ TEST_F(Migration, TestSetMigrateThreadNumPage2M)
 }
 
 extern "C" long CalcDurationUs(struct timeval start, struct timeval end);
-TEST_F(Migration, TestCalcDurationUs)
+TEST_F(MigrationTest, TestCalcDurationUs)
 {
     struct timeval start = { 0 };
     struct timeval end = { 0 };
@@ -498,7 +498,7 @@ TEST_F(Migration, TestCalcDurationUs)
 }
 
 extern "C" void CalProcessNuma(StrategyAttribute *strategyAttr);
-TEST_F(Migration, TestCalProcessNuma)
+TEST_F(MigrationTest, TestCalProcessNuma)
 {
     ProcessAttr attr = {};
     attr.strategyAttr.nrPagesPerLocalNuma[0] = 100;
@@ -516,7 +516,7 @@ typedef struct {
 } NumaMemReduce;
 
 extern "C" int CompareMigIn(const void *a, const void *b);
-TEST_F(Migration, TestCompareMigIn)
+TEST_F(MigrationTest, TestCompareMigIn)
 {
     NumaMemReduce *a = (NumaMemReduce *)malloc(sizeof(NumaMemReduce));
     NumaMemReduce *b = (NumaMemReduce *)malloc(sizeof(NumaMemReduce));
@@ -530,7 +530,7 @@ TEST_F(Migration, TestCompareMigIn)
 }
 
 extern "C" int CompareMigOut(const void *b, const void *a);
-TEST_F(Migration, TestCompareMigOut)
+TEST_F(MigrationTest, TestCompareMigOut)
 {
     NumaMemReduce *a = (NumaMemReduce *)malloc(sizeof(NumaMemReduce));
     NumaMemReduce *b = (NumaMemReduce *)malloc(sizeof(NumaMemReduce));
@@ -544,7 +544,7 @@ TEST_F(Migration, TestCompareMigOut)
 }
 
 extern "C" void NumaSwapMemPool(ProcessAttr *current);
-TEST_F(Migration, TestNumaSwapMemPool)
+TEST_F(MigrationTest, TestNumaSwapMemPool)
 {
     int l2Node = 4;
     ProcessAttr attr = {};
@@ -574,7 +574,7 @@ TEST_F(Migration, TestNumaSwapMemPool)
 }
 
 extern "C" void NumaMigReduceDeal(ProcessAttr *current);
-TEST_F(Migration, TestNumaMigReduceDeal)
+TEST_F(MigrationTest, TestNumaMigReduceDeal)
 {
     ProcessAttr attr = {};
     attr.strategyAttr.nrPagesPerLocalNuma[0] = 100;
@@ -588,7 +588,7 @@ TEST_F(Migration, TestNumaMigReduceDeal)
 }
 
 extern "C" int PreMigration(struct ProcessManager *manager, struct MigrateMsg *mMsg, uint64_t *migratePages);
-TEST_F(Migration, TestPerformMigration)
+TEST_F(MigrationTest, TestPerformMigration)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -601,7 +601,7 @@ TEST_F(Migration, TestPerformMigration)
 
 extern "C" void PrintMigSpeed(struct ProcessManager *manager, uint64_t nr, struct timeval start, struct timeval end);
 extern "C" void PostMigration(struct ProcessManager *manager, struct MigrateMsg *mMsg);
-TEST_F(Migration, TestPerformMigrationSecond)
+TEST_F(MigrationTest, TestPerformMigrationSecond)
 {
     int ret;
     ProcessAttr process = { .pid = 1025 };
@@ -617,7 +617,7 @@ TEST_F(Migration, TestPerformMigrationSecond)
 
 extern "C" int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 extern "C" int UpdateScanTime(ProcessAttr *process);
-TEST_F(Migration, TestUpdateScanTime)
+TEST_F(MigrationTest, TestUpdateScanTime)
 {
     int ret;
     ProcessAttr process;
@@ -632,7 +632,7 @@ TEST_F(Migration, TestUpdateScanTime)
 }
 
 extern "C" void UpdateScene(struct ProcessManager *manager);
-TEST_F(Migration, TestUpdateScene)
+TEST_F(MigrationTest, TestUpdateScene)
 {
     struct ProcessManager manager = { 0 };
     ProcessAttr current = {};
@@ -649,7 +649,7 @@ TEST_F(Migration, TestUpdateScene)
 }
 
 extern "C" int HandleScene(ThreadCtx *ctx);
-TEST_F(Migration, TestHandleScene)
+TEST_F(MigrationTest, TestHandleScene)
 {
     struct ProcessManager manager = { 0 };
     ProcessAttr current = {};
@@ -669,7 +669,7 @@ TEST_F(Migration, TestHandleScene)
 
 extern "C" uint32_t GetScanPeriodConfig(void);
 extern "C" void UpdateAllProcessScanTime(ThreadCtx *ctx);
-TEST_F(Migration, TestUpdateAllProcessScanTime)
+TEST_F(MigrationTest, TestUpdateAllProcessScanTime)
 {
     struct ProcessManager manager = { 0 };
     ProcessAttr current = {};
@@ -692,7 +692,7 @@ extern "C" bool GetMigratePeriodChanged(void);
 extern "C" uint32_t GetMigratePeriodConfig(void);
 extern "C" bool GetScanPeriodChanged(void);
 extern "C" void UpdatePeriodFromConfig(ThreadCtx *ctx);
-TEST_F(Migration, TestUodatePeriodFromConfig)
+TEST_F(MigrationTest, TestUodatePeriodFromConfig)
 {
     ThreadCtx ctx = {};
     ctx.period = 500;
@@ -706,7 +706,7 @@ TEST_F(Migration, TestUodatePeriodFromConfig)
 }
 
 extern "C" void UpdateMigResult(struct MigrateMsg *mMsg, struct ProcessManager *manager);
-TEST_F(Migration, TestUpdateMigResultLocalToRemote)
+TEST_F(MigrationTest, TestUpdateMigResultLocalToRemote)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -732,7 +732,7 @@ TEST_F(Migration, TestUpdateMigResultLocalToRemote)
     EXPECT_EQ(170, attr.strategyAttr.remoteNrPagesAfterMigrate[0][0]);
 }
 
-TEST_F(Migration, TestUpdateMigResultRemoteToLocalUnexpectedMigCount)
+TEST_F(MigrationTest, TestUpdateMigResultRemoteToLocalUnexpectedMigCount)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -758,7 +758,7 @@ TEST_F(Migration, TestUpdateMigResultRemoteToLocalUnexpectedMigCount)
     EXPECT_EQ(0, attr.strategyAttr.remoteNrPagesAfterMigrate[0][0]);
 }
 
-TEST_F(Migration, TestUpdateMigResultRemoteToLocalExpectedMigCount)
+TEST_F(MigrationTest, TestUpdateMigResultRemoteToLocalExpectedMigCount)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -783,7 +783,7 @@ TEST_F(Migration, TestUpdateMigResultRemoteToLocalExpectedMigCount)
     UpdateMigResult(&mMsg, &manager);
     EXPECT_EQ(30, attr.strategyAttr.remoteNrPagesAfterMigrate[0][0]);
 }
-TEST_F(Migration, TestUpdateMigResultTwo)
+TEST_F(MigrationTest, TestUpdateMigResultTwo)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -810,7 +810,7 @@ TEST_F(Migration, TestUpdateMigResultTwo)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultThree)
+TEST_F(MigrationTest, TestUpdateMigResultThree)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -837,7 +837,7 @@ TEST_F(Migration, TestUpdateMigResultThree)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultFour)
+TEST_F(MigrationTest, TestUpdateMigResultFour)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -864,7 +864,7 @@ TEST_F(Migration, TestUpdateMigResultFour)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultFive)
+TEST_F(MigrationTest, TestUpdateMigResultFive)
 {
     ProcessAttr attr = {};
     ProcessAttr attr2 = {};
@@ -903,7 +903,7 @@ TEST_F(Migration, TestUpdateMigResultFive)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultSix)
+TEST_F(MigrationTest, TestUpdateMigResultSix)
 {
     ProcessAttr attr = {};
     attr.next = NULL;
@@ -930,7 +930,7 @@ TEST_F(Migration, TestUpdateMigResultSix)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultSeven)
+TEST_F(MigrationTest, TestUpdateMigResultSeven)
 {
     ProcessAttr attr = {};
     ProcessAttr attr2 = {};
@@ -969,7 +969,7 @@ TEST_F(Migration, TestUpdateMigResultSeven)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestUpdateMigResultEight)
+TEST_F(MigrationTest, TestUpdateMigResultEight)
 {
     ProcessAttr attr = {};
     ProcessAttr attr2 = {};
@@ -1008,7 +1008,7 @@ TEST_F(Migration, TestUpdateMigResultEight)
 }
 
 extern "C" int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg *msg);
-TEST_F(Migration, TestMigrateRemoteNumaOne)
+TEST_F(MigrationTest, TestMigrateRemoteNumaOne)
 {
     struct ProcessManager manager;
     struct MigrateNumaIoctlMsg msg = { .srcNid = 4, .destNid = 5, .count = 1, .memids = { 1 } };
@@ -1018,7 +1018,7 @@ TEST_F(Migration, TestMigrateRemoteNumaOne)
 }
 
 extern "C" int CleanStrategyAttribute(struct ProcessManager *manager);
-TEST_F(Migration, TestCleanStrateryAttribute)
+TEST_F(MigrationTest, TestCleanStrateryAttribute)
 {
     struct ProcessManager manager;
     ProcessAttr current;
@@ -1031,7 +1031,7 @@ TEST_F(Migration, TestCleanStrateryAttribute)
 }
 
 extern "C" void PrintMigSpeed(struct ProcessManager *manager, uint64_t nr, struct timeval start, struct timeval end);
-TEST_F(Migration, TestPrintMigSpeed)
+TEST_F(MigrationTest, TestPrintMigSpeed)
 {
     struct timeval start = { 0 };
     struct timeval end = { 0 };
@@ -1046,7 +1046,7 @@ TEST_F(Migration, TestPrintMigSpeed)
 }
 
 extern "C" int PreMigration(struct ProcessManager *manager, struct MigrateMsg *mMsg, uint64_t *migratePages);
-TEST_F(Migration, TestPreMigration)
+TEST_F(MigrationTest, TestPreMigration)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -1072,7 +1072,7 @@ TEST_F(Migration, TestPreMigration)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Migration, TestPreMigrationTwo)
+TEST_F(MigrationTest, TestPreMigrationTwo)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -1099,7 +1099,7 @@ TEST_F(Migration, TestPreMigrationTwo)
 }
 
 extern "C" void PostMigration(struct ProcessManager *manager, struct MigrateMsg *mMsg);
-TEST_F(Migration, TestPostMigration)
+TEST_F(MigrationTest, TestPostMigration)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -1117,7 +1117,7 @@ TEST_F(Migration, TestPostMigration)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestPostMigrationTwo)
+TEST_F(MigrationTest, TestPostMigrationTwo)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -1135,7 +1135,7 @@ TEST_F(Migration, TestPostMigrationTwo)
     free(mMsg.migList);
 }
 
-TEST_F(Migration, TestPostMigrationAppliesPendingGroupedPolicy)
+TEST_F(MigrationTest, TestPostMigrationAppliesPendingGroupedPolicy)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};

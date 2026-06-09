@@ -29,7 +29,7 @@ static struct dirent MakeDirent(const char *name)
 }
 
 
-class Device : public ::testing::Test {
+class DeviceTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -49,7 +49,7 @@ int ConfigTrackingDev(int *trackingFds, uint32_t pageSize);
 int EnableTracking(struct ProcessManager *manager);
 int OpenAndFlockFd(int fd);
 }
-TEST_F(Device, TestIInitTrackingDevOne)
+TEST_F(DeviceTest, TestIInitTrackingDevOne)
 {
     struct ProcessManager pm = {
         .nrThread = 0
@@ -61,7 +61,7 @@ TEST_F(Device, TestIInitTrackingDevOne)
     EXPECT_EQ(-ENODEV, ret);
 }
 
-TEST_F(Device, TestIInitTrackingDevTwo)
+TEST_F(DeviceTest, TestIInitTrackingDevTwo)
 {
     struct ProcessManager pm = {
         .nrThread = 0
@@ -87,7 +87,7 @@ TEST_F(Device, TestIInitTrackingDevTwo)
 }
 
 extern "C" int ConfigureTrackingDevices(struct ProcessManager *manager);
-TEST_F(Device, TestIInitTrackingDevThree)
+TEST_F(DeviceTest, TestIInitTrackingDevThree)
 {
     int ret;
     struct ProcessManager pm = {
@@ -107,7 +107,7 @@ TEST_F(Device, TestIInitTrackingDevThree)
 }
 
 extern "C" int SendCmdToAllNodes(int fds[], unsigned long cmd, int arg);
-TEST_F(Device, TestEnableTracking)
+TEST_F(DeviceTest, TestEnableTracking)
 {
     struct ProcessManager pm = {
         .nrThread = 0
@@ -119,7 +119,7 @@ TEST_F(Device, TestEnableTracking)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Device, TestDisableTracking)
+TEST_F(DeviceTest, TestDisableTracking)
 {
     struct ProcessManager pm = {
         .nrThread = 0
@@ -131,7 +131,7 @@ TEST_F(Device, TestDisableTracking)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Device, TestSendCmdToAllNodes)
+TEST_F(DeviceTest, TestSendCmdToAllNodes)
 {
     int fds[100] = {0};
     int ret;
@@ -146,7 +146,7 @@ TEST_F(Device, TestSendCmdToAllNodes)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Device, TestSendCmdToAllNodesGroup)
+TEST_F(DeviceTest, TestSendCmdToAllNodesGroup)
 {
     int fds[100] = {-1};
     int ret;
@@ -156,7 +156,7 @@ TEST_F(Device, TestSendCmdToAllNodesGroup)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(Device, TestConfigTrackingDev)
+TEST_F(DeviceTest, TestConfigTrackingDev)
 {
     int fds[100] = {0};
     int ret;
@@ -170,7 +170,7 @@ TEST_F(Device, TestConfigTrackingDev)
 }
 
 extern "C" int DisableTracking(struct ProcessManager *manager);
-TEST_F(Device, TestDeinitTrackingDev)
+TEST_F(DeviceTest, TestDeinitTrackingDev)
 {
     struct ProcessManager pm = {
         .fds = {
@@ -193,7 +193,7 @@ TEST_F(Device, TestDeinitTrackingDev)
 }
 
 extern "C" int FindFdByNode(int fds[], int fdsLength);
-TEST_F(Device, TestFindFdByNode)
+TEST_F(DeviceTest, TestFindFdByNode)
 {
     int fds[1] = {-5};
     int fdsLength = 1;
@@ -206,13 +206,13 @@ TEST_F(Device, TestFindFdByNode)
 }
 
 extern "C" bool IsLocalNuma(unsigned long nid);
-TEST_F(Device, TestIsLocalNumaExceedLocalNumaNum)
+TEST_F(DeviceTest, TestIsLocalNumaExceedLocalNumaNum)
 {
     bool ret = IsLocalNuma(LOCAL_NUMA_NUM);
     EXPECT_FALSE(ret);
 }
 
-TEST_F(Device, TestIsLocalNumaBuildFailed)
+TEST_F(DeviceTest, TestIsLocalNumaBuildFailed)
 {
     MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
         .stubs()
@@ -222,7 +222,7 @@ TEST_F(Device, TestIsLocalNumaBuildFailed)
 }
 
 extern "C" FILE *fopen(const char *filename, const char *modes);
-TEST_F(Device, TestIsLocalNumaOpenFailed)
+TEST_F(DeviceTest, TestIsLocalNumaOpenFailed)
 {
     MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
         .stubs()
@@ -234,7 +234,7 @@ TEST_F(Device, TestIsLocalNumaOpenFailed)
 
 extern "C" int fgetc(FILE *stream);
 extern "C" int fclose(FILE *stream);
-TEST_F(Device, TestIsLocalNumaReadFailed)
+TEST_F(DeviceTest, TestIsLocalNumaReadFailed)
 {
     FILE tmpFile;
 
@@ -248,7 +248,7 @@ TEST_F(Device, TestIsLocalNumaReadFailed)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(Device, TestIsLocalNumaReadRemote)
+TEST_F(DeviceTest, TestIsLocalNumaReadRemote)
 {
     FILE tmpFile;
     int remoteValue = '1';
@@ -263,7 +263,7 @@ TEST_F(Device, TestIsLocalNumaReadRemote)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(Device, TestIsLocalNumaReadLocal)
+TEST_F(DeviceTest, TestIsLocalNumaReadLocal)
 {
     FILE tmpFile;
     int localValue = '0';
@@ -279,7 +279,7 @@ TEST_F(Device, TestIsLocalNumaReadLocal)
 }
 
 extern "C" int GetNrLocalNumaFromKernel(struct ProcessManager *manager);
-TEST_F(Device, TestConfigureTrackingDevicesSetNrLocalNumaFailed)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesSetNrLocalNumaFailed)
 {
     struct ProcessManager manager;
     MOCKER(GetNrLocalNumaFromKernel).stubs().will(returnValue(-1));
@@ -287,7 +287,7 @@ TEST_F(Device, TestConfigureTrackingDevicesSetNrLocalNumaFailed)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Device, TestConfigureTrackingDevicesConfigTrackingDevFailed)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesConfigTrackingDevFailed)
 {
     struct ProcessManager manager;
     MOCKER(GetNrLocalNumaFromKernel).stubs().will(returnValue(0));
@@ -296,7 +296,7 @@ TEST_F(Device, TestConfigureTrackingDevicesConfigTrackingDevFailed)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(Device, TestConfigureTrackingDevicesSuccess)
+TEST_F(DeviceTest, TestConfigureTrackingDevicesSuccess)
 {
     struct ProcessManager manager;
     MOCKER(GetNrLocalNumaFromKernel).stubs().will(returnValue(0));

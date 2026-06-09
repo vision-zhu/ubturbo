@@ -17,7 +17,7 @@ using namespace std;
 extern "C" EnvAtomic g_status;
 extern "C" struct ProcessManager g_processManager;
 
-class InnerInterface : public ::testing::Test {
+class InnerInterfaceTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -32,7 +32,7 @@ protected:
     }
 };
 
-TEST_F(InnerInterface, TestNullptrError)
+TEST_F(InnerInterfaceTest, TestNullptrError)
 {
     int ret;
     EnvAtomicSet(&g_status, 1);
@@ -42,7 +42,7 @@ TEST_F(InnerInterface, TestNullptrError)
 }
 
 extern "C" void SetAdaptMem(bool flag);
-TEST_F(InnerInterface, TestSmapEnableAdaptMemOne)
+TEST_F(InnerInterfaceTest, TestSmapEnableAdaptMemOne)
 {
     int ret;
     MOCKER(SetAdaptMem).stubs();
@@ -50,7 +50,7 @@ TEST_F(InnerInterface, TestSmapEnableAdaptMemOne)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(InnerInterface, TestSmapEnableAdaptMemTwo)
+TEST_F(InnerInterfaceTest, TestSmapEnableAdaptMemTwo)
 {
     int ret;
     MOCKER(SetAdaptMem).stubs();
@@ -58,7 +58,7 @@ TEST_F(InnerInterface, TestSmapEnableAdaptMemTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(InnerInterface, TestSmapEnableAdaptMemThree)
+TEST_F(InnerInterfaceTest, TestSmapEnableAdaptMemThree)
 {
     int ret;
     MOCKER(SetAdaptMem).stubs();
@@ -66,7 +66,7 @@ TEST_F(InnerInterface, TestSmapEnableAdaptMemThree)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(InnerInterface, TestSmapQueryVmMemRatio)
+TEST_F(InnerInterfaceTest, TestSmapQueryVmMemRatio)
 {
     EnvAtomicSet(&g_status, 0);
     int ret = SmapQueryVmMemRatio(nullptr);
