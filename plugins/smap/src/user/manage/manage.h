@@ -90,6 +90,7 @@ extern EnvAtomic g_forbiddenNodes[MAX_NODES];
 #define NODE_FORBIDDEN_USER (1 << 0)
 #define NODE_FORBIDDEN_MIGBACK_DONE (1 << 1)
 #define NODE_FORBIDDEN_MIGBACK_BUSY (1 << 2)
+#define NODE_FORBIDDEN_CRITICAL_ERR (1 << 3)
 
 typedef uint16_t actc_t;
 
@@ -228,6 +229,7 @@ typedef struct {
 typedef struct {
     uint32_t cpuMask[LOCAL_NUMA_NUM]; // CPU绑定情况
     uint32_t numaNodes; // numa bitmap: 0-unused, 1-used
+    uint32_t originalNumaNodes; // 初始注册时的numa bitmap，用于critical_err恢复
 } NumaAttribute;
 
 typedef struct {
@@ -447,6 +449,8 @@ int ProcessSetPendingGroupedManage(pid_t pid, uint32_t nodeBitmap, const GroupMi
 int ApplyPendingGroupedPolicy(ProcessAttr *attr);
 
 void CheckAndRemoveInvalidProcess(void);
+
+void CheckRemoteNumaCriticalErr(struct ProcessManager *manager);
 
 void RemoveManagedProcess(int nr, pid_t *pidArr);
 

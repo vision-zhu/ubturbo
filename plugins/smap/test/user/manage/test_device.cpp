@@ -304,3 +304,73 @@ TEST_F(DeviceTest, TestConfigureTrackingDevicesSuccess)
     int ret = ConfigureTrackingDevices(&manager);
     EXPECT_EQ(0, ret);
 }
+
+extern "C" bool IsNumaCriticalErr(unsigned long nid);
+TEST_F(DeviceTest, TestIsNumaCriticalErrExceedMaxNodes)
+{
+    bool ret = IsNumaCriticalErr(MAX_NODES);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsNumaCriticalErrBuildPathFailed)
+{
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(-1));
+    bool ret = IsNumaCriticalErr(4);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsNumaCriticalErrFileNotFound)
+{
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue((FILE *)nullptr));
+    bool ret = IsNumaCriticalErr(4);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsNumaCriticalErrReadEOF)
+{
+    FILE tmpFile;
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(EOF));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsNumaCriticalErr(4);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsNumaCriticalErrAvailable)
+{
+    FILE tmpFile;
+    int availableValue = '0';
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(availableValue));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsNumaCriticalErr(4);
+    EXPECT_FALSE(ret);
+}
+
+TEST_F(DeviceTest, TestIsNumaCriticalErrUnavailable)
+{
+    FILE tmpFile;
+    int criticalValue = '1';
+
+    MOCKER((int (*)(char *, size_t, size_t, char const *, void *))snprintf_s)
+        .stubs()
+        .will(returnValue(0));
+    MOCKER(fopen).stubs().will(returnValue(&tmpFile));
+    MOCKER(fgetc).stubs().will(returnValue(criticalValue));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    bool ret = IsNumaCriticalErr(4);
+    EXPECT_TRUE(ret);
+}

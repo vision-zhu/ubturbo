@@ -712,6 +712,7 @@ int ScanMigrateWork(ThreadCtx *ctx)
     }
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
+    CheckRemoteNumaCriticalErr(manager);
     ret = PerformMigrationPreparation(manager);
     if (ret) {
         SMAP_LOGGER_DEBUG("Migration preparation failed: %d.", ret);

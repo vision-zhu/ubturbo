@@ -139,6 +139,40 @@ static bool IsLocalNuma(unsigned long nid)
     return c == '0';
 }
 
+bool IsNumaCriticalErr(unsigned long nid)
+{
+#define SYS_NODE_CRITICAL_ERR_LEN 60
+    char path[SYS_NODE_CRITICAL_ERR_LEN] = { 0 };
+#undef SYS_NODE_CRITICAL_ERR_LEN
+
+    if (nid >= MAX_NODES) {
+        return false;
+    }
+
+    int ret = snprintf_s(path, sizeof(path), sizeof(path) - 1, "%s/node%lu/critical_err", SYS_NODE_PATH, nid);
+    if (ret == -1) {
+        SMAP_LOGGER_ERROR("Failed to build node%lu critical_err path.", nid);
+        return false;
+    }
+
+    FILE *file = fopen(path, "r");
+    if (!file) {
+        SMAP_LOGGER_DEBUG("node%lu critical_err file not found, assume available.", nid);
+        return false;
+    }
+
+    int c = fgetc(file);
+    if (fclose(file) != 0) {
+        SMAP_LOGGER_WARNING("Failed to close node%lu critical_err file: %d.", nid, errno);
+    }
+    if (c == EOF) {
+        SMAP_LOGGER_DEBUG("node%lu critical_err file empty, assume available.", nid);
+        return false;
+    }
+
+    return c == '1';
+}
+
 static int GetNrLocalNumaFromKernel(struct ProcessManager *manager)
 {
     if (manager->fds.access < 0) {

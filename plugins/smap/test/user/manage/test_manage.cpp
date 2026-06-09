@@ -2417,3 +2417,132 @@ TEST_F(ManageTest, TestCalibrateMigratePagesThreeLocals)
     EXPECT_EQ((uint32_t)60, attr.strategyAttr.remoteNrPagesAfterMigrate[1][0]);
     EXPECT_EQ((uint32_t)120, attr.strategyAttr.remoteNrPagesAfterMigrate[2][0]);
 }
+
+extern "C" void CheckRemoteNumaCriticalErr(struct ProcessManager *manager);
+extern "C" bool IsNumaCriticalErr(unsigned long nid);
+TEST_F(ManageTest, TestCheckRemoteNumaCriticalErrDisableNode)
+{
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.numaAttr.originalNumaNodes = 0b00010001;
+    attr.scanType = NORMAL_SCAN;
+    attr.next = nullptr;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = &attr;
+    g_processManager.nrLocalNuma = 4;
+
+    MOCKER(IsNumaCriticalErr).stubs()
+        .will(returnValue(true))
+        .then(returnValue(false));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+    EXPECT_TRUE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_CRITICAL_ERR));
+    EXPECT_FALSE(InAttrL2(&attr, 4));
+
+    g_processManager.processes = nullptr;
+    for (int i = 0; i < MAX_NODES; i++) {
+        EnvAtomicSet(&g_forbiddenNodes[i], 0);
+    }
+}
+
+TEST_F(ManageTest, TestCheckRemoteNumaCriticalErrRestoreNode)
+{
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00000001;
+    attr.numaAttr.originalNumaNodes = 0b00010001;
+    attr.scanType = NORMAL_SCAN;
+    attr.next = nullptr;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = &attr;
+    g_processManager.nrLocalNuma = 4;
+    SetNodeForbiddenReason(4, NODE_FORBIDDEN_CRITICAL_ERR);
+
+    MOCKER(IsNumaCriticalErr).stubs().will(returnValue(false));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+    EXPECT_FALSE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_CRITICAL_ERR));
+    EXPECT_TRUE(InAttrL2(&attr, 4));
+    EXPECT_EQ((uint32_t)0b00010001, attr.numaAttr.numaNodes);
+
+    g_processManager.processes = nullptr;
+    for (int i = 0; i < MAX_NODES; i++) {
+        EnvAtomicSet(&g_forbiddenNodes[i], 0);
+    }
+}
+
+TEST_F(ManageTest, TestCheckRemoteNumaCriticalErrNoChange)
+{
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00010001;
+    attr.numaAttr.originalNumaNodes = 0b00010001;
+    attr.scanType = NORMAL_SCAN;
+    attr.next = nullptr;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = &attr;
+    g_processManager.nrLocalNuma = 4;
+
+    MOCKER(IsNumaCriticalErr).stubs().will(returnValue(false));
+    CheckRemoteNumaCriticalErr(&g_processManager);
+    EXPECT_EQ((uint32_t)0b00010001, attr.numaAttr.numaNodes);
+
+    g_processManager.processes = nullptr;
+}
+
+TEST_F(ManageTest, TestCheckRemoteNumaCriticalErrNodeAlreadyCritical)
+{
+    ProcessAttr attr = {};
+    attr.pid = 1234;
+    attr.numaAttr.numaNodes = 0b00000001;
+    attr.numaAttr.originalNumaNodes = 0b00010001;
+    attr.scanType = NORMAL_SCAN;
+    attr.next = nullptr;
+    EnvMutexInit(&g_processManager.lock);
+    g_processManager.processes = &attr;
+    g_processManager.nrLocalNuma = 4;
+    SetNodeForbiddenReason(4, NODE_FORBIDDEN_CRITICAL_ERR);
+
+    MOCKER(IsNumaCriticalErr).stubs().will(returnValue(true));
+    CheckRemoteNumaCriticalErr(&g_processManager);
+    EXPECT_TRUE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_CRITICAL_ERR));
+    EXPECT_EQ((uint32_t)0b00000001, attr.numaAttr.numaNodes);
+
+    g_processManager.processes = nullptr;
+    for (int i = 0; i < MAX_NODES; i++) {
+        EnvAtomicSet(&g_forbiddenNodes[i], 0);
+    }
+}
+
+TEST_F(ManageTest, TestOriginalNumaNodesSavedInAddProcess)
+{
+    g_processManager.processes = nullptr;
+    g_processManager.nr[VM_TYPE] = 0;
+    ProcessParam param = {
+        .pid = 123,
+        .scanTime = 50,
+        .duration = 1,
+        .scanType = NORMAL_SCAN,
+        .count = 1,
+    };
+    param.numaParam[0].nid = 4;
+    param.numaParam[0].ratio = 50;
+
+    MOCKER(GetPidType).stubs().will(returnValue(VM_TYPE));
+    MOCKER(CheckPid).stubs().will(returnValue(0));
+    MOCKER(VMPreprocess).stubs().will(returnValue(0));
+    MOCKER(GetPidNrPages).stubs().will(returnValue(0x100));
+    MOCKER(EnvMutexLock).stubs().will(ignoreReturnValue());
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
+    MOCKER(EnvMutexUnlock).stubs().will(ignoreReturnValue());
+    MOCKER(sched_getaffinity).stubs().will(returnValue(0));
+    MOCKER(GetNodeFromCpu).stubs().will(returnValue(4));
+
+    int ret = ProcessAddManage(&param, nullptr);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(g_processManager.processes->numaAttr.numaNodes,
+              g_processManager.processes->numaAttr.originalNumaNodes);
+}
