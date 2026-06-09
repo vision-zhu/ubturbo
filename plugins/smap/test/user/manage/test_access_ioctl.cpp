@@ -15,7 +15,7 @@
 
 using namespace std;
 
-class AccessIoctlTest : public ::testing::Test {
+class AccessIoctl : public ::testing::Test {
 public:
     static constexpr int BITMAP_BUF_LEN = 10;
     static constexpr int BITMAP_BUF_LEN_PART1 = 4;
@@ -36,7 +36,7 @@ protected:
 };
 
 extern "C" int open(const char *pathname, int flags);
-TEST_F(AccessIoctlTest, TestAccessIoctlAddPid)
+TEST_F(AccessIoctl, TestAccessIoctlAddPid)
 {
     int ret;
     int len = 0;
@@ -49,7 +49,7 @@ TEST_F(AccessIoctlTest, TestAccessIoctlAddPid)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessIoctlRemovePid)
+TEST_F(AccessIoctl, TestAccessIoctlRemovePid)
 {
     int ret;
     int len = 0;
@@ -63,7 +63,7 @@ TEST_F(AccessIoctlTest, TestAccessIoctlRemovePid)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessIoctlRemoveAllPid)
+TEST_F(AccessIoctl, TestAccessIoctlRemoveAllPid)
 {
     int ret;
     MOCKER(open).stubs().will(returnValue(-EPERM));
@@ -71,7 +71,7 @@ TEST_F(AccessIoctlTest, TestAccessIoctlRemoveAllPid)
     EXPECT_EQ(-EBADF, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessIoctlWalkPagemap)
+TEST_F(AccessIoctl, TestAccessIoctlWalkPagemap)
 {
     int ret;
     size_t len;
@@ -82,7 +82,7 @@ TEST_F(AccessIoctlTest, TestAccessIoctlWalkPagemap)
 }
 
 extern "C" ssize_t read(int fd, void *buf, size_t count);
-TEST_F(AccessIoctlTest, TestAccessReadAllInOneTime)
+TEST_F(AccessIoctl, TestAccessReadAllInOneTime)
 {
     int ret;
     size_t len = BITMAP_BUF_LEN;
@@ -93,7 +93,7 @@ TEST_F(AccessIoctlTest, TestAccessReadAllInOneTime)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessReadPartial)
+TEST_F(AccessIoctl, TestAccessReadPartial)
 {
     int ret;
     size_t len = BITMAP_BUF_LEN;
@@ -107,7 +107,7 @@ TEST_F(AccessIoctlTest, TestAccessReadPartial)
     EXPECT_EQ(-EIO, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessReadAllInTwoTimes)
+TEST_F(AccessIoctl, TestAccessReadAllInTwoTimes)
 {
     int ret;
     size_t len = BITMAP_BUF_LEN_PART1 + BITMAP_BUF_LEN_PART2;
@@ -122,7 +122,7 @@ TEST_F(AccessIoctlTest, TestAccessReadAllInTwoTimes)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(AccessIoctlTest, TestAccessReadFailedInSecondTime)
+TEST_F(AccessIoctl, TestAccessReadFailedInSecondTime)
 {
     int ret;
     size_t len = BITMAP_BUF_LEN_PART1 + BITMAP_BUF_LEN_PART2;

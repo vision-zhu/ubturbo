@@ -13,7 +13,7 @@
 
 using namespace std;
 
-class SceneTest : public ::testing::Test {
+class Scene : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -29,7 +29,7 @@ protected:
 };
 
 extern "C" int PrevIndex(int index, int len);
-TEST_F(SceneTest, TestPrevIndex)
+TEST_F(Scene, TestPrevIndex)
 {
     int base = 0, period = 5;
     int ret = PrevIndex(base, period);
@@ -37,7 +37,7 @@ TEST_F(SceneTest, TestPrevIndex)
 }
 
 extern "C" int NextIndex(int index, int len);
-TEST_F(SceneTest, TestNextIndex)
+TEST_F(Scene, TestNextIndex)
 {
     int period = 5;
     int base = period - 1;
@@ -46,7 +46,7 @@ TEST_F(SceneTest, TestNextIndex)
 }
 
 extern "C" void IncPageIndex(SceneInfo *info);
-TEST_F(SceneTest, TestIncPageIndex)
+TEST_F(Scene, TestIncPageIndex)
 {
     SceneInfo info = { 0 };
     IncPageIndex(&info);
@@ -54,7 +54,7 @@ TEST_F(SceneTest, TestIncPageIndex)
 }
 
 extern "C" int GetDeltaHot(SceneInfo *info, int currIdx);
-TEST_F(SceneTest, TestGetDeltaHot)
+TEST_F(Scene, TestGetDeltaHot)
 {
     SceneInfo info = { 0 };
     info.pageInfo[0].nrHot = 10;
@@ -64,7 +64,7 @@ TEST_F(SceneTest, TestGetDeltaHot)
 }
 
 extern "C" bool TryFromStableToUnstable(SceneInfo *info, int idx);
-TEST_F(SceneTest, TestTryFromStableToUnstable)
+TEST_F(Scene, TestTryFromStableToUnstable)
 {
     SceneInfo info = { 0 };
 
@@ -78,7 +78,7 @@ TEST_F(SceneTest, TestTryFromStableToUnstable)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(SceneTest, TestTryFromStableToUnstableLittleDeltaHot)
+TEST_F(Scene, TestTryFromStableToUnstableLittleDeltaHot)
 {
     SceneInfo info = { 0 };
     info.pageInfo[0].nrPages = 1000;
@@ -89,7 +89,7 @@ TEST_F(SceneTest, TestTryFromStableToUnstableLittleDeltaHot)
 }
 
 extern "C" bool TryToStayInUnstable(SceneInfo *info, int idx);
-TEST_F(SceneTest, TestTryToStayInUnstable)
+TEST_F(Scene, TestTryToStayInUnstable)
 {
     SceneInfo info = { 0 };
 
@@ -102,7 +102,7 @@ TEST_F(SceneTest, TestTryToStayInUnstable)
 }
 
 extern "C" bool IsUnstableScene(SceneInfo *info);
-TEST_F(SceneTest, TestIsUnstableScene)
+TEST_F(Scene, TestIsUnstableScene)
 {
     bool ret;
     SceneInfo info = { 0 };
@@ -114,7 +114,7 @@ TEST_F(SceneTest, TestIsUnstableScene)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(SceneTest, TestIsUnstableSceneTwo)
+TEST_F(Scene, TestIsUnstableSceneTwo)
 {
     SceneInfo info = { 0 };
     info.lastScene = UNSTABLE_SCENE;
@@ -132,7 +132,7 @@ TEST_F(SceneTest, TestIsUnstableSceneTwo)
 }
 
 extern "C" bool IsHeavyLoadScene(SceneInfo *info);
-TEST_F(SceneTest, TestIsHeavyLoadScene)
+TEST_F(Scene, TestIsHeavyLoadScene)
 {
     bool ret;
     SceneInfo info = { 0 };
@@ -153,7 +153,7 @@ TEST_F(SceneTest, TestIsHeavyLoadScene)
 }
 
 extern "C" void AnalyzeScene(SceneInfo *info);
-TEST_F(SceneTest, TestAnalyzeScene)
+TEST_F(Scene, TestAnalyzeScene)
 {
     SceneInfo info;
     MOCKER(IsUnstableScene).stubs().will(returnValue(true));
@@ -174,7 +174,7 @@ TEST_F(SceneTest, TestAnalyzeScene)
 }
 
 extern "C" int StatsL2AvgHotPages(ProcessAttr *process);
-TEST_F(SceneTest, TestStatsL2AvgHotPages)
+TEST_F(Scene, TestStatsL2AvgHotPages)
 {
     ProcessAttr process;
     process.sceneInfo.pageInfoIndex = 0;
@@ -188,7 +188,7 @@ TEST_F(SceneTest, TestStatsL2AvgHotPages)
 extern "C" int StatsMaxHotPages(ProcessAttr *process);
 extern "C" uint32_t StatsMaxGuaranteePages(ProcessAttr *process);
 extern "C" void StatsGuaranteePages(ProcessAttr *process);
-TEST_F(SceneTest, TestStatsGuaranteePages)
+TEST_F(Scene, TestStatsGuaranteePages)
 {
     ProcessAttr process;
     process.sceneInfo.pageInfoIndex = 0;
@@ -201,7 +201,7 @@ TEST_F(SceneTest, TestStatsGuaranteePages)
 }
 
 extern "C" void CalcMemInfo(ProcessAttr *process);
-TEST_F(SceneTest, TestCalcMemInfo)
+TEST_F(Scene, TestCalcMemInfo)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -223,7 +223,7 @@ TEST_F(SceneTest, TestCalcMemInfo)
 }
 
 extern "C" int GetProcessSceneAttr(Scene scene, SceneInfo *info, PidType type);
-TEST_F(SceneTest, TestGetProcessSceneAttr)
+TEST_F(Scene, TestGetProcessSceneAttr)
 {
     SceneInfo info = { 0 };
     Scene scene = UNSTABLE_SCENE;
@@ -243,7 +243,7 @@ TEST_F(SceneTest, TestGetProcessSceneAttr)
 }
 
 extern "C" int InitSceneInfo(SceneInfo *info, PidType type);
-TEST_F(SceneTest, TestInitSceneInfo)
+TEST_F(Scene, TestInitSceneInfo)
 {
     SceneInfo info = { 0 };
     int ret = InitSceneInfo(&info, VM_TYPE);
@@ -253,7 +253,7 @@ TEST_F(SceneTest, TestInitSceneInfo)
 }
 
 extern "C" int SetProcessSceneAttr(ProcessAttr *process);
-TEST_F(SceneTest, TestSetProcessSceneAttr)
+TEST_F(Scene, TestSetProcessSceneAttr)
 {
     int ret = SetProcessSceneAttr(nullptr);
     EXPECT_EQ(-EINVAL, ret);
@@ -270,7 +270,7 @@ TEST_F(SceneTest, TestSetProcessSceneAttr)
 }
 
 extern "C" void SetLocalMemStatus(SceneInfo *info);
-TEST_F(SceneTest, TestSetLocalMemStatus)
+TEST_F(Scene, TestSetLocalMemStatus)
 {
     SceneInfo info = { 0 };
     info.pageInfoIndex = 0;
@@ -294,7 +294,7 @@ TEST_F(SceneTest, TestSetLocalMemStatus)
 }
 
 extern "C" int AddList(int arr[], int len);
-TEST_F(SceneTest, TestAddList)
+TEST_F(Scene, TestAddList)
 {
     int arr[2];
     arr[0] = 1;
@@ -304,7 +304,7 @@ TEST_F(SceneTest, TestAddList)
 }
 
 extern "C" void UpdateMemRatio(ProcessAttr *process);
-TEST_F(SceneTest, TestUpdateMemRatio)
+TEST_F(Scene, TestUpdateMemRatio)
 {
     ProcessAttr process;
     double ret = 70;
@@ -318,7 +318,7 @@ TEST_F(SceneTest, TestUpdateMemRatio)
 }
 
 extern "C" void ClearList(int arr[], int len);
-TEST_F(SceneTest, TestClearList)
+TEST_F(Scene, TestClearList)
 {
     int arr[2];
     arr[0] = 1;
@@ -329,7 +329,7 @@ TEST_F(SceneTest, TestClearList)
 }
 
 extern "C" void DistributeExtraPages(int arr[], int len);
-TEST_F(SceneTest, TestDistributeExtraPages)
+TEST_F(Scene, TestDistributeExtraPages)
 {
     int arr[4];
     arr[0] = 2;
@@ -343,7 +343,7 @@ TEST_F(SceneTest, TestDistributeExtraPages)
     EXPECT_EQ(0, arr[3]);
 }
 
-TEST_F(SceneTest, TestDistributeExtraPagesTwo)
+TEST_F(Scene, TestDistributeExtraPagesTwo)
 {
     int arr[3];
     arr[0] = 2;
@@ -356,7 +356,7 @@ TEST_F(SceneTest, TestDistributeExtraPagesTwo)
 }
 
 extern "C" void DistributeInsufficientPages(int arr[], int len);
-TEST_F(SceneTest, TestDistributeInsufficientPages)
+TEST_F(Scene, TestDistributeInsufficientPages)
 {
     int arr[4];
     arr[0] = -2;
@@ -370,7 +370,7 @@ TEST_F(SceneTest, TestDistributeInsufficientPages)
     EXPECT_EQ(0, arr[3]);
 }
 
-TEST_F(SceneTest, TestDistributeInsufficientPagesTwo)
+TEST_F(Scene, TestDistributeInsufficientPagesTwo)
 {
     int arr[3];
     arr[0] = 2;
@@ -383,7 +383,7 @@ TEST_F(SceneTest, TestDistributeInsufficientPagesTwo)
 }
 
 extern "C" void BalanceSurpluses(int arr[], int len);
-TEST_F(SceneTest, TestBalanceSurpluses)
+TEST_F(Scene, TestBalanceSurpluses)
 {
     int arr[4] = { 0 };
     arr[0] = 1;
@@ -403,7 +403,7 @@ TEST_F(SceneTest, TestBalanceSurpluses)
 
 extern "C" bool g_adaptLocalMem;
 extern "C" void SetAdaptMem(bool flag);
-TEST_F(SceneTest, TestSetAdaptMem)
+TEST_F(Scene, TestSetAdaptMem)
 {
     g_adaptLocalMem = true;
     SetAdaptMem(false);
@@ -411,7 +411,7 @@ TEST_F(SceneTest, TestSetAdaptMem)
 }
 extern "C" bool IsReadyForAdapt(ProcessAttr *attr);
 extern "C" void AdjustVmMemRatio(struct ProcessManager *manager, int *surpluses, int len);
-TEST_F(SceneTest, TestAdjustVmMemRatio)
+TEST_F(Scene, TestAdjustVmMemRatio)
 {
     int arr[2];
     int len = 1;
@@ -439,7 +439,7 @@ TEST_F(SceneTest, TestAdjustVmMemRatio)
     EXPECT_EQ(HEAVY_STABLE_SCENE, current.sceneInfo.currScene);
 }
 
-TEST_F(SceneTest, TestIsReadyForAdapt)
+TEST_F(Scene, TestIsReadyForAdapt)
 {
     bool ret;
     ProcessAttr attr;
@@ -453,7 +453,7 @@ TEST_F(SceneTest, TestIsReadyForAdapt)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(SceneTest, TestIsReadyForAdaptTwo)
+TEST_F(Scene, TestIsReadyForAdaptTwo)
 {
     bool ret;
     ProcessAttr attr;
@@ -471,7 +471,7 @@ TEST_F(SceneTest, TestIsReadyForAdaptTwo)
 }
 
 extern "C" void ConfigMultiVmRatio(struct ProcessManager *manager);
-TEST_F(SceneTest, TestConfigMultiVmRatio)
+TEST_F(Scene, TestConfigMultiVmRatio)
 {
     struct ProcessManager manager;
     manager.nr[VM_TYPE] = 0;
@@ -492,7 +492,7 @@ TEST_F(SceneTest, TestConfigMultiVmRatio)
 }
 
 extern "C" void GetMaxNuma(struct ProcessManager *manager, int *maxL1node, int *maxL2node);
-TEST_F(SceneTest, TestGetMaxNuma)
+TEST_F(Scene, TestGetMaxNuma)
 {
     ProcessAttr attr = {};
     attr.numaAttr.numaNodes = 0b10011001;
@@ -508,7 +508,7 @@ TEST_F(SceneTest, TestGetMaxNuma)
 }
 
 extern "C" void ConfigMultiVmRatioInGroups(struct ProcessManager *manager);
-TEST_F(SceneTest, TestConfigMultiVmRatioInGroups)
+TEST_F(Scene, TestConfigMultiVmRatioInGroups)
 {
     struct ProcessManager *manager = GetProcessManager();
     ProcessAttr current;
@@ -520,7 +520,7 @@ TEST_F(SceneTest, TestConfigMultiVmRatioInGroups)
     EXPECT_EQ(false, current.adaptMem.enableAdaptMem);
 }
 
-TEST_F(SceneTest, TestConfigMultiVmRatioInGroupsTwo)
+TEST_F(Scene, TestConfigMultiVmRatioInGroupsTwo)
 {
     struct ProcessManager *manager = GetProcessManager();
     ProcessAttr current;
@@ -534,7 +534,7 @@ TEST_F(SceneTest, TestConfigMultiVmRatioInGroupsTwo)
 }
 
 extern "C" void SkipMultiProcessRatio(struct ProcessManager *manager);
-TEST_F(SceneTest, TestSkipMultiProcessRatio)
+TEST_F(Scene, TestSkipMultiProcessRatio)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -551,7 +551,7 @@ TEST_F(SceneTest, TestSkipMultiProcessRatio)
 extern "C" void ConfigRatios(struct ProcessManager *manager);
 extern "C" PidType GetPidType(struct ProcessManager *manager);
 extern "C" void ConfigMultiVmRatioInGroups(struct ProcessManager *manager);
-TEST_F(SceneTest, TestConfigRatiosProcessType)
+TEST_F(Scene, TestConfigRatiosProcessType)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -567,7 +567,7 @@ TEST_F(SceneTest, TestConfigRatiosProcessType)
     ConfigRatios(&manager);
 }
 
-TEST_F(SceneTest, TestConfigRatiosVmTypeAdaptMemTrue)
+TEST_F(Scene, TestConfigRatiosVmTypeAdaptMemTrue)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -581,7 +581,7 @@ TEST_F(SceneTest, TestConfigRatiosVmTypeAdaptMemTrue)
     ConfigRatios(&manager);
 }
 
-TEST_F(SceneTest, TestConfigRatiosVmTypeAdaptMemFalse)
+TEST_F(Scene, TestConfigRatiosVmTypeAdaptMemFalse)
 {
     struct ProcessManager manager = {};
     ProcessAttr current = {};
@@ -598,7 +598,7 @@ TEST_F(SceneTest, TestConfigRatiosVmTypeAdaptMemFalse)
 }
 
 extern "C" bool GetAdaptMem(void);
-TEST_F(SceneTest, TetsGetAdaptMem)
+TEST_F(Scene, TetsGetAdaptMem)
 {
     g_adaptLocalMem = true;
     bool ret = GetAdaptMem();
@@ -610,7 +610,7 @@ TEST_F(SceneTest, TetsGetAdaptMem)
 }
 
 extern "C" uint32_t StatsMaxGuaranteePages(ProcessAttr *process);
-TEST_F(SceneTest,  TestStatsMaxGuaranteePages)
+TEST_F(Scene,  TestStatsMaxGuaranteePages)
 {
     ProcessAttr attr = {};
     attr.sceneInfo.pageInfoIndex = 0;
@@ -621,7 +621,7 @@ TEST_F(SceneTest,  TestStatsMaxGuaranteePages)
 }
 
 extern "C" int StatsMaxHotPages(ProcessAttr *process);
-TEST_F(SceneTest,  TestStatsMaxHotPages)
+TEST_F(Scene,  TestStatsMaxHotPages)
 {
     ProcessAttr attr = {};
     attr.sceneInfo.pageInfoIndex = 0;

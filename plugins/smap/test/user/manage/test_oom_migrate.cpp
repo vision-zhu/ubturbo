@@ -15,7 +15,7 @@
 
 using namespace std;
 
-class OomMigrateTest : public ::testing::Test {
+class OomMigrate : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -31,7 +31,7 @@ protected:
 };
 
 extern "C" int InitOomMigrateMsg(struct MigrateMsg *mMsg, struct ProcessManager *manager);
-TEST_F(OomMigrateTest, TestInitOomMigrateMsg)
+TEST_F(OomMigrate, TestInitOomMigrateMsg)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -49,7 +49,7 @@ TEST_F(OomMigrateTest, TestInitOomMigrateMsg)
 extern "C" int InitMigList(struct MigList *mList, uint64_t *pageCount, ProcessAttr *attr);
 extern "C" int GetNumaNodesForPid(pid_t pid, int *node);
 extern "C" unsigned long GetPidNrPages(pid_t pid);
-TEST_F(OomMigrateTest, TestInitMigList)
+TEST_F(OomMigrate, TestInitMigList)
 {
     int ret;
     int node = 0;
@@ -77,7 +77,7 @@ TEST_F(OomMigrateTest, TestInitMigList)
     EXPECT_EQ(pageCount, mList.nr);
 }
 
-TEST_F(OomMigrateTest, TestInitMigListSecond)
+TEST_F(OomMigrate, TestInitMigListSecond)
 {
     int ret;
     int node = 0;
@@ -111,7 +111,7 @@ extern "C" int OpenPidPagemapFile(pid_t pid, int *pagemapFd);
 extern "C" int GetPaddrsFromPagemap(ProcessAttr *attr, int pagemapFd,
     uint64_t *pageCount, struct MigList *mList);
 extern "C" void FindEnoughPageToMigrate(uint64_t *pageCount, ProcessAttr *attr, struct MigrateMsg *mMsg);
-TEST_F(OomMigrateTest, TestFindEnoughPageToMigrate)
+TEST_F(OomMigrate, TestFindEnoughPageToMigrate)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -134,7 +134,7 @@ TEST_F(OomMigrateTest, TestFindEnoughPageToMigrate)
     EXPECT_EQ(0, mMsg.cnt);
 }
 
-TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateSecond)
+TEST_F(OomMigrate, TestFindEnoughPageToMigrateSecond)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -148,7 +148,7 @@ TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateSecond)
     EXPECT_EQ(0, mList.nr);
 }
 
-TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateThird)
+TEST_F(OomMigrate, TestFindEnoughPageToMigrateThird)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -163,7 +163,7 @@ TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateThird)
     EXPECT_EQ(1, mList.nr);
 }
 
-TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateForth)
+TEST_F(OomMigrate, TestFindEnoughPageToMigrateForth)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -180,7 +180,7 @@ TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateForth)
     EXPECT_EQ(1, mList.nr);
 }
 
-TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateFifth)
+TEST_F(OomMigrate, TestFindEnoughPageToMigrateFifth)
 {
     int ret;
     struct MigrateMsg mMsg;
@@ -201,7 +201,7 @@ TEST_F(OomMigrateTest, TestFindEnoughPageToMigrateFifth)
 
 extern "C" int EnvMutexInit(EnvMutex *mutex);
 extern "C" void FindPidMigrateSize(uint64_t size);
-TEST_F(OomMigrateTest, TestFindPidMigrateSizeAbnormalOne)
+TEST_F(OomMigrate, TestFindPidMigrateSizeAbnormalOne)
 {
     uint64_t size = 0;
     struct MigrateMsg mMsg = {
@@ -223,7 +223,7 @@ TEST_F(OomMigrateTest, TestFindPidMigrateSizeAbnormalOne)
 }
 
 extern "C" int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager);
-TEST_F(OomMigrateTest, TestFindPidMigrateSizeNormalOne)
+TEST_F(OomMigrate, TestFindPidMigrateSizeNormalOne)
 {
     uint64_t size = 0;
     struct MigrateMsg mMsg = {
@@ -257,7 +257,7 @@ extern "C" int snprintf_s(char *strDest, size_t destMax, size_t count, const cha
                            ...);
 extern "C" int GetPaddrsFromPagemap(ProcessAttr *attr, int pagemapFd,
     uint64_t *pageCount, struct MigList *mList);
-TEST_F(OomMigrateTest, TestGetPaddrsFromPagemap)
+TEST_F(OomMigrate, TestGetPaddrsFromPagemap)
 {
     int ret;
     pid_t pid = 123;
@@ -284,7 +284,7 @@ TEST_F(OomMigrateTest, TestGetPaddrsFromPagemap)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapSecond)
+TEST_F(OomMigrate, TestGetPaddrsFromPagemapSecond)
 {
     int ret;
     pid_t pid = 123;
@@ -307,7 +307,7 @@ TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapSecond)
     EXPECT_EQ(-ENODEV, ret);
 }
 
-TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapThird)
+TEST_F(OomMigrate, TestGetPaddrsFromPagemapThird)
 {
     int ret;
     pid_t pid = 123;
@@ -333,7 +333,7 @@ TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapThird)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapForth)
+TEST_F(OomMigrate, TestGetPaddrsFromPagemapForth)
 {
     int ret;
     pid_t pid = 123;
@@ -360,7 +360,7 @@ TEST_F(OomMigrateTest, TestGetPaddrsFromPagemapForth)
     EXPECT_EQ(-1, ret);
 }
 
-TEST_F(OomMigrateTest, TestGetPaddrFromMemRange)
+TEST_F(OomMigrate, TestGetPaddrFromMemRange)
 {
     int ret;
     int pagemapFd = 1;
@@ -375,7 +375,7 @@ TEST_F(OomMigrateTest, TestGetPaddrFromMemRange)
 }
 
 extern "C" ssize_t read(int fd, void *buf, size_t count);
-TEST_F(OomMigrateTest, TestGetPaddrFromMemRangeSecond)
+TEST_F(OomMigrate, TestGetPaddrFromMemRangeSecond)
 {
     int ret;
     int pagemapFd = 1;
@@ -391,7 +391,7 @@ TEST_F(OomMigrateTest, TestGetPaddrFromMemRangeSecond)
 }
 
 extern "C" void OomGetPaddr(uint64_t entry, struct MigList *mList, uint64_t *pageCount);
-TEST_F(OomMigrateTest, TestOomGetPaddr)
+TEST_F(OomMigrate, TestOomGetPaddr)
 {
     uint64_t entry = 1ULL << 63;
     struct MigList mList = {0};
@@ -405,7 +405,7 @@ TEST_F(OomMigrateTest, TestOomGetPaddr)
     free(mList.addr);
 }
 
-TEST_F(OomMigrateTest, TestGetPaddrFromMemRangeThird)
+TEST_F(OomMigrate, TestGetPaddrFromMemRangeThird)
 {
     int ret;
     int pagemapFd = 1;
@@ -428,7 +428,7 @@ TEST_F(OomMigrateTest, TestGetPaddrFromMemRangeThird)
 
 extern "C" int open(const char *pathname, int flags);
 extern "C" int OpenPidPagemapFile(pid_t pid, int *pagemapFd);
-TEST_F(OomMigrateTest, TestOpenPidPagemapFile)
+TEST_F(OomMigrate, TestOpenPidPagemapFile)
 {
     int ret;
     int pagemapFd = 1;
@@ -440,7 +440,7 @@ TEST_F(OomMigrateTest, TestOpenPidPagemapFile)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(OomMigrateTest, TestOpenPidPagemapFileSecond)
+TEST_F(OomMigrate, TestOpenPidPagemapFileSecond)
 {
     int ret;
     int pagemapFd = 1;
@@ -454,7 +454,7 @@ TEST_F(OomMigrateTest, TestOpenPidPagemapFileSecond)
     EXPECT_EQ(-ENODEV, ret);
 }
 
-TEST_F(OomMigrateTest, TestOpenPidPagemapFileThird)
+TEST_F(OomMigrate, TestOpenPidPagemapFileThird)
 {
     int ret;
     int pagemapFd = 1;

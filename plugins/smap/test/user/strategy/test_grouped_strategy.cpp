@@ -12,7 +12,7 @@
 #include "strategy/grouped_strategy.h"
 #include "strategy/strategy_config.h"
 
-class GroupedStrategyTest : public ::testing::Test {
+class GroupedStrategy : public ::testing::Test {
 protected:
     void TearDown() override
     {
@@ -30,7 +30,7 @@ static void FreeMigList(struct MigList mlist[MAX_NODES][MAX_NODES])
     }
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyDemoteByLocalLimitAndQuota)
+TEST_F(GroupedStrategy, TestGroupedStrategyDemoteByLocalLimitAndQuota)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -66,7 +66,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyDemoteByLocalLimitAndQuota)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteByLocalDeficit)
+TEST_F(GroupedStrategy, TestGroupedStrategyPromoteByLocalDeficit)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -105,7 +105,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteByLocalDeficit)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteTakesPriorityWhenAnyLocalBelowReserve)
+TEST_F(GroupedStrategy, TestGroupedStrategyPromoteTakesPriorityWhenAnyLocalBelowReserve)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -146,7 +146,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteTakesPriorityWhenAnyLocalB
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyLocalDeficitWithoutRemoteSkipsDemote)
+TEST_F(GroupedStrategy, TestGroupedStrategyLocalDeficitWithoutRemoteSkipsDemote)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -187,7 +187,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyLocalDeficitWithoutRemoteSkipsDem
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyDemoteOnlyFromLocalAboveReserve)
+TEST_F(GroupedStrategy, TestGroupedStrategyDemoteOnlyFromLocalAboveReserve)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -230,7 +230,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyDemoteOnlyFromLocalAboveReserve)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyPromotePrefersLargerLocalDeficit)
+TEST_F(GroupedStrategy, TestGroupedStrategyPromotePrefersLargerLocalDeficit)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -265,7 +265,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyPromotePrefersLargerLocalDeficit)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteOrdersGroupsByDeficit)
+TEST_F(GroupedStrategy, TestGroupedStrategyPromoteOrdersGroupsByDeficit)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -310,7 +310,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyPromoteOrdersGroupsByDeficit)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestUpdateGroupedMigrationResult)
+TEST_F(GroupedStrategy, TestUpdateGroupedMigrationResult)
 {
     ProcessAttr process = {};
 
@@ -336,7 +336,7 @@ TEST_F(GroupedStrategyTest, TestUpdateGroupedMigrationResult)
     EXPECT_EQ(0, process.groupPolicy.groups[0].targets[0].usedPages);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategyLocalRebalanceUsesRemainingDeficitAfterPromote)
+TEST_F(GroupedStrategy, TestGroupedStrategyLocalRebalanceUsesRemainingDeficitAfterPromote)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -385,7 +385,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategyLocalRebalanceUsesRemainingDefici
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategySwapAfterStableRounds)
+TEST_F(GroupedStrategy, TestGroupedStrategySwapAfterStableRounds)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -438,7 +438,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategySwapAfterStableRounds)
     FreeMigList(mlist);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategySwapDisabled)
+TEST_F(GroupedStrategy, TestGroupedStrategySwapDisabled)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -472,7 +472,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategySwapDisabled)
     EXPECT_EQ(0, mlist[0][4].nr);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategySwapSkipsSharedTarget)
+TEST_F(GroupedStrategy, TestGroupedStrategySwapSkipsSharedTarget)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -516,7 +516,7 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategySwapSkipsSharedTarget)
     EXPECT_EQ(0, mlist[0][4].nr);
 }
 
-TEST_F(GroupedStrategyTest, TestGroupedStrategySwapRequiresHotColdGap)
+TEST_F(GroupedStrategy, TestGroupedStrategySwapRequiresHotColdGap)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};

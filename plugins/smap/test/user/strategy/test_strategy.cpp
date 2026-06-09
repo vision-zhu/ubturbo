@@ -13,7 +13,7 @@
 
 using namespace std;
 
-class StrategyTest : public ::testing::Test {
+class Strategy : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -29,7 +29,7 @@ protected:
 };
 
 extern "C" int RunStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], size_t mlistSize);
-TEST_F(StrategyTest, TestRunStrategyOne)
+TEST_F(Strategy, TestRunStrategyOne)
 {
     size_t mlistSize = NR_LEVEL;
     ProcessAttr process;
@@ -43,7 +43,7 @@ TEST_F(StrategyTest, TestRunStrategyOne)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(StrategyTest, TestRunStrategyTwo)
+TEST_F(Strategy, TestRunStrategyTwo)
 {
     size_t mlistSize = NR_LEVEL;
     ProcessAttr process;
@@ -57,7 +57,7 @@ TEST_F(StrategyTest, TestRunStrategyTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(StrategyTest, TestRunStrategyThree)
+TEST_F(Strategy, TestRunStrategyThree)
 {
     size_t mlistSize = 0;
     ProcessAttr process;
@@ -73,7 +73,7 @@ extern "C" FILE *fopen(const char *__restrict __filename, const char *__restrict
 extern "C" char *fgets(char *__restrict __s, int __n, FILE *__restrict __stream);
 extern "C" int fclose(FILE *__stream);
 extern "C" int sscanf_s(const char *buffer, const char *format, ...);
-TEST_F(StrategyTest, TestGetNrFreePagesByNode)
+TEST_F(Strategy, TestGetNrFreePagesByNode)
 {
     int nid = 1;
     int ret;
@@ -84,7 +84,7 @@ TEST_F(StrategyTest, TestGetNrFreePagesByNode)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreePagesByNodeTwo)
+TEST_F(Strategy, TestGetNrFreePagesByNodeTwo)
 {
     int nid = 1;
     int ret;
@@ -96,7 +96,7 @@ TEST_F(StrategyTest, TestGetNrFreePagesByNodeTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreePagesByNodeThree)
+TEST_F(Strategy, TestGetNrFreePagesByNodeThree)
 {
     int nid = 1;
     int ret;
@@ -111,7 +111,7 @@ TEST_F(StrategyTest, TestGetNrFreePagesByNodeThree)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreePagesByNodeFour)
+TEST_F(Strategy, TestGetNrFreePagesByNodeFour)
 {
     int nid = 1;
     int ret;
@@ -126,7 +126,7 @@ TEST_F(StrategyTest, TestGetNrFreePagesByNodeFour)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreeHugePagesByNode)
+TEST_F(Strategy, TestGetNrFreeHugePagesByNode)
 {
     int nid = 1;
     int ret;
@@ -137,7 +137,7 @@ TEST_F(StrategyTest, TestGetNrFreeHugePagesByNode)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeTwo)
+TEST_F(Strategy, TestGetNrFreeHugePagesByNodeTwo)
 {
     int nid = 1;
     int ret;
@@ -149,7 +149,7 @@ TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeTwo)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeThree)
+TEST_F(Strategy, TestGetNrFreeHugePagesByNodeThree)
 {
     int nid = 1;
     int ret;
@@ -164,7 +164,7 @@ TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeThree)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(StrategyTest, TestGetNrFreeHugePagesByNodeFour)
+TEST_F(Strategy, TestGetNrFreeHugePagesByNodeFour)
 {
     int nid = 1;
     int ret;

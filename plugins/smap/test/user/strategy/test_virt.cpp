@@ -17,7 +17,7 @@
 
 using namespace std;
 
-class VirtTest : public ::testing::Test {
+class Virt : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -33,7 +33,7 @@ protected:
 };
 
 extern "C" int ExtractIdFromCmdline(char *cmdline, int len, int *id);
-TEST_F(VirtTest, TestExtractIdFromCmdline)
+TEST_F(Virt, TestExtractIdFromCmdline)
 {
     int ret;
     char cmdline[64] = "domain-134-test_vm/";
@@ -51,7 +51,7 @@ TEST_F(VirtTest, TestExtractIdFromCmdline)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(VirtTest, TestExtractIdFromCmdlineInvalidLen)
+TEST_F(Virt, TestExtractIdFromCmdlineInvalidLen)
 {
     int ret;
     char cmdline[64] = "domain-134-test_vm/";
@@ -61,7 +61,7 @@ TEST_F(VirtTest, TestExtractIdFromCmdlineInvalidLen)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(VirtTest, TestReadDomainIdByPid)
+TEST_F(Virt, TestReadDomainIdByPid)
 {
     int ret;
     pid_t pid = 0;
@@ -84,7 +84,7 @@ TEST_F(VirtTest, TestReadDomainIdByPid)
 }
 
 extern "C" int snprintf_s(char *strDest, size_t destMax, size_t count, const char *format, ...);
-TEST_F(VirtTest, TestReadDomainIdByPidTwo)
+TEST_F(Virt, TestReadDomainIdByPidTwo)
 {
     int ret;
     pid_t pid = 0;
@@ -102,7 +102,7 @@ int StubVirConnectClose(virConnectPtr conn)
 }
 
 extern "C" int(*g_virConnectClose)(virConnectPtr conn);
-TEST_F(VirtTest, TestCloseVirConn)
+TEST_F(Virt, TestCloseVirConn)
 {
     virConnect conn;
     virConnectPtr virConn = &conn;
@@ -117,7 +117,7 @@ virConnectPtr stubFunc(const char *name)
     return nullptr;
 }
 extern "C" virConnectPtr(*g_virConnectOpen)(const char *name);
-TEST_F(VirtTest, TestOpenVirConn)
+TEST_F(Virt, TestOpenVirConn)
 {
     int ret;
     virConnect conn;
@@ -130,7 +130,7 @@ TEST_F(VirtTest, TestOpenVirConn)
     EXPECT_EQ(-ENOTCONN, ret);
 }
 
-TEST_F(VirtTest, TestOpenVirConnTwo)
+TEST_F(Virt, TestOpenVirConnTwo)
 {
     virConnect conn;
     virConnectPtr virConn = nullptr;
@@ -142,7 +142,7 @@ TEST_F(VirtTest, TestOpenVirConnTwo)
 }
 
 extern "C" void *g_virtHandler;
-TEST_F(VirtTest, TestCloseVirHandler)
+TEST_F(Virt, TestCloseVirHandler)
 {
     virConnect conn;
     g_virtHandler = &conn;
@@ -151,7 +151,7 @@ TEST_F(VirtTest, TestCloseVirHandler)
     EXPECT_EQ(nullptr, g_virtHandler);
 }
 
-TEST_F(VirtTest, TestOpenVirHandler)
+TEST_F(Virt, TestOpenVirHandler)
 {
     int ret;
     virConnect conn;
@@ -162,7 +162,7 @@ TEST_F(VirtTest, TestOpenVirHandler)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerTwo)
+TEST_F(Virt, TestOpenVirHandlerTwo)
 {
     g_virtHandler = nullptr;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(nullptr)));
@@ -178,7 +178,7 @@ TEST_F(VirtTest, TestOpenVirHandlerTwo)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerThree)
+TEST_F(Virt, TestOpenVirHandlerThree)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -188,7 +188,7 @@ TEST_F(VirtTest, TestOpenVirHandlerThree)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerFour)
+TEST_F(Virt, TestOpenVirHandlerFour)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -198,7 +198,7 @@ TEST_F(VirtTest, TestOpenVirHandlerFour)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerFive)
+TEST_F(Virt, TestOpenVirHandlerFive)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -210,7 +210,7 @@ TEST_F(VirtTest, TestOpenVirHandlerFive)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerSix)
+TEST_F(Virt, TestOpenVirHandlerSix)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -223,7 +223,7 @@ TEST_F(VirtTest, TestOpenVirHandlerSix)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerSeven)
+TEST_F(Virt, TestOpenVirHandlerSeven)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -237,7 +237,7 @@ TEST_F(VirtTest, TestOpenVirHandlerSeven)
     g_virtHandler = nullptr;
 }
 
-TEST_F(VirtTest, TestOpenVirHandlerEight)
+TEST_F(Virt, TestOpenVirHandlerEight)
 {
     virConnect conn;
     MOCKER(dlopen).stubs().will(returnValue(static_cast<void *>(&conn)));
@@ -294,7 +294,7 @@ extern "C" int(*g_virDomainGetVcpus)
 extern "C" int(*g_virDomainFree)(virDomainPtr domain);
 extern "C" char *(*g_virDomainGetXMLDesc)(virDomainPtr domain, unsigned int flags);
 
-TEST_F(VirtTest, TestCheckVirConn)
+TEST_F(Virt, TestCheckVirConn)
 {
     int ret;
     virConnectPtr virConn = nullptr;
@@ -303,7 +303,7 @@ TEST_F(VirtTest, TestCheckVirConn)
     EXPECT_EQ(-ENOTCONN, ret);
 }
 
-TEST_F(VirtTest, TestCheckVirConnTwo)
+TEST_F(Virt, TestCheckVirConnTwo)
 {
     int ret;
     virConnect conn;
@@ -315,7 +315,7 @@ TEST_F(VirtTest, TestCheckVirConnTwo)
     EXPECT_EQ(-ENOTCONN, ret);
 }
 
-TEST_F(VirtTest, TestCheckVirConnThree)
+TEST_F(Virt, TestCheckVirConnThree)
 {
     int ret;
     virConnect conn;
@@ -331,7 +331,7 @@ TEST_F(VirtTest, TestCheckVirConnThree)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(VirtTest, TestGetXMLByDomainIdOpenConnFailed)
+TEST_F(Virt, TestGetXMLByDomainIdOpenConnFailed)
 {
     int domainId;
     char *xml = nullptr;
@@ -342,7 +342,7 @@ TEST_F(VirtTest, TestGetXMLByDomainIdOpenConnFailed)
     EXPECT_EQ(nullptr, xml);
 }
 
-TEST_F(VirtTest, TestGetXMLByDomainIdGetDomainFailed)
+TEST_F(Virt, TestGetXMLByDomainIdGetDomainFailed)
 {
     int domainId;
     char *xml = nullptr;
@@ -356,7 +356,7 @@ TEST_F(VirtTest, TestGetXMLByDomainIdGetDomainFailed)
     EXPECT_EQ(nullptr, xml);
 }
 
-TEST_F(VirtTest, TestGetXMLByDomainIdGetXMLFailed)
+TEST_F(Virt, TestGetXMLByDomainIdGetXMLFailed)
 {
     int domainId;
     char *xml = nullptr;

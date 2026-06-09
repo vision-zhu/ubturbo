@@ -29,7 +29,7 @@ typedef struct NumaInfo {
     int remoteNid;
 } NumaInfo;
 
-class SeparateStrategyTest : public ::testing::Test {
+class SeparateStrategy : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -45,7 +45,7 @@ protected:
 };
 
 extern "C" int InitSeparateParam(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestInitSeparateParam)
+TEST_F(SeparateStrategy, TestInitSeparateParam)
 {
     ProcessAttr process;
     MOCKER(GetSlowThresholdConfig).stubs().will(returnValue(40));
@@ -55,7 +55,7 @@ TEST_F(SeparateStrategyTest, TestInitSeparateParam)
 }
 
 extern "C" bool ShouldMigrate(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestShouldMigrateOne)
+TEST_F(SeparateStrategy, TestShouldMigrateOne)
 {
     ProcessAttr process;
     process.separateParam.maxMigrate = 0;
@@ -63,7 +63,7 @@ TEST_F(SeparateStrategyTest, TestShouldMigrateOne)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(SeparateStrategyTest, TestShouldMigrateTwo)
+TEST_F(SeparateStrategy, TestShouldMigrateTwo)
 {
     ProcessAttr process;
     process.separateParam.maxMigrate = 1;
@@ -72,7 +72,7 @@ TEST_F(SeparateStrategyTest, TestShouldMigrateTwo)
     EXPECT_FALSE(ret);
 }
 
-TEST_F(SeparateStrategyTest, TestShouldMigrateThree)
+TEST_F(SeparateStrategy, TestShouldMigrateThree)
 {
     ProcessAttr process;
     process.separateParam.maxMigrate = 1;
@@ -82,7 +82,7 @@ TEST_F(SeparateStrategyTest, TestShouldMigrateThree)
 }
 
 extern "C" int ActcFreqAscFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestActcFreqAscFunc)
+TEST_F(SeparateStrategy, TestActcFreqAscFunc)
 {
     ActcData *actc1 = (ActcData *)calloc(1, sizeof(ActcData));
     ActcData *actc2 = (ActcData *)calloc(1, sizeof(ActcData));
@@ -111,7 +111,7 @@ TEST_F(SeparateStrategyTest, TestActcFreqAscFunc)
 }
 
 extern "C" int ActcFreqDescFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestActcFreqDescFunc)
+TEST_F(SeparateStrategy, TestActcFreqDescFunc)
 {
     ActcData *actc1 = (ActcData *)calloc(1, sizeof(ActcData));
     ActcData *actc2 = (ActcData *)calloc(1, sizeof(ActcData));
@@ -140,7 +140,7 @@ TEST_F(SeparateStrategyTest, TestActcFreqDescFunc)
 }
 
 extern "C" uint64_t CalcMigrateNumByFreq(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqOne)
+TEST_F(SeparateStrategy, TestCalcMigrateNumByFreqOne)
 {
     ProcessAttr process = {};
 
@@ -172,7 +172,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqOne)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqZeroFreqDisabled)
+TEST_F(SeparateStrategy, TestCalcMigrateNumByFreqZeroFreqDisabled)
 {
     ProcessAttr process = {};
 
@@ -207,7 +207,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqZeroFreqDisabled)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqZeroFreqEnabled)
+TEST_F(SeparateStrategy, TestCalcMigrateNumByFreqZeroFreqEnabled)
 {
     ProcessAttr process = {};
 
@@ -242,7 +242,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqZeroFreqEnabled)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqLowSmallerThanHigh)
+TEST_F(SeparateStrategy, TestCalcMigrateNumByFreqLowSmallerThanHigh)
 {
     ProcessAttr process = {};
 
@@ -285,7 +285,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqLowSmallerThanHigh)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqTwo)
+TEST_F(SeparateStrategy, TestCalcMigrateNumByFreqTwo)
 {
     ProcessAttr process;
     process.scanAttr.actcLen[0] = 6;
@@ -302,7 +302,7 @@ TEST_F(SeparateStrategyTest, TestCalcMigrateNumByFreqTwo)
 
 extern "C" int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
     uint64_t rawMigrateNum, MigrateDirection dir);
-TEST_F(SeparateStrategyTest, TestBaseStrategyOne)
+TEST_F(SeparateStrategy, TestBaseStrategyOne)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b10011001;
@@ -319,7 +319,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyOne)
 }
 
 extern "C" int SwapStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES]);
-TEST_F(SeparateStrategyTest, TestSwapStrategyOne)
+TEST_F(SeparateStrategy, TestSwapStrategyOne)
 {
     struct MigList mlist[MAX_NODES][MAX_NODES];
     ProcessAttr process;
@@ -330,7 +330,7 @@ TEST_F(SeparateStrategyTest, TestSwapStrategyOne)
 
 extern "C" int PromotionStrategy(ProcessAttr *process,
     struct MigList mlist[MAX_NODES][MAX_NODES], uint64_t rawMigrateNum);
-TEST_F(SeparateStrategyTest, TestPromotionStrategy)
+TEST_F(SeparateStrategy, TestPromotionStrategy)
 {
     ProcessAttr process;
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -342,7 +342,7 @@ TEST_F(SeparateStrategyTest, TestPromotionStrategy)
 
 extern "C" int DemotionStrategy(ProcessAttr *process,
     struct MigList mlist[MAX_NODES][MAX_NODES], uint64_t rawMigrateNum);
-TEST_F(SeparateStrategyTest, TestDemotionStrategy)
+TEST_F(SeparateStrategy, TestDemotionStrategy)
 {
     ProcessAttr process;
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -370,7 +370,7 @@ void SeparateStrategyinit(ActcData actcData1[2], ActcData actcData2[4], ProcessA
     process->scanAttr.actCount[4].freqMax = 1000;
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategyall)
+TEST_F(SeparateStrategy, TestSeparateStrategyall)
 {
     MOCKER(IsHugeMode).stubs().will(returnValue(true));
     MOCKER(GetNrLocalNuma).stubs().will(returnValue(4)); // 本地4个numa
@@ -439,7 +439,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategyall)
     EXPECT_EQ(DEMOTE, process.strategyAttr.dir[4]);
 }
 
-TEST_F(SeparateStrategyTest, TestPeriodConfig)
+TEST_F(SeparateStrategy, TestPeriodConfig)
 {
     int ret = GenerateStrategyConfigFile("./example2.config");
     EXPECT_EQ(0, ret);
@@ -447,7 +447,7 @@ TEST_F(SeparateStrategyTest, TestPeriodConfig)
     StrategyConfigRead("./example2.config");
 }
 
-TEST_F(SeparateStrategyTest, TestShouldMigrate)
+TEST_F(SeparateStrategy, TestShouldMigrate)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b10011001;
@@ -467,7 +467,7 @@ TEST_F(SeparateStrategyTest, TestShouldMigrate)
 }
 
 extern "C" void FreeMlist(struct MigList mlist[MAX_NODES][MAX_NODES]);
-TEST_F(SeparateStrategyTest, TestFreeMlist)
+TEST_F(SeparateStrategy, TestFreeMlist)
 {
     struct MigList mlist[MAX_NODES][MAX_NODES] = {0};
     mlist[0][0].addr = (uint64_t *)malloc(sizeof(uint64_t));
@@ -476,7 +476,7 @@ TEST_F(SeparateStrategyTest, TestFreeMlist)
 }
 
 extern "C" int BaseStrategyInner(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], int from, int to);
-TEST_F(SeparateStrategyTest, TestBaseStrategyInner)
+TEST_F(SeparateStrategy, TestBaseStrategyInner)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES] = {};
@@ -490,7 +490,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyInner)
     EXPECT_EQ(ret, -EINVAL);
 }
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyInnerFromIsNULL)
+TEST_F(SeparateStrategy, TestBaseStrategyInnerFromIsNULL)
 {
     ProcessAttr process = {};
     ActcData actcArr[2] = {};
@@ -512,7 +512,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyInnerFromIsNULL)
 
 extern "C" int BaseStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
     uint64_t rawMigrateNum, MigrateDirection dir);
-TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsDemote)
+TEST_F(SeparateStrategy, TestBaseStrategyDirEqualsDemote)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -544,7 +544,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsDemote)
     }
 }
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsPromote)
+TEST_F(SeparateStrategy, TestBaseStrategyDirEqualsPromote)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -576,7 +576,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsPromote)
     }
 }
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsSWAP)
+TEST_F(SeparateStrategy, TestBaseStrategyDirEqualsSWAP)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -624,7 +624,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyDirEqualsSWAP)
 }
 
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyTwo)
+TEST_F(SeparateStrategy, TestBaseStrategyTwo)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -654,7 +654,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyTwo)
     }
 }
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyThree)
+TEST_F(SeparateStrategy, TestBaseStrategyThree)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -684,7 +684,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyThree)
     }
 }
 
-TEST_F(SeparateStrategyTest, TestBaseStrategyFour)
+TEST_F(SeparateStrategy, TestBaseStrategyFour)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -715,7 +715,7 @@ TEST_F(SeparateStrategyTest, TestBaseStrategyFour)
 }
 
 extern "C" void SortActcData(ProcessAttr *process);
-TEST_F(SeparateStrategyTest, TestSortActcData)
+TEST_F(SeparateStrategy, TestSortActcData)
 {
     ProcessAttr process = {};
     process.numaAttr.numaNodes = 0b00010001;
@@ -731,7 +731,7 @@ TEST_F(SeparateStrategyTest, TestSortActcData)
     }
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KShouldMigrate)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KShouldMigrate)
 {
     ProcessAttr process;
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -747,7 +747,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KShouldMigrate)
 
 extern "C" int BuildSelectKMlistAddr(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
     uint32_t numaOffset[MAX_NODES], int from, int to, SelectionMode mode);
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KAbnormal)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KAbnormal)
 {
     ProcessAttr process;
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -765,7 +765,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KAbnormal)
     EXPECT_EQ(-ENOMEM, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KNormal)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KNormal)
 {
     ProcessAttr process;
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -814,7 +814,7 @@ void initializeMigList(MigList mlist[][MAX_NODES])
 }
 
 extern "C" uint64_t GetNrFreePagesByNode(int nid);
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasic)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KSwapBasic)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -842,7 +842,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasic)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasicDemote)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KSwapBasicDemote)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -870,7 +870,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasicDemote)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasicPromote)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KSwapBasicPromote)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -898,7 +898,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapBasicPromote)
     EXPECT_EQ(0, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapMultiNode)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KSwapMultiNode)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -935,7 +935,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapMultiNode)
     EXPECT_EQ(8, mlist[5][1].nr);
 }
 
-TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapLimitByFreePage)
+TEST_F(SeparateStrategy, TestSeparateStrategy4KSwapLimitByFreePage)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -971,7 +971,7 @@ TEST_F(SeparateStrategyTest, TestSeparateStrategy4KSwapLimitByFreePage)
 extern "C" void CalculateMigInfo(ProcessAttr *process, RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM],
                                  uint64_t nrPages[NR_LEVEL], uint64_t *demoteNum, uint64_t *promoteNum);
 
-TEST_F(SeparateStrategyTest, TestCalculateMigInfo)
+TEST_F(SeparateStrategy, TestCalculateMigInfo)
 {
     int nrLocalNuma = 4;
     ProcessAttr process = {};
@@ -1020,7 +1020,7 @@ extern "C" int DemoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList ml
 extern "C" int PromoteMultiNumaVmStrategy(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
                                           RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM], int nrLocalNuma);
 extern "C" int SeparateStrategyMultiNumaVm(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES]);
-TEST_F(SeparateStrategyTest, TestSeparateStrategyMultiNumaVm)
+TEST_F(SeparateStrategy, TestSeparateStrategyMultiNumaVm)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -1076,7 +1076,7 @@ extern "C" int GroupMigPagesByNode(LevelActcData *levelActcData[NR_LEVEL], uint6
                                    uint64_t *migAddrArray[MAX_NODES]);
 extern "C" int BuildSwapMigLists(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES],
                                  uint64_t nrMig[MAX_NODES], uint64_t *migAddrArray[MAX_NODES], int nrLocalNuma);
-TEST_F(SeparateStrategyTest, TestSwapMultiNumaVmStrategy)
+TEST_F(SeparateStrategy, TestSwapMultiNumaVmStrategy)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -1154,7 +1154,7 @@ TEST_F(SeparateStrategyTest, TestSwapMultiNumaVmStrategy)
 extern "C" int BuildDemoteMultiNumaMigLists(uint64_t *migAddrArray[MAX_NODES], uint64_t nrMig[MAX_NODES],
                                             struct MigList mlist[MAX_NODES][MAX_NODES],
                                             RemoteMigInfo remoteMigInfo[REMOTE_NUMA_NUM]);
-TEST_F(SeparateStrategyTest, TestDemoteMultiNumaVmStrategy)
+TEST_F(SeparateStrategy, TestDemoteMultiNumaVmStrategy)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -1198,7 +1198,7 @@ TEST_F(SeparateStrategyTest, TestDemoteMultiNumaVmStrategy)
 }
 
 const int MULTI_NUMA_VM_OOM = 66;
-TEST_F(SeparateStrategyTest, TestPromoteMultiNumaVmStrategy)
+TEST_F(SeparateStrategy, TestPromoteMultiNumaVmStrategy)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -1221,7 +1221,7 @@ TEST_F(SeparateStrategyTest, TestPromoteMultiNumaVmStrategy)
     EXPECT_EQ(0, remoteMigInfo[0].nrMig);
 }
 
-TEST_F(SeparateStrategyTest, TestBuildLevelActcData)
+TEST_F(SeparateStrategy, TestBuildLevelActcData)
 {
     ProcessAttr process = {};
     LevelActcData *levelActcData = (LevelActcData *)calloc(1, sizeof(LevelActcData));
@@ -1251,7 +1251,7 @@ TEST_F(SeparateStrategyTest, TestBuildLevelActcData)
 extern "C" int BuildMigListForDirection(MigrateDirection dir, uint64_t *migAddrArray[MAX_NODES],
                                         uint64_t nrMig[MAX_NODES], uint64_t destFreeList[MAX_NODES],
                                         struct MigList mlist[MAX_NODES][MAX_NODES]);
-TEST_F(SeparateStrategyTest, TestBuildSwapMigLists)
+TEST_F(SeparateStrategy, TestBuildSwapMigLists)
 {
     ProcessAttr process = {};
     struct MigList mlist[MAX_NODES][MAX_NODES];
@@ -1275,7 +1275,7 @@ TEST_F(SeparateStrategyTest, TestBuildSwapMigLists)
     EXPECT_EQ(-MULTI_NUMA_VM_OOM, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestBuildMigListForDirection)
+TEST_F(SeparateStrategy, TestBuildMigListForDirection)
 {
     MigrateDirection dir;
     uint64_t *migAddrArray[MAX_NODES] = { NULL };
@@ -1296,7 +1296,7 @@ TEST_F(SeparateStrategyTest, TestBuildMigListForDirection)
     EXPECT_EQ(0, mlist[4][0].nr);
 }
 
-TEST_F(SeparateStrategyTest, TestBuildMigListForDirectionPromote)
+TEST_F(SeparateStrategy, TestBuildMigListForDirectionPromote)
 {
     MigrateDirection dir;
     uint64_t *migAddrArray[MAX_NODES] = { NULL };
@@ -1318,7 +1318,7 @@ TEST_F(SeparateStrategyTest, TestBuildMigListForDirectionPromote)
     free(mlist[4][0].addr);
 }
 
-TEST_F(SeparateStrategyTest, TestGroupMigPagesByNode)
+TEST_F(SeparateStrategy, TestGroupMigPagesByNode)
 {
     LevelActcData *levelActcData[NR_LEVEL] = { NULL };
     uint64_t swapNum = 0;
@@ -1352,7 +1352,7 @@ TEST_F(SeparateStrategyTest, TestGroupMigPagesByNode)
 
 extern "C" uint64_t CalMultiNumaVmLowMigrateNum(uint64_t migrateNum, uint64_t freqWt, uint32_t slowThred,
                                                 LevelActcData *levelActcData[NR_LEVEL]);
-TEST_F(SeparateStrategyTest, TestCalcMultiNumaVmSwapNumByFreq)
+TEST_F(SeparateStrategy, TestCalcMultiNumaVmSwapNumByFreq)
 {
     ProcessAttr process = {};
     LevelActcData *levelActcData[NR_LEVEL] = { NULL };
@@ -1369,7 +1369,7 @@ TEST_F(SeparateStrategyTest, TestCalcMultiNumaVmSwapNumByFreq)
     EXPECT_EQ(1, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestCalMultiNumaVmLowMigrateNum)
+TEST_F(SeparateStrategy, TestCalMultiNumaVmLowMigrateNum)
 {
     uint64_t migrateNum = 1;
     uint64_t freqWt = 0;
@@ -1385,7 +1385,7 @@ TEST_F(SeparateStrategyTest, TestCalMultiNumaVmLowMigrateNum)
 }
 
 extern "C" int FreqDescFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestFreqDescFunc)
+TEST_F(SeparateStrategy, TestFreqDescFunc)
 {
     LevelActcData *levelActcData_1 = (LevelActcData *)calloc(1, sizeof(LevelActcData));
     ASSERT_NE(nullptr, levelActcData_1);
@@ -1417,7 +1417,7 @@ TEST_F(SeparateStrategyTest, TestFreqDescFunc)
 }
 
 extern "C" int FreqAscFunc(const void *actc1, const void *actc2);
-TEST_F(SeparateStrategyTest, TestFreqAscFunc)
+TEST_F(SeparateStrategy, TestFreqAscFunc)
 {
     LevelActcData *levelActcData_1 = (LevelActcData *)calloc(1, sizeof(LevelActcData));
     ASSERT_NE(nullptr, levelActcData_1);
@@ -1442,7 +1442,7 @@ TEST_F(SeparateStrategyTest, TestFreqAscFunc)
     EXPECT_EQ(-2, ret);
 }
 
-TEST_F(SeparateStrategyTest, TestBuildDemoteMultiNumaMigLists)
+TEST_F(SeparateStrategy, TestBuildDemoteMultiNumaMigLists)
 {
     uint64_t *migAddrArray[MAX_NODES] = { NULL };
     uint64_t nrMig[MAX_NODES] = { 0 };

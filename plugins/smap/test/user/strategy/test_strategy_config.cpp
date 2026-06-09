@@ -19,7 +19,7 @@
 
 using namespace std;
 
-class PeriodConfigTest : public ::testing::Test {
+class PeriodConfig : public ::testing::Test {
 protected:
     void SetUp() override
     {
@@ -67,7 +67,7 @@ extern "C" StrategyConfig g_strategyConfig;
 extern "C" StrategyConfigReadElem g_strategyConfigRead[];
 
 extern "C" uint32_t GetScanPeriodConfig(void);
-TEST_F(PeriodConfigTest, GetScanPeriodConfigTest)
+TEST_F(PeriodConfig, GetScanPeriodConfig)
 {
     g_strategyConfig.scanPeriod = 1;
     uint32_t ret = GetScanPeriodConfig();
@@ -75,7 +75,7 @@ TEST_F(PeriodConfigTest, GetScanPeriodConfigTest)
 }
 
 extern "C" uint32_t GetMigratePeriodConfig(void);
-TEST_F(PeriodConfigTest, GetMigratePeriodConfigTest)
+TEST_F(PeriodConfig, GetMigratePeriodConfig)
 {
     g_strategyConfig.migratePeriod = 2;
     uint32_t ret = GetMigratePeriodConfig();
@@ -83,7 +83,7 @@ TEST_F(PeriodConfigTest, GetMigratePeriodConfigTest)
 }
 
 extern "C" bool GetZeroFreqMigrateEnableConfig(void);
-TEST_F(PeriodConfigTest, GetZeroFreqMigrateEnableConfigTest)
+TEST_F(PeriodConfig, GetZeroFreqMigrateEnableConfigTest)
 {
     g_strategyConfig.zeroFreqMigrateEnable = true;
     bool ret = GetZeroFreqMigrateEnableConfig();
@@ -94,7 +94,7 @@ TEST_F(PeriodConfigTest, GetZeroFreqMigrateEnableConfigTest)
 }
 
 extern "C" bool GetAdaptiveRatioEnableConfig(void);
-TEST_F(PeriodConfigTest, GetAdaptiveRatioEnableConfigTest)
+TEST_F(PeriodConfig, GetAdaptiveRatioEnableConfigTest)
 {
     g_strategyConfig.adaptiveRatioEnable = true;
     bool ret = GetAdaptiveRatioEnableConfig();
@@ -105,7 +105,7 @@ TEST_F(PeriodConfigTest, GetAdaptiveRatioEnableConfigTest)
 }
 
 extern "C" bool GetFileConfSwitchConfig(void);
-TEST_F(PeriodConfigTest, GetFileConfSwitchConfigTest)
+TEST_F(PeriodConfig, GetFileConfSwitchConfigTest)
 {
     g_strategyConfig.fileConfSwitch = true;
     bool ret = GetFileConfSwitchConfig();
@@ -113,7 +113,7 @@ TEST_F(PeriodConfigTest, GetFileConfSwitchConfigTest)
 }
 
 extern "C" uint32_t GetGroupSwapRatioConfig(void);
-TEST_F(PeriodConfigTest, GetGroupSwapRatioConfigTest)
+TEST_F(PeriodConfig, GetGroupSwapRatioConfigTest)
 {
     g_strategyConfig.groupSwapRatio = 1;
     uint32_t ret = GetGroupSwapRatioConfig();
@@ -121,7 +121,7 @@ TEST_F(PeriodConfigTest, GetGroupSwapRatioConfigTest)
 }
 
 extern "C" uint32_t GetGroupSwapMinRemoteFreqConfig(void);
-TEST_F(PeriodConfigTest, GetGroupSwapMinRemoteFreqConfigTest)
+TEST_F(PeriodConfig, GetGroupSwapMinRemoteFreqConfigTest)
 {
     g_strategyConfig.groupSwapMinRemoteFreq = 5;
     uint32_t ret = GetGroupSwapMinRemoteFreqConfig();
@@ -129,7 +129,7 @@ TEST_F(PeriodConfigTest, GetGroupSwapMinRemoteFreqConfigTest)
 }
 
 extern "C" uint32_t GetGroupSwapMinFreqGainConfig(void);
-TEST_F(PeriodConfigTest, GetGroupSwapMinFreqGainConfigTest)
+TEST_F(PeriodConfig, GetGroupSwapMinFreqGainConfigTest)
 {
     g_strategyConfig.groupSwapMinFreqGain = 3;
     uint32_t ret = GetGroupSwapMinFreqGainConfig();
@@ -137,7 +137,7 @@ TEST_F(PeriodConfigTest, GetGroupSwapMinFreqGainConfigTest)
 }
 
 extern "C" bool GetScanPeriodChanged(void);
-TEST_F(PeriodConfigTest, GetScanPeriodChangedTest)
+TEST_F(PeriodConfig, GetScanPeriodChangedTest)
 {
     g_strategyConfig.scanPeriodChanged = true;
     bool ret = GetScanPeriodChanged();
@@ -145,7 +145,7 @@ TEST_F(PeriodConfigTest, GetScanPeriodChangedTest)
 }
 
 extern "C" bool GetMigratePeriodChanged(void);
-TEST_F(PeriodConfigTest, GetMigratePeriodChangedTest)
+TEST_F(PeriodConfig, GetMigratePeriodChangedTest)
 {
     g_strategyConfig.migratePeriodChanged = true;
     bool ret = GetMigratePeriodChanged();
@@ -153,7 +153,7 @@ TEST_F(PeriodConfigTest, GetMigratePeriodChangedTest)
 }
 
 extern "C" void SetScanPeriodChanged(bool val);
-TEST_F(PeriodConfigTest, SetScanPeriodChangedTest)
+TEST_F(PeriodConfig, SetScanPeriodChangedTest)
 {
     g_strategyConfig.scanPeriodChanged = true;
     SetScanPeriodChanged(false);
@@ -161,7 +161,7 @@ TEST_F(PeriodConfigTest, SetScanPeriodChangedTest)
 }
 
 extern "C" void SetMigratePeriodChanged(bool val);
-TEST_F(PeriodConfigTest, SetMigratePeriodChangedTest)
+TEST_F(PeriodConfig, SetMigratePeriodChangedTest)
 {
     g_strategyConfig.migratePeriodChanged = false;
     SetMigratePeriodChanged(true);
@@ -169,7 +169,7 @@ TEST_F(PeriodConfigTest, SetMigratePeriodChangedTest)
 }
 
 extern "C" int32_t ConfigReadValueToInt(char *pvalue, uint32_t *resultvalue);
-TEST_F(PeriodConfigTest, ConfigReadValueToIntTest)
+TEST_F(PeriodConfig, ConfigReadValueToIntTest)
 {
     char* pvalue = "123";
     uint32_t resultvalue = 0;
@@ -184,7 +184,7 @@ TEST_F(PeriodConfigTest, ConfigReadValueToIntTest)
 }
 
 extern "C" int32_t ConfigScanPeriod(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigScanPeriodTest)
+TEST_F(PeriodConfig, ConfigScanPeriodTest)
 {
     char* substr = "scanPeriod";
     char* value = "123";
@@ -205,7 +205,7 @@ TEST_F(PeriodConfigTest, ConfigScanPeriodTest)
     EXPECT_EQ(RETURN_ERROR, ret);
 }
 
-TEST_F(PeriodConfigTest, ConfigScanPeriodTestSuccess)
+TEST_F(PeriodConfig, ConfigScanPeriodTestSuccess)
 {
     int ret;
     char* substr2 = "scanPeriod";
@@ -217,7 +217,7 @@ TEST_F(PeriodConfigTest, ConfigScanPeriodTestSuccess)
 }
 
 extern "C" int32_t ConfigMigratePeriod(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigMigratePeriodTest)
+TEST_F(PeriodConfig, ConfigMigratePeriodTest)
 {
     char* substr = "migratePeriod";
     char* value = "123";
@@ -239,7 +239,7 @@ TEST_F(PeriodConfigTest, ConfigMigratePeriodTest)
 }
 
 extern "C" int32_t ConfigRemoteFreqPercentile(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigRemoteFreqPercentileTest)
+TEST_F(PeriodConfig, ConfigRemoteFreqPercentileTest)
 {
     char *substr = "smap.remote.freq.percentile";
     char *value = "101";
@@ -261,7 +261,7 @@ TEST_F(PeriodConfigTest, ConfigRemoteFreqPercentileTest)
 }
 
 extern "C" int32_t ConfigSlowThreshold(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigSlowThresholdTest)
+TEST_F(PeriodConfig, ConfigSlowThresholdTest)
 {
     char *substr = "smap.slow.threshold";
     char *value = "1201";
@@ -283,7 +283,7 @@ TEST_F(PeriodConfigTest, ConfigSlowThresholdTest)
 }
 
 extern "C" int32_t ConfigFreqWt(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigFreqWtTest)
+TEST_F(PeriodConfig, ConfigFreqWtTest)
 {
     char *substr = "smap.freq.wt";
     char *value = "65536";
@@ -305,7 +305,7 @@ TEST_F(PeriodConfigTest, ConfigFreqWtTest)
 }
 
 extern "C" int32_t ConfigZeroFreqMigrateEnable(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigZeroFreqMigrateEnableTest)
+TEST_F(PeriodConfig, ConfigZeroFreqMigrateEnableTest)
 {
     char *substr = "test";
     char *value1 = "true";
@@ -326,7 +326,7 @@ TEST_F(PeriodConfigTest, ConfigZeroFreqMigrateEnableTest)
 }
 
 extern "C" int32_t ConfigAdaptiveRatioEnable(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigAdaptiveRatioEnableTest)
+TEST_F(PeriodConfig, ConfigAdaptiveRatioEnableTest)
 {
     char *substr = "test";
     char *value1 = "true";
@@ -348,7 +348,7 @@ TEST_F(PeriodConfigTest, ConfigAdaptiveRatioEnableTest)
 
 extern "C" int32_t ConfigFileConfSwitch(char *substr, char *value);
 extern "C" int32_t ConfigGroupSwapRatio(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigGroupSwapRatioTest)
+TEST_F(PeriodConfig, ConfigGroupSwapRatioTest)
 {
     char *substr = "smap.group.swap.ratio";
     char *value = "101";
@@ -370,7 +370,7 @@ TEST_F(PeriodConfigTest, ConfigGroupSwapRatioTest)
 }
 
 extern "C" int32_t ConfigGroupSwapMinRemoteFreq(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigGroupSwapMinRemoteFreqTest)
+TEST_F(PeriodConfig, ConfigGroupSwapMinRemoteFreqTest)
 {
     char *substr = "smap.group.swap.min.remote.freq";
     char *value = "65536";
@@ -392,7 +392,7 @@ TEST_F(PeriodConfigTest, ConfigGroupSwapMinRemoteFreqTest)
 }
 
 extern "C" int32_t ConfigGroupSwapMinFreqGain(char *substr, char *value);
-TEST_F(PeriodConfigTest, ConfigGroupSwapMinFreqGainTest)
+TEST_F(PeriodConfig, ConfigGroupSwapMinFreqGainTest)
 {
     char *substr = "smap.group.swap.min.freq.gain";
     char *value = "65536";
@@ -413,7 +413,7 @@ TEST_F(PeriodConfigTest, ConfigGroupSwapMinFreqGainTest)
     EXPECT_EQ(3, g_tmpStrategyConfig.groupSwapMinFreqGain);
 }
 
-TEST_F(PeriodConfigTest, ConfigFileConfSwitchTest)
+TEST_F(PeriodConfig, ConfigFileConfSwitchTest)
 {
     char* substr = "test";
     char* value1 = "true";
@@ -432,7 +432,7 @@ TEST_F(PeriodConfigTest, ConfigFileConfSwitchTest)
 }
 
 extern "C" void ConfigReadTrim(char *str);
-TEST_F(PeriodConfigTest, ConfigReadTrimTest)
+TEST_F(PeriodConfig, ConfigReadTrimTest)
 {
     char str1[] = "123test\n";
     ConfigReadTrim(str1);
@@ -441,7 +441,7 @@ TEST_F(PeriodConfigTest, ConfigReadTrimTest)
 }
 
 extern "C" char *ConfigReadSearchSubString(const char *buf, const char *substr);
-TEST_F(PeriodConfigTest, ConfigReadSearchSubStringTest)
+TEST_F(PeriodConfig, ConfigReadSearchSubStringTest)
 {
     char buf[20] = "smap = 2\n";
     const char* substr = "smap";
@@ -454,7 +454,7 @@ TEST_F(PeriodConfigTest, ConfigReadSearchSubStringTest)
 }
 
 extern "C" int StrategyConfigAnalyze(const char *str);
-TEST_F(PeriodConfigTest, PeriodConfigAnalyzeTest)
+TEST_F(PeriodConfig, PeriodConfigAnalyzeTest)
 {
     char *str = "smap";
     MOCKER(ConfigReadSearchSubString).stubs().will(returnValue(static_cast<char *>(nullptr)));
@@ -463,7 +463,7 @@ TEST_F(PeriodConfigTest, PeriodConfigAnalyzeTest)
 }
 
 extern "C" int32_t ConfigReadByLine(FILE *fptemp, char *buf, int32_t readLine);
-TEST_F(PeriodConfigTest, ConfigReadByLineTest)
+TEST_F(PeriodConfig, ConfigReadByLineTest)
 {
     FILE *fptemp = (FILE *)malloc(sizeof(FILE));
     char *buf = (char *)malloc(1024);
@@ -479,7 +479,7 @@ TEST_F(PeriodConfigTest, ConfigReadByLineTest)
 
 extern "C" int ConfigReadReadFile(const char *configFile);
 extern "C" int32_t StrategyConfigReview(void);
-TEST_F(PeriodConfigTest, PeriodConfigReviewTest)
+TEST_F(PeriodConfig, PeriodConfigReviewTest)
 {
     g_strategyConfigRead[0].needCfg = 1UL;
     g_strategyConfigRead[0].realCfg = 0UL;
@@ -503,7 +503,7 @@ TEST_F(PeriodConfigTest, PeriodConfigReviewTest)
 }
 
 extern "C" void PeriodConifgReset(void);
-TEST_F(PeriodConfigTest, PeriodConifgResetTest)
+TEST_F(PeriodConfig, PeriodConifgResetTest)
 {
     for (int i = 0; i < 3; i++) {
         g_strategyConfigRead[i].realCfg = 1;
@@ -513,7 +513,7 @@ TEST_F(PeriodConfigTest, PeriodConifgResetTest)
 }
 
 extern "C" void InitStrategyConfig(void);
-TEST_F(PeriodConfigTest, InitPeriodConfigTest)
+TEST_F(PeriodConfig, InitPeriodConfig)
 {
     g_strategyConfig.scanPeriod = 10;
     g_strategyConfig.migratePeriod = 10;
@@ -535,7 +535,7 @@ TEST_F(PeriodConfigTest, InitPeriodConfigTest)
 }
 
 extern "C" int32_t EnsureDirectoryExists(const char *dirPath);
-TEST_F(PeriodConfigTest, TestEnsureDirectoryExists)
+TEST_F(PeriodConfig, TestEnsureDirectoryExists)
 {
     const char* dir = "/home/test";
     MOCKER(stat).stubs().will(returnValue(1));
@@ -546,7 +546,7 @@ TEST_F(PeriodConfigTest, TestEnsureDirectoryExists)
 }
 
 extern "C" bool UpdateStrategyConfigChanged(void);
-TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChanged)
+TEST_F(PeriodConfig, TestUpdatePeriodConfigChanged)
 {
     g_tmpStrategyConfig.fileConfSwitch = true;
     g_strategyConfig.scanPeriod = 500;
@@ -558,7 +558,7 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChanged)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedNoChange)
+TEST_F(PeriodConfig, TestUpdatePeriodConfigChangedNoChange)
 {
     g_tmpStrategyConfig.fileConfSwitch = true;
     g_strategyConfig.scanPeriod = 500;
@@ -588,7 +588,7 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedNoChange)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedZeroFreqChanged)
+TEST_F(PeriodConfig, TestUpdatePeriodConfigChangedZeroFreqChanged)
 {
     g_tmpStrategyConfig.fileConfSwitch = true;
     g_strategyConfig.scanPeriod = 500;
@@ -604,7 +604,7 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedZeroFreqChanged)
     EXPECT_EQ(true, ret);
 }
 
-TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedAdaptiveRatioChanged)
+TEST_F(PeriodConfig, TestUpdatePeriodConfigChangedAdaptiveRatioChanged)
 {
     g_tmpStrategyConfig.fileConfSwitch = true;
     g_strategyConfig.scanPeriod = 500;
@@ -621,7 +621,7 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedAdaptiveRatioChanged)
 }
 
 extern "C" void StrategyConfigRead(const char *configFile);
-TEST_F(PeriodConfigTest, PeriodConfigReadTestReadFileFailed)
+TEST_F(PeriodConfig, PeriodConfigReadTestReadFileFailed)
 {
     const char *configFile = "/test";
     MOCKER(ConfigReadReadFile).stubs().will(returnValue(-1));
@@ -630,7 +630,7 @@ TEST_F(PeriodConfigTest, PeriodConfigReadTestReadFileFailed)
     StrategyConfigRead(configFile);
 }
 
-TEST_F(PeriodConfigTest, PeriodConfigReadTestConfigReviewFailed)
+TEST_F(PeriodConfig, PeriodConfigReadTestConfigReviewFailed)
 {
     const char *configFile = "/test";
     MOCKER(ConfigReadReadFile).stubs().will(returnValue(0));
@@ -640,7 +640,7 @@ TEST_F(PeriodConfigTest, PeriodConfigReadTestConfigReviewFailed)
     StrategyConfigRead(configFile);
 }
 
-TEST_F(PeriodConfigTest, PeriodConfigReadTestSuccess)
+TEST_F(PeriodConfig, PeriodConfigReadTestSuccess)
 {
     const char *configFile = "/test";
     MOCKER(ConfigReadReadFile).stubs().will(returnValue(0));

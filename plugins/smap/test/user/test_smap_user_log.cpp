@@ -24,27 +24,27 @@ static void MockLogCallback(int level, const char *str, const char *moduleName)
     if (moduleName) g_lastLogModule = moduleName;
 }
 
-class SmapUserLogTest : public ::testing::Test {
+class SmapUserLog : public ::testing::Test {
 protected:
     void SetUp() override
     {
-        cout << "[SmapUserLogTest SetUp Begin]" << endl;
+        cout << "[SmapUserLog SetUp Begin]" << endl;
         g_logCallCount = 0;
         g_lastLogLevel = 0;
         g_lastLogMsg.clear();
         g_lastLogModule.clear();
-        cout << "[SmapUserLogTest SetUp End]" << endl;
+        cout << "[SmapUserLog SetUp End]" << endl;
     }
     void TearDown() override
     {
-        cout << "[SmapUserLogTest TearDown Begin]" << endl;
+        cout << "[SmapUserLog TearDown Begin]" << endl;
         SmapLoggerExit();
         GlobalMockObject::verify();
-        cout << "[SmapUserLogTest TearDown End]" << endl;
+        cout << "[SmapUserLog TearDown End]" << endl;
     }
 };
 
-TEST_F(SmapUserLogTest, TestUpstreamSubscribeLogger)
+TEST_F(SmapUserLog, TestUpstreamSubscribeLogger)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "test message");
@@ -53,27 +53,27 @@ TEST_F(SmapUserLogTest, TestUpstreamSubscribeLogger)
     EXPECT_TRUE(g_lastLogModule.find("SMAP") != string::npos);
 }
 
-TEST_F(SmapUserLogTest, TestUpstreamSubscribeLoggerNull)
+TEST_F(SmapUserLog, TestUpstreamSubscribeLoggerNull)
 {
     UpstreamSubscribeLogger(NULL);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "test message");
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLogTest, TestSmapStartULogNullPath)
+TEST_F(SmapUserLog, TestSmapStartULogNullPath)
 {
     int ret = SmapStartULog(NULL);
     EXPECT_EQ(-22, ret);
 }
 
-TEST_F(SmapUserLogTest, TestSmapStartULogValidPath)
+TEST_F(SmapUserLog, TestSmapStartULogValidPath)
 {
     int ret = SmapStartULog("/tmp/test_smap_ulog");
     EXPECT_EQ(0, ret);
     SmapLoggerExit();
 }
 
-TEST_F(SmapUserLogTest, TestSMAP_UlogDebug)
+TEST_F(SmapUserLog, TestSMAP_UlogDebug)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_DEBUG, "testFunc", 10, "test.c", "debug message");
@@ -81,7 +81,7 @@ TEST_F(SmapUserLogTest, TestSMAP_UlogDebug)
     EXPECT_EQ(0, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLogTest, TestSMAP_UlogWarning)
+TEST_F(SmapUserLog, TestSMAP_UlogWarning)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_WARNING, "testFunc", 10, "test.c", "warning message");
@@ -89,7 +89,7 @@ TEST_F(SmapUserLogTest, TestSMAP_UlogWarning)
     EXPECT_EQ(2, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLogTest, TestSMAP_UlogError)
+TEST_F(SmapUserLog, TestSMAP_UlogError)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_ERROR, "testFunc", 10, "test.c", "error message");
@@ -97,14 +97,14 @@ TEST_F(SmapUserLogTest, TestSMAP_UlogError)
     EXPECT_EQ(3, g_lastLogLevel);
 }
 
-TEST_F(SmapUserLogTest, TestSMAP_UlogInvalidLevel)
+TEST_F(SmapUserLog, TestSMAP_UlogInvalidLevel)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(999, "testFunc", 10, "test.c", "invalid level message");
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLogTest, TestSmapLoggerExitWithSubscriber)
+TEST_F(SmapUserLog, TestSmapLoggerExitWithSubscriber)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SmapLoggerExit();
@@ -112,7 +112,7 @@ TEST_F(SmapUserLogTest, TestSmapLoggerExitWithSubscriber)
     EXPECT_EQ(0, g_logCallCount);
 }
 
-TEST_F(SmapUserLogTest, TestSMAP_UlogWithFormat)
+TEST_F(SmapUserLog, TestSMAP_UlogWithFormat)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "format test %d %s", 42, "string");
@@ -121,7 +121,7 @@ TEST_F(SmapUserLogTest, TestSMAP_UlogWithFormat)
     EXPECT_TRUE(g_lastLogMsg.find("string") != string::npos);
 }
 
-TEST_F(SmapUserLogTest, TestUpstreamSubscribeLoggerReplace)
+TEST_F(SmapUserLog, TestUpstreamSubscribeLoggerReplace)
 {
     UpstreamSubscribeLogger(MockLogCallback);
     SMAP_Ulog(SMAP_LOG_INFO, "testFunc", 10, "test.c", "first message");
