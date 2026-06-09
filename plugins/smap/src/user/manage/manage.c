@@ -456,12 +456,10 @@ int VMPreprocess(pid_t pid, ProcessAttr *attr)
 static void SetBasicProcessConfig(ProcessAttr *attr, ProcessParam *param)
 {
     attr->pid = param->pid;
-    attr->scanTime = param->scanTime;
     attr->duration = param->duration;
     attr->scanType = param->scanType;
     attr->migrateMode = param->numaParam[0].migrateMode;
     attr->remoteNumaCnt = param->count;
-    attr->isFirstScan = true;
     attr->enableSwap = true;
 
     int localRatio = HUNDRED;
@@ -597,6 +595,7 @@ static void SetGroupedProcessConfig(ProcessAttr *attr, pid_t pid, uint32_t nodeB
                                     const GroupMigrationPolicy *policy)
 {
     attr->pid = pid;
+    attr->isFirstScan = true;
     attr->scanTime = SCAN_TIME_2M;
     attr->duration = 0;
     attr->scanType = NORMAL_SCAN;
@@ -666,6 +665,7 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
 
     attr->type = type;
     SetProcessConfig(attr, param);
+    attr->isFirstScan = true;
     attr->scanTime = DEFAULT_SCAN_PERIOD;
     LinkedListAdd(&g_processManager.processes, &attr);
     SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", attr->pid, attr->scanTime);
