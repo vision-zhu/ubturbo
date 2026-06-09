@@ -228,6 +228,7 @@ typedef struct {
 typedef struct {
     uint32_t cpuMask[LOCAL_NUMA_NUM]; // CPU绑定情况
     uint32_t numaNodes; // numa bitmap: 0-unused, 1-used
+    uint32_t savedNumaNodes; // 原始numa bitmap，用于critical_err恢复
 } NumaAttribute;
 
 typedef struct {
@@ -752,4 +753,6 @@ static inline bool IsMultiNumaVm(ProcessAttr *process)
 }
 
 bool IsMemoryLow(pid_t pid);
+
+void CheckRemoteNumaCriticalErr(struct ProcessManager *manager);
 #endif /* __MANAGE_H__ */

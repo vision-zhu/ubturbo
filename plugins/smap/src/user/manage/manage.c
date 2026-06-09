@@ -670,6 +670,7 @@ int AddProcess(ProcessParam *param, PidType type, uint32_t *nodeBitmap)
     LinkedListAdd(&g_processManager.processes, &attr);
     SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", attr->pid, attr->scanTime);
     g_processManager.nr[type]++;
+    attr->numaAttr.savedNumaNodes = attr->numaAttr.numaNodes;
 
     ret = SyncAllProcessConfig();
     if (ret) {
@@ -964,6 +965,7 @@ int ProcessAddManage(ProcessParam *param, uint32_t *nodeBitmap)
     current = GetProcessAttrLocked(param->pid);
     if (current) {
         SetProcessConfig(current, param);
+        current->numaAttr.savedNumaNodes = current->numaAttr.numaNodes;
         SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", current->pid, current->scanTime);
         ret = SyncAllProcessConfig();
         if (ret) {
@@ -1000,6 +1002,7 @@ int ProcessAddGroupedManage(pid_t pid, uint32_t nodeBitmap, const GroupMigration
     ProcessAttr *current = GetProcessAttrLocked(pid);
     if (current) {
         SetGroupedProcessConfig(current, pid, nodeBitmap, policy);
+        current->numaAttr.savedNumaNodes = current->numaAttr.numaNodes;
         SMAP_LOGGER_INFO("Update grouped pid %d success, group count %d.", pid, policy->groupCount);
         ret = SyncAllProcessConfig();
         if (ret) {
@@ -1028,6 +1031,7 @@ int ProcessAddGroupedManage(pid_t pid, uint32_t nodeBitmap, const GroupMigration
     SetGroupedProcessConfig(attr, pid, nodeBitmap, policy);
     LinkedListAdd(&g_processManager.processes, &attr);
     g_processManager.nr[VM_TYPE]++;
+    attr->numaAttr.savedNumaNodes = attr->numaAttr.numaNodes;
     SMAP_LOGGER_INFO("Add grouped pid %d success, group count %d.", pid, policy->groupCount);
     ret = SyncAllProcessConfig();
     if (ret) {
@@ -1239,6 +1243,72 @@ static void SetPidNrPages(ProcessAttr *attr, size_t *nrPages, int len)
         attr->walkPage.nrPage += nrPages[i];
     }
     SMAP_LOGGER_INFO("Pid %d nrPage %llu.", attr->pid, attr->walkPage.nrPage);
+}
+
+static void ReregisterProcessNumaNodes(ProcessAttr *current)
+{
+    struct AccessAddPidPayload payload;
+    payload.pid = current->pid;
+    payload.numaNodes = current->numaAttr.numaNodes;
+    payload.scanTime = current->scanTime;
+    payload.duration = current->duration;
+    payload.type = current->scanType;
+    payload.nTimes = 0;
+    int ret = AccessIoctlAddPid(1, &payload);
+    if (ret) {
+        SMAP_LOGGER_WARNING("Reregister pid %d with updated numaNodes failed: %d.", current->pid, ret);
+    }
+}
+
+static void UpdateProcessNumaNodesForForbiddenNode(struct ProcessManager *manager, int nid)
+{
+    EnvMutexLock(&manager->lock);
+    ProcessAttr *current = manager->processes;
+    while (current) {
+        if (InAttrL2(current, nid)) {
+            ClearNodeBit(&current->numaAttr.numaNodes, nid);
+            ReregisterProcessNumaNodes(current);
+            SMAP_LOGGER_INFO("Pid %d: removed node%d from scan bitmap due to critical_err.", current->pid, nid);
+        }
+        current = current->next;
+    }
+    EnvMutexUnlock(&manager->lock);
+}
+
+static void RestoreProcessNumaNodesForRecoveredNode(struct ProcessManager *manager, int nid)
+{
+    EnvMutexLock(&manager->lock);
+    ProcessAttr *current = manager->processes;
+    while (current) {
+        unsigned long bitmap = current->numaAttr.savedNumaNodes;
+        if (nid >= LOCAL_NUMA_BITS && nid < MAX_NODES && TestBit(nid, &bitmap)) {
+            AddL2ByNid(&current->numaAttr.numaNodes, nid);
+            ReregisterProcessNumaNodes(current);
+            SMAP_LOGGER_INFO("Pid %d: restored node%d to scan bitmap after critical_err cleared.", current->pid, nid);
+        }
+        current = current->next;
+    }
+    EnvMutexUnlock(&manager->lock);
+}
+
+void CheckRemoteNumaCriticalErr(struct ProcessManager *manager)
+{
+    int nrLocalNuma = GetNrLocalNuma();
+    for (int nid = nrLocalNuma; nid < MAX_NODES; nid++) {
+        int criticalErr = ReadNumaCriticalErr(nid);
+        if (criticalErr < 0) {
+            continue;
+        }
+        if (criticalErr == 1 && !IsNodeForbiddenReason(nid, NODE_FORBIDDEN_USER)) {
+            SetNodeForbiddenReason(nid, NODE_FORBIDDEN_USER);
+            SMAP_LOGGER_INFO("Remote NUMA node%d critical_err detected, disabling scan and migration.", nid);
+            UpdateProcessNumaNodesForForbiddenNode(manager, nid);
+        } else if (criticalErr == 0 && IsNodeForbiddenReason(nid, NODE_FORBIDDEN_USER)) {
+            ClearNodeForbiddenReason(nid, NODE_FORBIDDEN_USER);
+            SMAP_LOGGER_INFO("Remote NUMA node%d critical_err cleared, restoring scan and migration.", nid);
+            RestoreProcessNumaNodesForRecoveredNode(manager, nid);
+        }
+    }
 }
 
 #define FREQ_FILE_PATH_LEN 50

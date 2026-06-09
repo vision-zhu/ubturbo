@@ -710,6 +710,7 @@ int ScanMigrateWork(ThreadCtx *ctx)
     if (GetFileConfSwitchConfig()) {
         SetAdaptMem(GetAdaptiveRatioEnableConfig());
     }
+    CheckRemoteNumaCriticalErr(manager);
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
     ret = PerformMigrationPreparation(manager);

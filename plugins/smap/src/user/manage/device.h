@@ -35,4 +35,6 @@ int InitTrackingDev(struct ProcessManager *manager);
 
 void DeinitTrackingDev(struct ProcessManager *manager);
 
+int ReadNumaCriticalErr(int nid);
+
 #endif /* __DEVICE_H__ */

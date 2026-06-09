@@ -2417,3 +2417,129 @@ TEST_F(ManageTest, TestCalibrateMigratePagesThreeLocals)
     EXPECT_EQ((uint32_t)60, attr.strategyAttr.remoteNrPagesAfterMigrate[1][0]);
     EXPECT_EQ((uint32_t)120, attr.strategyAttr.remoteNrPagesAfterMigrate[2][0]);
 }
+
+extern "C" void CheckRemoteNumaCriticalErr(struct ProcessManager *manager);
+extern "C" int ReadNumaCriticalErr(int nid);
+extern "C" EnvAtomic g_forbiddenNodes[MAX_NODES];
+
+class CriticalErrTest : public ::testing::Test {
+protected:
+    void SetUp() override
+    {
+        for (int i = 0; i < MAX_NODES; i++) {
+            EnvAtomicSet(&g_forbiddenNodes[i], 0);
+        }
+        g_processManager.processes = nullptr;
+        g_processManager.nrLocalNuma = 4;
+    }
+    void TearDown() override
+    {
+        GlobalMockObject::verify();
+        g_processManager.processes = nullptr;
+        for (int i = 0; i < MAX_NODES; i++) {
+            EnvAtomicSet(&g_forbiddenNodes[i], 0);
+        }
+    }
+};
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrNodeUnavailable)
+{
+    ProcessAttr attr = {};
+    attr.pid = 100;
+    attr.scanTime = 50;
+    attr.scanType = NORMAL_SCAN;
+    attr.numaAttr.numaNodes = 0x10; // node4 in bitmap
+    attr.numaAttr.savedNumaNodes = 0x10;
+    g_processManager.processes = &attr;
+
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(1));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_TRUE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+    EXPECT_FALSE(InAttrL2(&attr, 4));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrNodeRecovered)
+{
+    ProcessAttr attr = {};
+    attr.pid = 100;
+    attr.scanTime = 50;
+    attr.scanType = NORMAL_SCAN;
+    attr.numaAttr.numaNodes = 0x0; // node4 removed from bitmap
+    attr.numaAttr.savedNumaNodes = 0x10; // originally had node4
+    g_processManager.processes = &attr;
+
+    SetNodeForbiddenReason(4, NODE_FORBIDDEN_USER);
+
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(0));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(0));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_FALSE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+    EXPECT_TRUE(InAttrL2(&attr, 4));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrReadFailed)
+{
+    g_processManager.processes = nullptr;
+
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(-1));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_FALSE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrNodeAlreadyForbidden)
+{
+    SetNodeForbiddenReason(4, NODE_FORBIDDEN_USER);
+
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(1));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_TRUE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrNodeAvailableNoForbidden)
+{
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(0));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_FALSE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrReregisterFailed)
+{
+    ProcessAttr attr = {};
+    attr.pid = 100;
+    attr.scanTime = 50;
+    attr.scanType = NORMAL_SCAN;
+    attr.numaAttr.numaNodes = 0x10;
+    attr.numaAttr.savedNumaNodes = 0x10;
+    g_processManager.processes = &attr;
+
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(1));
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(-1));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_TRUE(IsNodeForbiddenReason(4, NODE_FORBIDDEN_USER));
+    EXPECT_FALSE(InAttrL2(&attr, 4));
+}
+
+TEST_F(CriticalErrTest, TestCheckRemoteNumaCriticalErrLocalNodeNotChecked)
+{
+    MOCKER(ReadNumaCriticalErr).stubs().will(returnValue(1));
+
+    CheckRemoteNumaCriticalErr(&g_processManager);
+
+    EXPECT_FALSE(IsNodeForbiddenReason(0, NODE_FORBIDDEN_USER));
+    EXPECT_FALSE(IsNodeForbiddenReason(1, NODE_FORBIDDEN_USER));
+    EXPECT_FALSE(IsNodeForbiddenReason(2, NODE_FORBIDDEN_USER));
+    EXPECT_FALSE(IsNodeForbiddenReason(3, NODE_FORBIDDEN_USER));
+}
