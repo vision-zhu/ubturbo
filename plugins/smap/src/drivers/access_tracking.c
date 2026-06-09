@@ -35,6 +35,18 @@
 #define MAX_SCAN_TIME 100000 /* 100s */
 #define MS_TO_US 1000
 #define DELAY_BUFFER_MS 8
+#define SMAP_SCAN_CPU_MIN 288
+#define SMAP_SCAN_CPU_MAX 379
+#define SMAP_SCAN_CPU_COUNT (SMAP_SCAN_CPU_MAX - SMAP_SCAN_CPU_MIN + 1)
+
+static int smap_scan_cpu_idx = 0;
+
+static int smap_next_scan_cpu(void)
+{
+	int cpu = SMAP_SCAN_CPU_MIN + smap_scan_cpu_idx % SMAP_SCAN_CPU_COUNT;
+	smap_scan_cpu_idx+=2;
+	return cpu;
+}
 
 static void work_func(struct work_struct *work);
 int calc_access_len(struct access_tracking_dev *adev);
@@ -84,8 +96,8 @@ void submit_one_work(struct access_pid *ap)
 	cancel_ap_scan_work(ap);
 	init_completion(&ap->work_done);
 	INIT_DELAYED_WORK(&ap->scan_work, work_func);
-	queue_delayed_work(adev_head->scanq, &ap->scan_work,
-			   msecs_to_jiffies(ap->scan_time));
+	queue_delayed_work_on(smap_next_scan_cpu(), adev_head->scanq, &ap->scan_work,
+				   msecs_to_jiffies(ap->scan_time));
 }
 
 static void submit_scan_works(struct access_tracking_dev *adev)
@@ -470,7 +482,7 @@ static void work_func(struct work_struct *work)
 	}
 	ap->last_scan_delay_ms = scan_delay_ms;
 	if (ap->cur_times < ap->ntimes) {
-		queue_delayed_work(adev->scanq, &ap->scan_work,
+		queue_delayed_work_on(smap_next_scan_cpu(), adev->scanq, &ap->scan_work,
 				   msecs_to_jiffies(scan_delay_ms));
 		ap->last_scan_end = ktime_get();
 	} else {
