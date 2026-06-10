@@ -16,7 +16,7 @@
 #define SCAN_PERIOD_UNIT_MS 50
 
 #define MMAPLOCK_BATCH_SIZE (64UL * 1024 * 1024)
-#define SCAN_GROUP_SIZE (64UL * 1024) /* 64KiB分组扫描优化 */
+#define SCAN_GROUP_SIZE (4UL * 1024) /* 4KiB分组扫描优化 */
 
 #define SCAN_RESULT_CAPACITY (MMAPLOCK_BATCH_SIZE / PAGE_SIZE)
 
@@ -57,6 +57,7 @@ struct scan_result_entry {
 	phys_addr_t paddr;
 	u8 nid;
 	u8 hot;
+	u64 va;
 };
 
 struct pte_walk {

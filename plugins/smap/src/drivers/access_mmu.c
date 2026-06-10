@@ -110,7 +110,8 @@ int add_to_bm_page(u64 paddr, struct access_pid *ap)
 	return 0;
 }
 
-int add_to_bm_page_fast(u64 paddr, int nid, u64 acidx, struct access_pid *ap)
+int add_to_bm_page_fast(u64 paddr, int nid, u64 acidx, u64 va,
+			 struct access_pid *ap)
 {
 	int ret, nid_pos;
 	unsigned long numa_nodes;
@@ -130,6 +131,8 @@ int add_to_bm_page_fast(u64 paddr, int nid, u64 acidx, struct access_pid *ap)
 	if (!test_bit(acidx, ap->paddr_bm[nid])) {
 		set_bit(acidx, ap->paddr_bm[nid]);
 		ap->page_num[nid]++;
+		if (ap->va_data[nid])
+			ap->va_data[nid][acidx] = va;
 	}
 	return 0;
 }
@@ -208,6 +211,8 @@ int add_to_bm_hugepage(u64 vaddr, u64 paddr, struct access_pid *ap)
 	if (!test_bit(acidx, ap->paddr_bm[nid])) {
 		set_bit(acidx, ap->paddr_bm[nid]);
 		ap->page_num[nid]++;
+		if (ap->va_data[nid])
+			ap->va_data[nid][acidx] = vaddr;
 	}
 	set_pa_prior(ap, vaddr, acidx, nid);
 	return 0;

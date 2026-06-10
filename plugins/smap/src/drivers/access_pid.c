@@ -52,6 +52,8 @@ void destroy_access_pid(struct access_pid *elem)
 		elem->paddr_bm[i] = NULL;
 		vfree(elem->white_list_bm[i]);
 		elem->white_list_bm[i] = NULL;
+		vfree(elem->va_data[i]);
+		elem->va_data[i] = NULL;
 		elem->bm_len[i] = 0;
 		elem->scan_count[i] = 0;
 		elem->page_num[i] = 0;
@@ -236,6 +238,49 @@ static int mem_freq_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+#define ACTC_DIR "/var/log/actc/"
+#define ACTC_PATH_MAX 64
+
+static u64 format_actc_entry(actc_t freq, u64 va, int nid)
+{
+	u64 is_local = (nid < nr_local_numa) ? 1ULL : 0ULL;
+
+	return ((u64)freq << 48) | (va & 0x0000FFFFFFFFF000ULL) | (is_local << 8);
+}
+
+static int write_actc_bin_file(pid_t pid, u32 *idx, u64 *buf, size_t len)
+{
+	struct file *filp;
+	char path[ACTC_PATH_MAX];
+	loff_t pos = 0;
+	ssize_t written;
+
+	if (!buf || len == 0)
+		return 0;
+
+	if (snprintf(path, sizeof(path), ACTC_DIR "%d_%u.out", pid, *idx) >=
+	    sizeof(path))
+		return -EINVAL;
+
+	filp = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (IS_ERR(filp)) {
+		pr_err("failed to create actc bin file: %s\n", path);
+		return PTR_ERR(filp);
+	}
+
+	written = kernel_write(filp, (const char *)buf, len * sizeof(u64), &pos);
+	filp_close(filp, NULL);
+
+	if (written != (ssize_t)(len * sizeof(u64))) {
+		pr_err("failed to write actc bin data to %s\n", path);
+		return written < 0 ? written : -EIO;
+	}
+
+	(*idx)++;
+	pr_info("saved actc bin data to %s, %zu entries\n", path, len);
+	return 0;
+}
+
 /**
  * fill_actc_data_by_bitmap - 根据bitmap生成actc_data数组
  * @ap: access_pid结构体指针
@@ -245,9 +290,30 @@ static int mem_freq_release(struct inode *inode, struct file *file)
  *
  * 遍历bitmap，结合频次数据、mapping和white_list_bm，生成actc_data结构体数组。
  */
+static void fill_actc_entry(struct actc_data *actc, u32 idx, actc_t freq,
+			    struct access_pid *ap, int nid, size_t acidx,
+			    u32 mapping_offset, u64 *out_buf)
+{
+	actc[idx].addr = idx;
+	actc[idx].freq = freq;
+	if (ap->info.vm_size && ap->info.mapping &&
+	    (mapping_offset + idx) < ap->info.vm_size)
+		actc[idx].prior =
+			ap->info.mapping[mapping_offset + idx] & 0xff;
+	else
+		actc[idx].prior = 0;
+	if (ap->white_list_bm[nid] &&
+	    test_bit(acidx, ap->white_list_bm[nid]))
+		actc[idx].is_white_list = 1;
+	else
+		actc[idx].is_white_list = 0;
+	if (out_buf && ap->va_data[nid])
+		out_buf[mapping_offset + idx] = format_actc_entry(freq, ap->va_data[nid][acidx], nid);
+}
+
 static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 				     struct actc_data *actc, u32 *actc_len,
-				     u32 mapping_offset)
+				     u32 mapping_offset, u64 *out_buf)
 {
 	u32 len_cnt = 0;
 	size_t acidx, bm_len;
@@ -280,31 +346,8 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 				adev->page_count, acidx, nid);
 			break;
 		}
-
-		/* 填充addr - 使用相对索引 */
-		actc[len_cnt].addr = len_cnt;
-
-		/* 填充freq */
-		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
-
-		/* 填充prior - 从mapping获取 */
-		if (ap->info.vm_size && ap->info.mapping &&
-		    (mapping_offset + len_cnt) < ap->info.vm_size) {
-			actc[len_cnt].prior =
-				ap->info.mapping[mapping_offset + len_cnt] &
-				0xff;
-		} else {
-			actc[len_cnt].prior = 0;
-		}
-
-		/* 填充is_white_list */
-		if (ap->white_list_bm[nid] &&
-		    test_bit(acidx, ap->white_list_bm[nid])) {
-			actc[len_cnt].is_white_list = 1;
-		} else {
-			actc[len_cnt].is_white_list = 0;
-		}
-
+		fill_actc_entry(actc, len_cnt, adev->access_bit_actc_data[acidx],
+				ap, nid, acidx, mapping_offset, out_buf);
 		len_cnt++;
 		acidx++;
 	}
@@ -321,7 +364,8 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
  * 对每个node调用fill_actc_data_by_bitmap生成actc_data。
  */
 static void fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc,
-			       u32 actc_len[SMAP_MAX_NUMNODES])
+			       u32 actc_len[SMAP_MAX_NUMNODES],
+			       u64 *out_buf)
 {
 	int nid;
 	u32 mapping_offset = 0;
@@ -329,7 +373,8 @@ static void fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc,
 
 	for (nid = 0; nid < SMAP_MAX_NUMNODES; nid++) {
 		fill_actc_data_by_bitmap(ap, nid, actc + actc_offset,
-					 &actc_len[nid], mapping_offset);
+					 &actc_len[nid], mapping_offset,
+					 out_buf);
 		mapping_offset += actc_len[nid];
 		actc_offset += ap->page_num[nid];
 	}
@@ -345,29 +390,27 @@ static inline size_t calc_process_page_number(struct access_pid *ap)
 	return ret_len;
 }
 
-static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
-			     loff_t *ppos)
+static ssize_t do_mem_freq_read(struct access_pid *ap, char __user *buf,
+						size_t cnt, loff_t *ppos)
 {
 	struct actc_data *actc;
-	struct access_pid *ap = file->private_data;
 	ssize_t len;
-	size_t total_len;
+	size_t total_len, total_page_num;
 	u32 actc_len[SMAP_MAX_NUMNODES];
+	u64 *out_buf;
 
-	pr_debug("enter mem_freq_read\n");
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
-		len = -EAGAIN;
-		goto out;
-	}
-
-	down_read(&ap_data.lock);
-	total_len = calc_process_page_number(ap) * sizeof(struct actc_data);
+	total_page_num = calc_process_page_number(ap);
+	total_len = total_page_num * sizeof(struct actc_data);
 	actc = kvmalloc(total_len, GFP_KERNEL);
-	if (!actc) {
-		len = -ENOMEM;
-		up_read(&ap_data.lock);
-		goto out;
-	}
+	if (!actc)
+		return -ENOMEM;
+
+	out_buf = kvmalloc(total_page_num * sizeof(u64), GFP_KERNEL);
+
+	fill_pid_actc_data(ap, actc, actc_len, out_buf);
+	if (out_buf)
+		write_actc_bin_file(ap->pid, &ap->actc_idx, out_buf,
+				    total_page_num);
 
 	len = -EINVAL;
 	if (*ppos % sizeof(struct actc_data)) {
@@ -384,7 +427,6 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	else
 		len = cnt;
 
-	fill_pid_actc_data(ap, actc, actc_len);
 	if (copy_to_user(buf, actc + (*ppos / sizeof(struct actc_data)), len)) {
 		len = -EFAULT;
 		goto out_free;
@@ -392,16 +434,34 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	if (*ppos + cnt <= total_len)
 		*ppos += len;
 out_free:
+	kvfree(out_buf);
 	kvfree(actc);
+	return len;
+}
+
+static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
+			     loff_t *ppos)
+{
+	struct access_pid *ap = file->private_data;
+	ssize_t len;
+
+	pr_debug("enter mem_freq_read\n");
+	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
+		len = -EAGAIN;
+		goto out;
+	}
+
+	down_read(&ap_data.lock);
+	len = do_mem_freq_read(ap, buf, cnt, ppos);
 	up_read(&ap_data.lock);
 out:
 	if (len < 0) {
 		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ);
+					     AP_STATE_FREQ);
 	} else {
 		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ |
-						     AP_STATE_MIG);
+					     AP_STATE_FREQ |
+					     AP_STATE_MIG);
 	}
 	return len;
 }
@@ -502,6 +562,7 @@ int init_access_pid(struct access_add_pid_payload *payload,
 		ap->bm_len[i] = 0;
 		ap->paddr_bm[i] = NULL;
 		ap->white_list_bm[i] = NULL;
+		ap->va_data[i] = NULL;
 	}
 	if (is_access_hugepage()) {
 		if (init_vm_mapping_info(ap->pid, &ap->info)) {
@@ -1174,6 +1235,8 @@ static void free_ap_bm_white_list(struct access_pid *ap)
 		ap->paddr_bm[i] = NULL;
 		vfree(ap->white_list_bm[i]);
 		ap->white_list_bm[i] = NULL;
+		vfree(ap->va_data[i]);
+		ap->va_data[i] = NULL;
 		ap->bm_len[i] = 0;
 	}
 }
@@ -1188,6 +1251,7 @@ int init_ap_bm_white_list(int node_len, u64 *node_page_count,
 		ap->page_num[i] = 0;
 		ap->bm_len[i] = BITS_TO_LONGS(node_page_count[i]);
 		if (ap->bm_len[i] == 0) {
+			ap->va_data[i] = NULL;
 			continue;
 		}
 		ap->paddr_bm[i] = vzalloc(ap->bm_len[i] * nr_bytes);
@@ -1201,6 +1265,14 @@ int init_ap_bm_white_list(int node_len, u64 *node_page_count,
 		ap->white_list_bm[i] = vzalloc(ap->bm_len[i] * nr_bytes);
 		if (!ap->white_list_bm[i]) {
 			pr_err("unable to allocate memory for white list bitmap on node %d of pid: %d\n",
+			       i, ap->pid);
+			free_ap_bm_white_list(ap);
+			return -ENOMEM;
+		}
+
+		ap->va_data[i] = vzalloc(node_page_count[i] * sizeof(u64));
+		if (!ap->va_data[i]) {
+			pr_err("unable to allocate memory for VA data on node %d of pid: %d\n",
 			       i, ap->pid);
 			free_ap_bm_white_list(ap);
 			return -ENOMEM;
@@ -1233,6 +1305,8 @@ void clean_last_ap_data(struct access_pid *ap)
 		ap->paddr_bm[i] = NULL;
 		vfree(ap->white_list_bm[i]);
 		ap->white_list_bm[i] = NULL;
+		vfree(ap->va_data[i]);
+		ap->va_data[i] = NULL;
 		ap->bm_len[i] = 0;
 		ap->page_num[i] = 0;
 	}

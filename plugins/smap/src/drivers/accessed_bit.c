@@ -1346,6 +1346,7 @@ save_res:
 	pte_walk->scan_results[pte_walk->scan_result_cnt].paddr = paddr;
 	pte_walk->scan_results[pte_walk->scan_result_cnt].nid = nid;
 	pte_walk->scan_results[pte_walk->scan_result_cnt].hot = is_young;
+	pte_walk->scan_results[pte_walk->scan_result_cnt].va = addr;
 	pte_walk->scan_result_cnt++;
 
 	return 0;
@@ -1379,7 +1380,8 @@ static void process_scan_results(struct pte_walk *pte_walk)
 		if (entry->hot)
 			actc_data_update(entry->nid, pa_idx);
 		if (is_last_scan)
-			add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx,
+			add_to_bm_page_fast(entry->paddr, entry->nid,
+					    pa_idx, entry->va,
 					    pte_walk->ap);
 		cond_resched();
 	}

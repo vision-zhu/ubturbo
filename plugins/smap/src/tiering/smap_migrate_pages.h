@@ -24,6 +24,11 @@ enum smap_migrate_type {
 	NR_MIGRATE_TYPE,
 };
 
+static int node_is_critical_err(int nid)
+{
+        return 0;
+}
+
 void set_remote_migrate_mode(unsigned int mode);
 struct folio *smap_alloc_new_node_page(struct folio *folio, unsigned long node);
 struct folio *smap_alloc_new_node_page_mig_back(struct folio *folio,

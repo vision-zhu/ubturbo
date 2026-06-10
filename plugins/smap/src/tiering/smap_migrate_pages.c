@@ -71,7 +71,7 @@ static struct migrate_node {
 void set_remote_migrate_mode(unsigned int mode)
 {
 	if (mode) {
-		remote_migrate_mode = MIGRATE_ASYNC_DMA_OFFLOADING;
+		remote_migrate_mode = MIGRATE_ASYNC;
 	}
 	pr_info("set remote migrate mode: %u\n", remote_migrate_mode);
 }
