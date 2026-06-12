@@ -550,6 +550,11 @@ static struct ram_segment *find_rseg_by_start(u64 start)
 
 /**
  * update_actc_direct - Directly update access frequency to hdev without intermediate buffer
+ *
+ * The hdev buffer is indexed by cumulative page offset per NUMA node, consistent with
+ * calc_paddr_acidx_iomem(). preceding_pages tracks the cumulative page count of all
+ * preceding segments on the same NUMA node, so that seg_offset matches the index
+ * used by the upper layer when reading frequency data via procfs.
  */
 static void update_actc_direct(struct segs_info *rmem_info,
 			       struct addr_seg *seg, u16 *freq, u32 buf_len,
@@ -563,38 +568,45 @@ static void update_actc_direct(struct segs_info *rmem_info,
 	struct ram_segment *rseg;
 	struct addr_seg *cur_seg;
 	unsigned int i;
+	u64 preceding_pages[SMAP_MAX_NUMNODES] = { 0 };
 
 	read_lock(&rem_ram_list_lock);
 	for (i = 0; i < rmem_info->cnt; i++) {
 		cur_seg = &rmem_info->segs[i];
-
-		/* Check intersection between scan window and remote memory segment */
-		if (!is_intersect(cur_seg, seg, &inter_start, &inter_end))
-			continue;
 
 		/* Find the ram_segment for NUMA node lookup */
 		rseg = find_rseg_by_start(cur_seg->start);
 		if (!rseg)
 			continue;
 
-		hdev = find_hdev_by_node(rseg->numa_node);
-		if (!hdev || !hdev->access_bit_actc_data)
+		/* Check intersection between scan window and remote memory segment */
+		if (!is_intersect(cur_seg, seg, &inter_start, &inter_end)) {
+			preceding_pages[rseg->numa_node] += cur_seg->size >> shift;
 			continue;
+		}
 
-		/* Calculate offsets and page count in intersection region */
+		hdev = find_hdev_by_node(rseg->numa_node);
+		if (!hdev || !hdev->access_bit_actc_data) {
+			preceding_pages[rseg->numa_node] += cur_seg->size >> shift;
+			continue;
+		}
+
+		/* Calculate offsets: cumulative preceding pages + offset within current segment */
 		hist_offset = (inter_start - seg->start) >> shift;
-		seg_offset = (inter_start - cur_seg->start) >> shift;
+		seg_offset = preceding_pages[rseg->numa_node] + ((inter_start - cur_seg->start) >> shift);
 		inter_pages = (inter_end - inter_start + 1) >> shift;
 
 		if (seg_offset + inter_pages > hdev->page_count) {
 			pr_err("exceeded hdev buffer: %llu > %llu\n",
 			       seg_offset + inter_pages, hdev->page_count);
+			preceding_pages[rseg->numa_node] += cur_seg->size >> shift;
 			continue;
 		}
 
 		/* Update frequency counts directly to hdev buffer */
 		do_actc_update(hdev, seg_offset, hist_offset, inter_pages,
 			       freq);
+		preceding_pages[rseg->numa_node] += cur_seg->size >> shift;
 	}
 	read_unlock(&rem_ram_list_lock);
 }
