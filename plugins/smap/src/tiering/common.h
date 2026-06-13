@@ -126,4 +126,9 @@ static inline bool is_node_invalid(int node)
 	return node < 0 || node >= SMAP_MAX_NUMNODES;
 }
 
+static inline int node_is_critical_err(int nid)
+{
+        return 0;
+}
+
 #endif /* _SRC_TIERING_COMMON_H */
