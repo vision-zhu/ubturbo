@@ -20,6 +20,10 @@ else
     ccflags-y += -DKERNEL_OPENEULER
 endif
 
+ifeq ($(CRITICAL), 0)
+	ccflags-y += -DCRITICAL_OFF
+endif
+
 .PHONY: modules
 default: modules
 
