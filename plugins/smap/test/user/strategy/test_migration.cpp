@@ -302,7 +302,6 @@ TEST_F(MigrationTest, TestBuildMigrationMsgL2NodeForbidden)
     EXPECT_EQ(-EPERM, ret);
 }
 
-extern "C" uint64_t CalcMigrateNumByFreq(ProcessAttr *process);
 extern "C" int RunStrategyStub(ProcessAttr *process, struct MigList mlist[MAX_NODES][MAX_NODES], size_t mlistSize);
 TEST_F(MigrationTest, TestBuildMigrationMsgSuccess)
 {
