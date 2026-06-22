@@ -286,6 +286,7 @@ struct ProcessAttribute {
     uint64_t groupSwapLastTotalPages;
     uint8_t groupSwapStableTotalRounds;
     bool groupSwapTotalPagesValid;
+    bool groupSwapFrozen;
     PendingGroupMigrationPolicy pendingGroupPolicy;
     StrategyAttribute strategyAttr;
     ScanAttribute scanAttr;
