@@ -3159,20 +3159,59 @@ out:
     return ret;
 }
 
+/* Calculate total ratio from all local NUMA nodes to specified remote NUMA */
+static double CalcTotalRemoteMemRatio(ProcessAttr *attr, int nrLocalNuma, int l2Index)
+{
+    double totalRatio = 0.0;
+
+    for (int l1Node = 0; l1Node < nrLocalNuma && l1Node < LOCAL_NUMA_NUM; l1Node++) {
+        if (InAttrL1(attr, l1Node)) {
+            totalRatio += attr->strategyAttr.initRemoteMemRatio[l1Node][l2Index];
+        }
+    }
+    return totalRatio;
+}
+
+/* Calculate total memSize from all local NUMA nodes to specified remote NUMA */
+static uint64_t CalcTotalMemSize(ProcessAttr *attr, int nrLocalNuma, int l2Index)
+{
+    uint64_t totalMemSize = 0;
+
+    for (int l1Node = 0; l1Node < nrLocalNuma && l1Node < LOCAL_NUMA_NUM; l1Node++) {
+        if (InAttrL1(attr, l1Node)) {
+            totalMemSize += attr->strategyAttr.memSize[l1Node][l2Index];
+        }
+    }
+    return totalMemSize;
+}
+
+/* Check if process has valid L1 and L2 nodes */
+static bool IsValidProcessL1L2(ProcessAttr *attr, int l2Node, int nrLocalNuma)
+{
+    int l1Node = GetAttrL1(attr);
+    if (l1Node < 0 || l2Node < nrLocalNuma) {
+        SMAP_LOGGER_ERROR("AssignOldProcessPayload pid %d L1 %d or L2 %d is invalid.",
+                          attr->pid, l1Node, l2Node);
+        return false;
+    }
+    return true;
+}
+
 static int AssignOldProcessPayload(struct OldProcessPayload *result, ProcessAttr *attr, int l2Node)
 {
     int len, l2Index;
     int nrLocalNuma = GetNrLocalNuma();
     int l1Node = GetAttrL1(attr);
-    if (l1Node < 0 || l2Node < nrLocalNuma) {
-        SMAP_LOGGER_ERROR("AssignOldProcessPayload pid %d L1 %d or L2 %d is invalid.", attr->pid, l1Node, l2Node);
+
+    if (!IsValidProcessL1L2(attr, l2Node, nrLocalNuma)) {
         return -EINVAL;
     }
 
     l2Index = l2Node - nrLocalNuma;
     len = sizeof(result->l1Node) / sizeof(result->l1Node[0]);
     result->pid = attr->pid;
-    result->ratio = attr->strategyAttr.initRemoteMemRatio[l1Node][l2Index];
+    /* Sum ratio and memSize from all local NUMA nodes to specified remote NUMA */
+    result->ratio = (uint8_t)CalcTotalRemoteMemRatio(attr, nrLocalNuma, l2Index);
     result->scanType = attr->scanType;
     result->type = attr->type;
     result->state = attr->state;
@@ -3180,7 +3219,7 @@ static int AssignOldProcessPayload(struct OldProcessPayload *result, ProcessAttr
     result->l2Node[0] = l2Node;
     result->scanTime = attr->scanTime;
     result->migrateMode = attr->migrateMode;
-    result->memSize = attr->strategyAttr.memSize[l1Node][l2Index];
+    result->memSize = CalcTotalMemSize(attr, nrLocalNuma, l2Index);
     // only the first elem of l1Node and l2Node is used, so assign invalid nid to other elems
     for (int i = 1; i < len; i++) {
         result->l1Node[i] = result->l2Node[i] = NUMA_NO_NODE;

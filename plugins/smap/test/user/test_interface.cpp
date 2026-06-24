@@ -3726,6 +3726,68 @@ TEST_F(InterfaceTest, TestSmapQueryProcessConfigNormalThree)
     free(attr2);
 }
 
+/* Test multi-local NUMA scenario: ratio and memSize should be sum of all local NUMAs */
+TEST_F(InterfaceTest, TestSmapQueryProcessConfigMultiLocalNuma)
+{
+    int ret;
+    int inLen;
+    int outLen;
+    ProcessAttr *attr;
+    struct OldProcessPayload payload[1] = {};
+    struct ProcessManager manager = {
+        .processes = nullptr,
+        .nrLocalNuma = 4,
+    };
+
+    attr = (ProcessAttr *)calloc(1, sizeof(*attr));
+    ASSERT_NE(nullptr, attr);
+
+    /* Process has two local NUMA nodes: node 0 and node 1 */
+    attr->type = PROCESS_TYPE;
+    attr->pid = 5000;
+    attr->state = PROC_IDLE;
+    attr->scanTime = PROCESS_HEAVY_STABLE_SCAN_CYCLE;
+    attr->scanType = NORMAL_SCAN;
+    /* Set local NUMA 0, 1 (bits 0-1) and remote NUMA 5 (bit 5) */
+    attr->numaAttr.numaNodes = 0b00100011;
+    attr->migrateMode = MIG_RATIO_MODE;
+
+    /* Set ratio and memSize for each local NUMA to remote NUMA 5 (index 1) */
+    attr->strategyAttr.initRemoteMemRatio[0][1] = 20.0; /* local 0 -> remote 5: 20% */
+    attr->strategyAttr.initRemoteMemRatio[1][1] = 30.0; /* local 1 -> remote 5: 30% */
+    attr->strategyAttr.memSize[0][1] = 1024;            /* local 0 -> remote 5: 1024 KB */
+    attr->strategyAttr.memSize[1][1] = 2048;            /* local 1 -> remote 5: 2048 KB */
+
+    EnvAtomicSet(&g_status, RUNNING);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(IsOnlineRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    LinkedListAdd(&manager.processes, &attr);
+    EnvMutexInit(&manager.lock);
+
+    inLen = sizeof(payload) / sizeof(payload[0]);
+    /* Query config for remote NUMA 5 (nrLocalNuma=4, so nid=5 is remote index 1) */
+    ret = ubturbo_smap_process_config_query(5, payload, inLen, &outLen);
+
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(1, outLen);
+    EXPECT_EQ(attr->pid, payload[0].pid);
+    /* ratio should be sum: 20 + 30 = 50 */
+    EXPECT_EQ(50, payload[0].ratio);
+    /* memSize should be sum: 1024 + 2048 = 3072 */
+    EXPECT_EQ(3072, payload[0].memSize);
+    EXPECT_EQ(0, payload[0].l1Node[0]); /* First local NUMA node */
+    EXPECT_EQ(5, payload[0].l2Node[0]); /* Remote NUMA node */
+
+    /* Cleanup */
+    attr = manager.processes;
+    while (attr) {
+        LinkedListRemove(&attr, &manager.processes);
+        attr = manager.processes;
+    }
+    free(attr);
+}
+
 TEST_F(InterfaceTest, TestSmapQueryRemoteNumaFreqExceptionBranch)
 {
     EnvAtomicSet(&g_status, 0);
