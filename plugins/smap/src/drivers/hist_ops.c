@@ -27,6 +27,9 @@
 #include "hist_tracking.h"
 #include "hist_ops.h"
 
+#undef pr_fmt
+#define pr_fmt(fmt) "hist_ops: " fmt
+
 #define HOT_WINDOW_RATIO (10)
 #define SCAN_INTERVAL_RANGE_US 1000
 
@@ -99,7 +102,8 @@ MODULE_PARM_DESC(hist_4k_scan_mode_param,
  * - Validate the value is positive
  * - Update the global scan duration per window
  */
-static int hist_scan_duration_per_win_set(const char *val, const struct kernel_param *kp)
+static int hist_scan_duration_per_win_set(const char *val,
+					  const struct kernel_param *kp)
 {
 	unsigned int new_duration;
 	int ret;
@@ -111,7 +115,8 @@ static int hist_scan_duration_per_win_set(const char *val, const struct kernel_p
 
 	/* Validate parameter range: must be positive */
 	if (new_duration == 0) {
-		pr_err("invalid scan duration per win: %u, must be > 0\n", new_duration);
+		pr_err("invalid scan duration per win: %u, must be > 0\n",
+		       new_duration);
 		return -EINVAL;
 	}
 
@@ -450,7 +455,7 @@ static int generate_aligned_scan_wins_info(struct segs_info *win_info,
  * Filter windows by BA tag and store qualified 4k windows back to win_info->segs
  * @win_info: Windows set information structure containing all 4k scan windows
  * @max_wins_4k_per_ba: Maximum 4k scan windows to keep per BA
- * Return 0 on success, negative error code on failure 
+ * Return 0 on success, negative error code on failure
  */
 static int filter_4k_scan_hot_wins(struct segs_info *win_info,
 				   u32 max_wins_4k_per_ba)
@@ -829,7 +834,12 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 	 * - Other modes: start from -1 (scan from beginning)
 	 */
 	for (i = 0; i < dev->ba_cnt; ++i) {
-		offset[i] = do_4k_seq_loop ? dev->seq_loop_ba_offset[i] : -1;
+		if (do_4k_seq_loop)
+			offset[i] = (dev->seq_loop_ba_offset[i] < win_info->cnt)
+					    ? dev->seq_loop_ba_offset[i]
+					    : -1;
+		else
+			offset[i] = -1;
 	}
 
 	while (1) {
@@ -889,11 +899,11 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 			}
 		}
 		/* Check abort_flag after saving scanned data */
-		if (dev->abort_flag) {
+		if (ret == -EAGAIN) {
 			pr_debug("hist scan paused\n");
 			kfree(ba_result);
 			kfree(offset);
-			return -EAGAIN;
+			return ret;
 		}
 		cond_resched();
 	}
@@ -1107,7 +1117,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 		dev->info.segs = NULL;
 		dev->pgcount = 0;
 		dev->pgsize = pgsize;
-		pr_info("no page passed to address segment init\n");
+		pr_debug("no page passed to address segment init\n");
 		return 0;
 	}
 	tmp_addr_segs = vzalloc(nr_segs * sizeof(struct addr_seg));
@@ -1137,7 +1147,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 	sort(dev->info.segs, dev->info.cnt, sizeof(struct addr_seg),
 	     addr_seg_cmp_start, NULL);
 	dev->pgcount = pgcount;
-	pr_info("page count has been updated to %u\n", pgcount);
+	pr_debug("page count has been updated to %u\n", pgcount);
 	dev->pgsize = pgsize;
 	return 0;
 }
@@ -1145,7 +1155,7 @@ static int addr_segs_init(struct smap_hist_dev *dev, u32 pgsize)
 static void addr_segs_deinit(struct smap_hist_dev *dev)
 {
 	if (dev->info.segs) {
-		pr_info("deleting addr segs.\n");
+		pr_debug("deleting addr segs.\n");
 		vfree(dev->info.segs);
 		dev->info.segs = NULL;
 		dev->info.cnt = 0;
@@ -1195,15 +1205,9 @@ static int scan_thread_run(void *data)
 		}
 		if (dev->status.status_all) {
 			u32 pgsize = dev->status.flag.new_pgsize ?: dev->pgsize;
-			u32 j;
 
-			pr_info("histogram tracking page info has been reinited, status: %#x\n",
+			pr_debug("histogram tracking page info has been reinited, status: %#x\n",
 				dev->status.status_all);
-
-			/* Reset sequential loop scan offsets: start from beginning when memory updated or page size changed */
-			for (j = 0; j < HIST_STS_DEV_CNT; ++j) {
-				dev->seq_loop_ba_offset[j] = -1;
-			}
 
 			ret = hist_pginfo_reinit(dev, pgsize);
 			if (ret) {
