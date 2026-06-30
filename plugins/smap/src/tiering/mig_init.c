@@ -152,9 +152,11 @@ static int convert_migrate_list(int len, struct mig_list *mlist)
 		struct mig_list *ml = &mlist[i];
 
 		/* Sort ml->addr to accelerate conversion */
+		pr_info("mlist[%d] start sorting.\n", i);
 		sort(ml->addr, ml->nr, sizeof(u64), cmp_mlist_addr_ascend,
 		     NULL);
 
+		pr_info("mlist[%d] start converting.\n", i);
 		ret = convert_pos_to_paddr_sorted(ml->pid, ml->from, ml->nr,
 						  ml->addr);
 		if (ret) {
@@ -163,6 +165,7 @@ static int convert_migrate_list(int len, struct mig_list *mlist)
 			return ret;
 		}
 	}
+	pr_info("convert_migrate_list end.\n");
 	return 0;
 }
 
