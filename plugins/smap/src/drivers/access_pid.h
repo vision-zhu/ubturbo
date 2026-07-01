@@ -63,6 +63,8 @@ struct access_pid {
 	u32 scan_time;
 	u32 ntimes;
 	u32 cur_times;
+	u32 acc_times;
+	bool prior_decay;
 	struct delayed_work scan_work;
 	struct completion work_done;
 	u32 scan_count[SMAP_MAX_NUMNODES];
@@ -136,7 +138,12 @@ static inline bool access_pid_is_scanning(pid_t pid)
 
 static inline bool access_pid_cur_last_scanning(struct access_pid *ap)
 {
-	return ap->type == NORMAL_SCAN && ap->cur_times + 1 >= ap->ntimes;
+	return ap->type == NORMAL_SCAN && (ap->cur_times + 1 >= ap->ntimes);
+}
+
+static inline bool access_pid_cur_prior_decay(struct access_pid *ap)
+{
+	return ap->type == NORMAL_SCAN && (ap->acc_times >= SMAP_ACC_CNT_MAX);
 }
 
 static inline void clear_vm_mapping(u32 *mapping, u32 len)
