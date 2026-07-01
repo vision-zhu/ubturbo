@@ -31,6 +31,7 @@
 #include "access_pid.h"
 #include "hist_ops.h"
 #include "access_tracking.h"
+#include "smap_page_flags.h"
 
 #define MAX_SCAN_TIME 100000 /* 100s */
 #define MS_TO_US 1000
@@ -443,6 +444,7 @@ static void work_func(struct work_struct *work)
 	if (access_pid_cur_last_scanning(ap))
 		access_walk_pagemap_prepare(ap);
 
+	ap->prior_decay = access_pid_cur_prior_decay(ap);
 	adev_buffer_down_read();
 	down_read(&ap_data.lock);
 	page_size = get_page_size(adev);
@@ -460,6 +462,7 @@ static void work_func(struct work_struct *work)
 		       adev->page_count, page_size, adev->node);
 	}
 	ap->cur_times++;
+	ap->acc_times = ap->prior_decay ? 0 : (ap->acc_times + 1);
 	pr_debug("pid[%d] cpu[%d], scan took %lldus for %dth time\n", ap->pid,
 		 raw_smp_processor_id(), scan_time, ap->cur_times);
 

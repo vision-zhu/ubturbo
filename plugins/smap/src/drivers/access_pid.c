@@ -21,6 +21,8 @@
 #include "access_tracking.h"
 #include "access_mmu.h"
 #include "access_pid.h"
+#include "access_acpi_mem.h"
+#include "smap_page_flags.h"
 
 #undef pr_fmt
 #define pr_fmt(fmt) "access_pid: " fmt
@@ -236,6 +238,28 @@ static int mem_freq_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static u8 get_page_prior_flag(int nid, size_t acidx)
+{
+	u64 paddr = 0;
+	unsigned long pfn;
+	struct page *page;
+	if (nid < nr_local_numa) {
+		if (calc_acidx_paddr_acpi(nid, acidx, &paddr, PAGE_SIZE))
+			return 0;
+	}
+	else {
+		if (calc_acidx_paddr_iomem(nid, acidx, &paddr, PAGE_SIZE))
+			return 0;
+
+	}
+	pfn = PHYS_PFN(paddr);
+	if (pfn_valid(pfn)) {
+		page = pfn_to_page(pfn);
+		return get_smap_acc_cnt(page);
+	}
+	return 0;
+}
+
 /**
  * fill_actc_data_by_bitmap - 根据bitmap生成actc_data数组
  * @ap: access_pid结构体指针
@@ -288,13 +312,11 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
 
 		/* 填充prior - 从mapping获取 */
-		if (ap->info.vm_size && ap->info.mapping &&
-		    (mapping_offset + len_cnt) < ap->info.vm_size) {
-			actc[len_cnt].prior =
-				ap->info.mapping[mapping_offset + len_cnt] &
-				0xff;
+		if (ap->info.vm_size && ap->info.mapping) {
+			actc[len_cnt].prior = (mapping_offset + len_cnt) < ap->info.vm_size ?
+				(ap->info.mapping[mapping_offset + len_cnt] & 0xff) : 0;
 		} else {
-			actc[len_cnt].prior = 0;
+			actc[len_cnt].prior = get_page_prior_flag(nid, acidx);
 		}
 
 		/* 填充is_white_list */
