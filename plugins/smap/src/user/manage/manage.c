@@ -1317,7 +1317,7 @@ static uint8_t EstimatePriorThre(const uint32_t *histogram, uint32_t target)
     uint32_t cumulative = 0;
     for (int i = 0; i < PRIOR_HISTOGRAM_SIZE; i++) {
         if (histogram[i]) {
-            SMAP_LOGGER_DEBUG("Hist[%d] = %u", i, histogram[i]);
+            SMAP_LOGGER_INFO("Hist[%d] = %u", i, histogram[i]);
         }
     }
 
