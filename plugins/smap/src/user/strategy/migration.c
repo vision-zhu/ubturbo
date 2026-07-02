@@ -1040,8 +1040,26 @@ static void UpdatePeriodFromConfig(ThreadCtx *ctx)
         UpdateAllProcessScanTime(ctx);
         SetScanPeriodChanged(false);
     }
+}
 
-    IoctlUpdateUbDmaAvail(GetMigrateModeConfig());
+static void UpdateMigrateModeAndScanCpu(void)
+{
+    if (GetMigrateModeEnableConfig()) {
+        if (GetMigrateModeChanged()) {
+            IoctlUpdateUbDmaAvail(GetMigrateModeConfig());
+            SMAP_LOGGER_INFO("Start update migrate mode from config to %u.", GetMigrateModeConfig());
+            SetMigrateModeChanged(false);
+        }
+    }
+
+    if (GetScanCpuEnableConfig()) {
+        if (GetScanCpuChanged()) {
+            IoctlSetScanCpuRange(GetScanCpuMinConfig(), GetScanCpuMaxConfig());
+            SMAP_LOGGER_INFO("Start update scan cpu (%u-%u).",
+                GetScanCpuMinConfig(), GetScanCpuMaxConfig());
+            SetScanCpuChanged(false);
+        }
+    }
 }
 
 // 管理线程函数
@@ -1075,6 +1093,7 @@ int ScanMigrateWork(ThreadCtx *ctx)
     ConfigRatios(manager);
     SMAP_LOGGER_DEBUG("Ratio configured.");
     // 处理迁移参数
+    UpdateMigrateModeAndScanCpu();
     if (GetFileConfSwitchConfig()) {
         SMAP_LOGGER_DEBUG("Updating period from config.");
         UpdatePeriodFromConfig(ctx);

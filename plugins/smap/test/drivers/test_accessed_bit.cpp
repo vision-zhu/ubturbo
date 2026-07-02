@@ -1507,3 +1507,40 @@ TEST_F(AccessedBitTest, UpdateStatisticScanNumWrapAround)
     EXPECT_EQ(0, info.scan_num);
     list_del(&info.node);
 }
+
+extern "C" unsigned long scan_group_size;
+extern "C" int scan_group_size_set(const char *val, const struct kernel_param *kp);
+TEST_F(AccessedBitTest, ScanGroupSizeSetValidPowerOf2)
+{
+    scan_group_size = 64UL * 1024;
+    struct kernel_param kp;
+    int ret = scan_group_size_set("131072", &kp);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(131072UL, scan_group_size);
+}
+
+TEST_F(AccessedBitTest, ScanGroupSizeSetZeroInvalid)
+{
+    scan_group_size = 64UL * 1024;
+    struct kernel_param kp;
+    int ret = scan_group_size_set("0", &kp);
+    EXPECT_EQ(-EINVAL, ret);
+    EXPECT_EQ(64UL * 1024, scan_group_size);
+}
+
+TEST_F(AccessedBitTest, ScanGroupSizeSetNotPowerOf2Invalid)
+{
+    scan_group_size = 64UL * 1024;
+    struct kernel_param kp;
+    int ret = scan_group_size_set("100", &kp);
+    EXPECT_EQ(-EINVAL, ret);
+    EXPECT_EQ(64UL * 1024, scan_group_size);
+}
+
+TEST_F(AccessedBitTest, ScanGroupSizeSetParseFailed)
+{
+    scan_group_size = 64UL * 1024;
+    struct kernel_param kp;
+    int ret = scan_group_size_set("abc", &kp);
+    EXPECT_NE(0, ret);
+}
