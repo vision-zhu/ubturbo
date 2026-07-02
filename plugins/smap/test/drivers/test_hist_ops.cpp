@@ -1173,3 +1173,40 @@ TEST_F(HistOpsTest, pick_one_seg_seq_loop_no_wrap)
     EXPECT_EQ(1, offset_val);
 }
 
+extern "C" unsigned int hist_scan_duration_per_win;
+extern "C" int hist_scan_duration_per_win_set(const char *val, const struct kernel_param *kp);
+TEST_F(HistOpsTest, HistScanDurationPerWinSetValid)
+{
+    hist_scan_duration_per_win = 64;
+    struct kernel_param kp;
+    int ret = hist_scan_duration_per_win_set("128", &kp);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(128U, hist_scan_duration_per_win);
+}
+
+TEST_F(HistOpsTest, HistScanDurationPerWinSetZeroInvalid)
+{
+    hist_scan_duration_per_win = 64;
+    struct kernel_param kp;
+    int ret = hist_scan_duration_per_win_set("0", &kp);
+    EXPECT_EQ(-EINVAL, ret);
+    EXPECT_EQ(64U, hist_scan_duration_per_win);
+}
+
+TEST_F(HistOpsTest, HistScanDurationPerWinSetTooLargeInvalid)
+{
+    hist_scan_duration_per_win = 64;
+    struct kernel_param kp;
+    int ret = hist_scan_duration_per_win_set("600", &kp);
+    EXPECT_EQ(-EINVAL, ret);
+    EXPECT_EQ(64U, hist_scan_duration_per_win);
+}
+
+TEST_F(HistOpsTest, HistScanDurationPerWinSetParseFailed)
+{
+    hist_scan_duration_per_win = 64;
+    struct kernel_param kp;
+    int ret = hist_scan_duration_per_win_set("abc", &kp);
+    EXPECT_NE(0, ret);
+}
+
