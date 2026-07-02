@@ -1306,15 +1306,48 @@ static void SetPidNrPages(ProcessAttr *attr, size_t *nrPages, int len)
 #define FREQ_FILE_PATH_LEN 50
 
 /**
+ * EstimatePriorThre - 从直方图估算 prior 的阈值
+ * @histogram: 256桶直方图数组
+ * @totalCount: 总样本数
+ *
+ * 返回估算的prior阈值（uint8_t）
+ */
+static uint8_t EstimatePriorThre(const uint32_t *histogram, uint32_t target)
+{
+    uint32_t cumulative = 0;
+    for (int i = 0; i < PRIOR_HISTOGRAM_SIZE; i++) {
+        if (histogram[i]) {
+            SMAP_LOGGER_DEBUG("Hist[%d] = %u", i, histogram[i]);
+        }
+    }
+
+    for (int i = 0; i < PRIOR_HISTOGRAM_SIZE; i++) {
+        cumulative += histogram[i];
+        if (cumulative >= target) {
+            SMAP_LOGGER_INFO("Prior thre = %u", i);
+            return (uint8_t)i;
+        }
+    }
+    return 0;
+}
+
+/**
  * CalcActcStats - 从actc_data数组计算统计数据
  * @attr: ProcessAttr结构体指针
  *
  * 遍历actc_data数组，计算freqMax、freqMin、freqNum、freqSum等统计数据。
+ * 同时根据历史prior提升freq：如果prior > priorThre，则freq增加1。
+ * 在循环中统计prior直方图，更新priorThre供下次使用。
  */
 static void CalcActcStats(ProcessAttr *attr)
 {
     uint16_t remoteHotThreshold = GetRemoteHotThreshold();
     int nrLocalNuma = GetNrLocalNuma();
+    uint8_t priorThre = attr->scanAttr.priorThre;
+    uint32_t priorTotalCount = 0;
+
+    /* 每次扫描开始时清空 prior 直方图统计 */
+    memset(attr->scanAttr.priorHistogram, 0, sizeof(attr->scanAttr.priorHistogram));
 
     for (int nid = 0; nid < MAX_NODES; nid++) {
         uint64_t actcLen = attr->scanAttr.actcLen[nid];
@@ -1339,6 +1372,18 @@ static void CalcActcStats(ProcessAttr *attr)
         count->freqZero = 0;
 
         for (uint64_t i = 0; i < actcLen; i++) {
+            attr->scanAttr.priorHistogram[actc[i].prior]++;
+            priorTotalCount++;
+
+            /* 根据历史prior阈值调整热度（本地NUMA直接加一，远端NUMA需freq非零） */
+            if ((actc[i].prior > priorThre) && (attr->type == PROCESS_TYPE)) {
+                if (nid < nrLocalNuma) {
+                    actc[i].freq++;
+                } else if (actc[i].freq != 0) {
+                    actc[i].freq++;
+                }
+            }
+
             actc_t freq = actc[i].freq;
             uint16_t bucketIdx = MIN(freq, FREQ_BUCKETS_SIZE - 1);
             if (nid >= nrLocalNuma || !actc[i].isWhiteListPage) {
@@ -1374,6 +1419,8 @@ static void CalcActcStats(ProcessAttr *attr)
             }
         }
     }
+    /* 计算prior的低25%位置的阈值 */
+    attr->scanAttr.priorThre = EstimatePriorThre(attr->scanAttr.priorHistogram, priorTotalCount / 4);
 }
 
 /**
