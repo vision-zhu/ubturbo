@@ -1208,6 +1208,7 @@ TEST_F(DriversAccessPidTest, FillActcDataByBitmapPaddrBmNull)
     EXPECT_EQ(0u, actc_len);
 }
 
+extern "C" u8 get_page_prior_flag(int nid, size_t acidx);
 TEST_F(DriversAccessPidTest, FillActcDataByBitmapWithDev)
 {
     struct access_pid ap;
@@ -1227,6 +1228,7 @@ TEST_F(DriversAccessPidTest, FillActcDataByBitmapWithDev)
     for (int i = 0; i < 64; i++) adev.access_bit_actc_data[i] = (actc_t)i;
     init_rwsem(&adev.buffer_lock);
     list_add(&adev.list, &access_dev);
+    MOCKER(get_page_prior_flag).stubs().will(returnValue((u8)0));
     fill_actc_data_by_bitmap(&ap, 0, actc, &actc_len, 0);
     EXPECT_GT(actc_len, 0u);
     list_del(&adev.list);
@@ -1288,6 +1290,7 @@ TEST_F(DriversAccessPidTest, MemFreqReadSuccess)
     MOCKER(kvmalloc).stubs().will(returnValue((void *)malloc(1024)));
     MOCKER(kvfree).stubs();
     MOCKER(copy_to_user).stubs().will(returnValue((unsigned long)0));
+    MOCKER(get_page_prior_flag).stubs().will(returnValue((u8)0));
     ssize_t ret = mem_freq_read(&filp, buf, expected_len, &ppos);
     EXPECT_EQ((ssize_t)expected_len, ret);
     list_del(&adev.list);

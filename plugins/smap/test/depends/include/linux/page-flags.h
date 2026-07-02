@@ -8,6 +8,7 @@
 
 #include <linux/mm_types.h>
 #include <linux/pfn.h>
+#include <asm/cmpxchg.h>
 
 #define PageReserved(p) 0
 

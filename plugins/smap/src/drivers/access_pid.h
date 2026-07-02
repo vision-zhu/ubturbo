@@ -13,6 +13,7 @@
 #include "access_ioctl.h"
 #include "bus.h"
 #include "drv_common.h"
+#include "smap_page_flags.h"
 
 #define MAX_PATH_LENGTH 64
 #define AP_PROCFS_DIR_LEN 32
