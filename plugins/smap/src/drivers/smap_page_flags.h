@@ -20,7 +20,8 @@
  */
 
 #define SMAP_ACC_CNT_MAX       254			/* 8位字段最大可用值 */
-#define SMAP_ACC_CNT_INIT    LAST_CPUPID_MASK	/* 0xFF=255, 哨兵值 */
+#define SMAP_ACC_MASK		0x00FF
+#define SMAP_ACC_CNT_INIT    SMAP_ACC_MASK	/* MASK为哨兵值 */
 
 /*
  * 获取累计访问频次
@@ -28,7 +29,7 @@
 static inline u8 get_smap_acc_cnt(struct page *page)
 {
 	unsigned long flags = READ_ONCE(page->flags);
-	u8 cnt = (flags >> LAST_CPUPID_PGSHIFT) & LAST_CPUPID_MASK;
+	u8 cnt = (flags >> LAST_CPUPID_PGSHIFT) & SMAP_ACC_MASK;
 	if (cnt == SMAP_ACC_CNT_INIT)
 		return 0;
 
@@ -50,14 +51,14 @@ static inline void inc_smap_acc_cnt(struct page *page, bool decay)
 	u8 cnt, new_cnt;
 
 	old_flags = READ_ONCE(page->flags);
-	cnt = (old_flags >> LAST_CPUPID_PGSHIFT) & LAST_CPUPID_MASK;
+	cnt = (old_flags >> LAST_CPUPID_PGSHIFT) & SMAP_ACC_MASK;
 	if (cnt == SMAP_ACC_CNT_INIT)
 		cnt = 0;
 	new_cnt = (cnt >> decay);
 	if (new_cnt >= SMAP_ACC_CNT_MAX)
 		return;
 
-	new_flags = old_flags & ~(LAST_CPUPID_MASK << LAST_CPUPID_PGSHIFT);
+	new_flags = old_flags & ~(SMAP_ACC_MASK << LAST_CPUPID_PGSHIFT);
 	new_flags |= ((unsigned long)(++new_cnt) << LAST_CPUPID_PGSHIFT);
 	cmpxchg(&page->flags, old_flags, new_flags);
 }
