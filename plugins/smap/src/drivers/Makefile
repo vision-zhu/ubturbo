@@ -1,4 +1,4 @@
-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+KERNELDIR ?= /lib/modules/6.6.9520260603+/build
 PWD       := $(shell pwd)
 
 obj-m := smap_tracking_core.o

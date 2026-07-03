@@ -7,7 +7,7 @@ endif
 
 obj-m   := $(MODULE_NAME).o
 
-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+KERNELDIR ?= /lib/modules/6.6.9520260603+/build
 PWD       := $(shell pwd)
 KBUILD_EXTRA_SYMBOLS = $(src)/depends/Module.symvers
 
