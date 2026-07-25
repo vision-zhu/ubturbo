@@ -63,7 +63,6 @@ TEST_F(HistTrackingTest, hist_tracking_enable)
 {
     struct access_tracking_dev hdev = {};
     hdev.access_bit_actc_data = nullptr;
-    hdev.is_hist = true;
     hdev.enable_on = false;
     hdev.page_count = 0;
     hist_tracking_enable(&hdev.ldev);
@@ -77,7 +76,6 @@ TEST_F(HistTrackingTest, hist_tracking_disable)
     struct access_tracking_dev hdev = {};
 
     hdev.enable_on = true;
-    hdev.is_hist = true;
     hist_tracking_disable(&hdev.ldev);
     EXPECT_EQ(false, hdev.enable_on);
     EXPECT_EQ(false, g_smap_hist_dev.thread_enable);
@@ -230,7 +228,6 @@ TEST_F(HistTrackingTest, hist_tracking_deinit)
     struct access_tracking_dev *hdev = (struct access_tracking_dev *)kmalloc(
         sizeof(struct access_tracking_dev), GFP_KERNEL);
     hdev->page_count = 1;
-    hdev->is_hist = 1;
     hdev->tracking_dev = (struct tracking_dev *)malloc(sizeof(struct tracking_dev));
     list_add_tail(&hdev->list, &access_dev);
     MOCKER(tracking_dev_remove).stubs().will(ignoreReturnValue());

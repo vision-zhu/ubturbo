@@ -191,8 +191,6 @@ static void hist_tracking_deinit(void)
 {
 	struct access_tracking_dev *hdev, *n;
 	list_for_each_entry_safe(hdev, n, &access_dev, list) {
-		if (!hdev->is_hist)
-			continue;
 		tracking_dev_remove(hdev->tracking_dev);
 		actc_buffer_deinit(hdev);
 		device_unregister(&hdev->ldev);
@@ -224,7 +222,6 @@ static int hist_tracking_init(void)
 
 		hdev->node = node;
 		hdev->page_size_mode = PAGE_MODE_2M;
-		hdev->is_hist = true;
 
 		ret = actc_buffer_init(hdev);
 		if (ret) {

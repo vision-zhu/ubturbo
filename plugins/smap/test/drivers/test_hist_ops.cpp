@@ -793,7 +793,6 @@ TEST_F(HistOpsTest, update_actc_direct_to_hdev)
 
     /* Setup hdev with actc_data buffer */
     hdev.node = 0;
-    hdev.is_hist = true;
     hdev.page_count = 10;
     hdev.access_bit_actc_data = (actc_t *)calloc(10, sizeof(actc_t));
     init_rwsem(&hdev.buffer_lock);
@@ -849,7 +848,6 @@ TEST_F(HistOpsTest, update_actc_direct_overflow_handling)
 
     /* Setup hdev with existing high values in actc_data */
     hdev.node = 0;
-    hdev.is_hist = true;
     hdev.page_count = 10;
     hdev.access_bit_actc_data = (actc_t *)calloc(10, sizeof(actc_t));
     hdev.access_bit_actc_data[0] = U16_MAX - 1; /* Near overflow */

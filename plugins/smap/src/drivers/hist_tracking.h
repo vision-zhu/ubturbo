@@ -32,7 +32,6 @@ struct access_tracking_dev {
 	u64 page_count;
 	u8 page_size_mode;
 	bool enable_on;
-	bool is_hist;
 
 	u8 ba;
 

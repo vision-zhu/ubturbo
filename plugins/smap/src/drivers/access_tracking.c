@@ -45,8 +45,13 @@ int calc_access_len(struct access_tracking_dev *adev);
 #undef pr_fmt
 #define pr_fmt(fmt) "access-bit: " fmt
 
+static int enable_hist_set(const char *val, const struct kernel_param *kp);
+static const struct kernel_param_ops enable_hist_ops = {
+    .set = enable_hist_set,
+    .get = param_get_uint,
+};
 unsigned int enable_hist = DISABLE_HIST;
-module_param(enable_hist, uint, S_IRUGO);
+module_param_cb(enable_hist, &enable_hist_ops, &enable_hist, 0644);
 MODULE_PARM_DESC(enable_hist, "smap hist disable: 0, smap hist enable: 1");
 
 LIST_HEAD(access_dev);
@@ -197,8 +202,6 @@ static void access_tracking_enable(struct device *ldev)
 	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
 	int ret;
 
-	if (adev->is_hist)
-		return;
 	down_write(&adev->buffer_lock);
 	ret = actc_buffer_reinit(adev);
 	if (ret) {
@@ -217,8 +220,6 @@ static int access_tracking_disable(struct device *ldev)
 	struct access_pid *ap;
 	bool all_complete = true;
 
-	if (adev->is_hist)
-		return 0;
 	if (adev != get_first_access_dev())
 		return 0;
 
@@ -321,8 +322,7 @@ static int access_tracking_add(void)
 	int ret;
 	int devno;
 	struct access_tracking_dev *adev, *n;
-	int access_devices_cnt = enable_hist ? nr_local_numa
-					     : SMAP_MAX_NUMNODES;
+	int access_devices_cnt = SMAP_MAX_NUMNODES;
 
 	for (devno = 0; devno < access_devices_cnt; devno++) {
 		adev = kzalloc(sizeof(struct access_tracking_dev), GFP_KERNEL);
@@ -333,7 +333,6 @@ static int access_tracking_add(void)
 
 		adev->node = devno;
 		adev->page_size_mode = PAGE_MODE_2M;
-		adev->is_hist = false;
 
 		ret = actc_buffer_init(adev);
 		if (ret) {
@@ -389,19 +388,15 @@ put_dev:
 static void adev_buffer_down_read(void)
 {
 	struct access_tracking_dev *adev;
-	list_for_each_entry(adev, &access_dev, list) {
-		if (!adev->is_hist)
-			down_read(&adev->buffer_lock);
-	}
+	list_for_each_entry(adev, &access_dev, list)
+		down_read(&adev->buffer_lock);
 }
 
 static void adev_buffer_up_read(void)
 {
 	struct access_tracking_dev *adev;
-	list_for_each_entry(adev, &access_dev, list) {
-		if (!adev->is_hist)
-			up_read(&adev->buffer_lock);
-	}
+	list_for_each_entry(adev, &access_dev, list)
+		up_read(&adev->buffer_lock);
 }
 
 static void handle_statistic_scan(struct access_pid *ap, ktime_t start_time,
@@ -525,6 +520,44 @@ static void release_adev(void)
 	}
 }
 
+static int enable_hist_set(const char *val, const struct kernel_param *kp)
+{
+	unsigned int new_val;
+	int ret;
+
+	ret = kstrtouint(val, 10, &new_val);
+	if (ret)
+		return ret;
+
+	if (new_val > ENABLE_HIST) {
+		pr_err("invalid enable_hist value: %u, must be 0 or 1\n", new_val);
+		return -EINVAL;
+	}
+
+	if (new_val == enable_hist) {
+		pr_info("hist is already %s\n", new_val ? "enabled" : "disabled");
+		return 0;
+	}
+
+	if (new_val == ENABLE_HIST) {
+		/* 0 -> 1: 动态使能 histogram 硬件扫描 */
+		ret = hist_init(SIZE_2M);
+		if (ret) {
+			pr_err("failed to enable hist: %d\n", ret);
+			return ret;
+		}
+		enable_hist = ENABLE_HIST;
+		pr_info("hist enabled successfully\n");
+	} else {
+		/* 1 -> 0: 停止 histogram 硬件扫描 */
+		hist_deinit();
+		enable_hist = DISABLE_HIST;
+		pr_info("hist disabled successfully\n");
+	}
+
+	return 0;
+}
+
 static int __init access_tracking_init(void)
 {
 	int ret = 0;
@@ -555,13 +588,6 @@ static int __init access_tracking_init(void)
 		goto err_tracking_add;
 	}
 
-	if (enable_hist) {
-		ret = hist_module_init();
-		if (ret) {
-			pr_err("unable to init hist tracking\n");
-			goto err_tracking_add;
-		}
-	}
 	if (create_scan_workqueue()) {
 		goto err_tracking_add;
 	}

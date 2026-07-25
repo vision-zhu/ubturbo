@@ -564,7 +564,7 @@ static struct access_tracking_dev *find_hdev_by_node(int node)
 {
 	struct access_tracking_dev *hdev;
 	list_for_each_entry(hdev, &access_dev, list) {
-		if (hdev->is_hist && hdev->node == node)
+		if (hdev->node == node)
 			return hdev;
 	}
 	return NULL;
