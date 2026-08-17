@@ -311,8 +311,7 @@ int iterate_obmm_dev(void)
 	ret = iterate_obmm_dev_dir();
 	if (ret) {
 		pr_err("failed to iterate obmm_dev directory, ret: %d\n", ret);
-		free_obmm_dev();
-		goto out;
+		goto err_out;
 	}
 
 	clean_obmm_dev();
@@ -320,6 +319,13 @@ int iterate_obmm_dev(void)
 
 out:
 	mutex_unlock(&obmm_dev.lock);
+
+	return ret;
+
+err_out:
+	/* free_obmm_dev() takes obmm_dev.lock itself. */
+	mutex_unlock(&obmm_dev.lock);
+	free_obmm_dev();
 
 	return ret;
 }
