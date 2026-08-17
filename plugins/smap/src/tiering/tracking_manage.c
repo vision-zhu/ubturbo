@@ -141,8 +141,8 @@ static int __init tracking_init(void)
 	}
 	ret = iterate_obmm_dev();
 	if (ret) {
+		/* OBMM is optional; keep normal migration available without it. */
 		pr_err("failed to iterate obmm_dev, ret: %d\n", ret);
-		goto out_smap_node_sysfs;
 	}
 	migrate_back_wq = create_workqueue("smap_migrate_back_wq");
 	if (!migrate_back_wq) {
