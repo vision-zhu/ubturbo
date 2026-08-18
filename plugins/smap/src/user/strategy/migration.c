@@ -1711,6 +1711,11 @@ static int PerformMigration(struct ProcessManager *manager)
     struct MigrateMsg mMsg;
     struct timeval start, end;
 
+    int dr = ioctl(manager->fds.migrate, SMAP_MIG_DRAIN_COLD_QUEUE);
+    if (dr) {
+        SMAP_LOGGER_WARNING("drain cold queue failed: %d.", dr);
+    }
+    
     ret = PreMigration(manager, &mMsg, &migratePages);
     if (ret) {
         SMAP_LOGGER_ERROR("PreMigration failed! ret: %d.", ret);

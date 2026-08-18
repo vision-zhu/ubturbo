@@ -27,6 +27,7 @@
 #define SMAP_MIG_PID_REMOTE_NUMA \
 	_IOW(SMAP_MIG_MAGIC, 3, struct migrate_pid_remote_numa_msg)
 #define SMAP_SET_UB_DMA_AVAIL _IOW(SMAP_MIG_MAGIC, 4, unsigned int)
+#define SMAP_MIG_DRAIN_COLD_QUEUE _IO(SMAP_MIG_MAGIC, 5)
 
 typedef struct {
 	u64 pme;

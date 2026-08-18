@@ -35,6 +35,8 @@
 #include "access_mmu.h"
 #include "access_tracking.h"
 #include "accessed_bit.h"
+#include "smap_cold_queue.h"
+#include "smap_page_flags.h"
 
 #define DECIMAL 10
 #define DEFAULT_REF_COUNT 0
@@ -1449,6 +1451,8 @@ static inline int cal_acidx_and_node_by_paddr(phys_addr_t paddr, int *nid,
 	return ret;
 }
 
+unsigned int cold_period_thresh = 10;
+
 static void process_scan_results(struct pte_walk *pte_walk)
 {
 	u64 i, pa_idx;
@@ -1488,8 +1492,19 @@ static void process_scan_results(struct pte_walk *pte_walk)
 			page = smap_paddr_to_page(entry->paddr);
 			if (page && entry->nid >= nr_local_numa)
 				actc_data_set_max(page, entry->nid, pa_idx);
-			add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx,
-					    pte_walk->ap, page);
+			if (entry->hot) {
+				smap_page_cold_periods_reset(page);
+				add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx,
+						    pte_walk->ap, page);
+			} else {
+				if (smap_page_cold_periods_inc(page) >= cold_period_thresh &&
+					!smap_cold_queue_enqueue(entry->nid, PHYS_PFN(entry->paddr))) {
+						/* cold page enqueued for swap-out, skip bitmap */
+				} else {
+					add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx,
+								pte_walk->ap, page);
+				}
+			}
 		}
 		cond_resched();
 	}

@@ -34,6 +34,8 @@
 
 #define SMAP_IOCTL_PAGE_SIZE_SET_CMD _IOW('N', 4, unsigned long)
 
+#define SMAP_MIG_DRAIN_COLD_QUEUE _IO(SMAP_MIG_MAGIC, 5)
+
 struct NumaUbFluxMb {
     int numaId;
     uint32_t readMb;
