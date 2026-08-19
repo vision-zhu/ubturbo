@@ -20,6 +20,7 @@
 #include "device.h"
 #include "access_ioctl.h"
 #include "smap_ioctl.h"
+#include "thread.h"
 
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload)
 {
@@ -34,9 +35,6 @@ int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload)
         return -ENOMEM;
     }
     struct ProcessManager *manager = GetProcessManager();
-    uint32_t migrationPeriod;
-    migrationPeriod = manager->migPeriod;
-
     for (int i = 0; i < len; i++) {
         accessMsg.payload[i].pid = payload[i].pid;
         accessMsg.payload[i].numaNodes = payload[i].numaNodes;
@@ -47,11 +45,7 @@ int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload)
         }
         accessMsg.payload[i].scanTime = payload[i].scanTime;
         accessMsg.payload[i].duration = payload[i].duration;
-        if (payload[i].type == STATISTIC_SCAN) {
-            accessMsg.payload[i].nTimes = payload[i].duration * MS_PER_SEC / payload[i].scanTime;
-        } else {
-            accessMsg.payload[i].nTimes = migrationPeriod / payload[i].scanTime;
-        }
+        accessMsg.payload[i].nTimes = payload[i].duration / payload[i].scanTime;
         accessMsg.payload[i].type = payload[i].type;
         accessMsg.payload[i].pidType = payload[i].pidType;
     }
@@ -60,6 +54,11 @@ int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload)
     if (ret < 0) {
         SMAP_LOGGER_ERROR("access ioctl add pids error: %d.", ret);
         ret = -EBADF;
+    } else {
+        for (int i = 0; i < len; i++) {
+            if (payload[i].type == NORMAL_SCAN)
+                EventLoopRegisterPid(payload[i].pid);
+        }
     }
     return ret;
 }
@@ -102,13 +101,13 @@ int AccessIoctlRemoveAllPid(void)
     return ret;
 }
 
-int AccessIoctlWalkPagemap(size_t *len)
+int AccessIoctlGetPidPageNum(struct AccessPidPageNumMsg *msg)
 {
     struct ProcessManager *manager = GetProcessManager();
 
-    int ret = ioctl(manager->fds.access, SMAP_ACCESS_WALK_PAGEMAP, len);
+    int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_PID_PAGE_NUM, msg);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("access walk pagemap error: %d.", ret);
+        SMAP_LOGGER_ERROR("access get pid %d page num error: %d.", msg->pid, ret);
         ret = -EBADF;
     }
     return ret;
@@ -124,31 +123,6 @@ int AccessIoctlCreateProcfs(struct UserInfo *ui)
         ret = -EBADF;
     }
     return ret;
-}
-
-int AccessRead(size_t len, char *buf)
-{
-    struct ProcessManager *manager = GetProcessManager();
-    ssize_t bytesRead;
-    size_t totalRead = 0;
-
-    while (totalRead < len) {
-        bytesRead = read(manager->fds.access, buf + totalRead, len - totalRead);
-        if (bytesRead < 0) {
-            SMAP_LOGGER_ERROR("access ioctl read error: %zd.", bytesRead);
-            return -EIO;
-        }
-        SMAP_LOGGER_DEBUG("bytesRead: %zd, total len: %zu.", bytesRead, len);
-        totalRead += bytesRead;
-        if (bytesRead == 0) {
-            break;
-        }
-    }
-    if (totalRead != len) {
-        SMAP_LOGGER_ERROR("access ioctl read expect %zu, actual %zd.", len, totalRead);
-        return -EIO;
-    }
-    return 0;
 }
 
 void IoctlUpdateUbDmaAvail(uint32_t value)

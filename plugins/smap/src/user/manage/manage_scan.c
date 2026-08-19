@@ -217,103 +217,6 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
     return 0;
 }
 
-static int BuildBitmapBuf(size_t *len, char **buf)
-{
-    char *tmpBuf;
-    size_t tmpLen;
-    int ret = AccessIoctlWalkPagemap(&tmpLen);
-    if (ret) {
-        SMAP_LOGGER_ERROR("access ioctl walk pagemap error: %d.", ret);
-        return ret;
-    }
-    SMAP_LOGGER_INFO("AccessIoctlWalkPagemap bufLen %zu.", tmpLen);
-    if (tmpLen == 0) {
-        SMAP_LOGGER_ERROR("Access ioctl walk pagemap len invalid: %zu.", tmpLen);
-        return -EINVAL;
-    }
-
-    tmpBuf = malloc(tmpLen);
-    if (!tmpBuf) {
-        tmpLen = 0;
-        return -ENOMEM;
-    }
-
-    *len = tmpLen;
-    *buf = tmpBuf;
-
-    return 0;
-}
-
-static int ParseBitmapPid(struct ProcessMemBitmap *pmb, char *buf, size_t *offset)
-{
-    int ret;
-    size_t pidSize = sizeof(pmb->pid);
-
-    ret = memcpy_s(&pmb->pid, pidSize, buf, pidSize);
-    if (ret) {
-        return -ret;
-    }
-    *offset += pidSize;
-    return 0;
-}
-
-static int ParseBitmapNrPages(struct ProcessMemBitmap *pmb, char *buf, size_t *offset)
-{
-    int ret;
-    size_t pageNumSize = sizeof(pmb->nrPages[0]);
-    size_t tmpOffset = 0;
-
-    for (int nid = 0; nid < MAX_NODES; nid++) {
-        ret = memcpy_s(&pmb->nrPages[nid], pageNumSize, buf + tmpOffset, pageNumSize);
-        if (ret) {
-            return -ret;
-        }
-        tmpOffset += pageNumSize;
-    }
-    *offset += tmpOffset;
-    return 0;
-}
-
-static int ParseBitmap(size_t bufLen, char *buf, size_t *offset, struct ProcessMemBitmap *pmb)
-{
-    size_t newOffset = *offset;
-
-    int ret = ParseBitmapPid(pmb, buf + newOffset, &newOffset);
-    if (ret) {
-        SMAP_LOGGER_ERROR("ParseBitmapPid err: %d.", ret);
-        return ret;
-    }
-
-    ret = ParseBitmapNrPages(pmb, buf + newOffset, &newOffset);
-    if (ret) {
-        SMAP_LOGGER_ERROR("ParseBitmapNrPages err: %d.", ret);
-        return ret;
-    }
-
-    SMAP_LOGGER_INFO("read continue %zu %zu.", newOffset, bufLen);
-
-    *offset = newOffset;
-    return 0;
-}
-
-static int BuildAndFillBitmapBuf(size_t *len, char **buf)
-{
-    int ret;
-    ret = BuildBitmapBuf(len, buf);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Access ioctl walk pagemap error: %d.", ret);
-        return ret;
-    }
-    SMAP_LOGGER_INFO("Build bitmap buffer done.");
-    ret = AccessRead(*len, *buf);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Access read pagemap error: %d.", ret);
-        free(*buf);
-        return ret;
-    }
-    return 0;
-}
-
 int RefreshManagedLocalTrackingScope(ProcessAttr *attr)
 {
     ProcessAttr candidate = *attr;
@@ -328,7 +231,7 @@ int RefreshManagedLocalTrackingScope(ProcessAttr *attr)
             .type = attr->scanType,
             .pid = attr->pid,
             .scanTime = attr->scanTime,
-            .duration = attr->duration,
+            .duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration,
             .numaNodes = candidate.numaAttr.numaNodes,
             .pidType = attr->type,
         };
@@ -346,47 +249,45 @@ int RefreshManagedLocalTrackingScope(ProcessAttr *attr)
 
 int BuildAllPidData(void)
 {
-    int ret, failedCount = 0;
-    char *buf;
-    size_t bufLen;
-    ret = BuildAndFillBitmapBuf(&bufLen, &buf);
-    if (ret) {
-        SMAP_LOGGER_ERROR("BuildAllPidData: build and fill BitmapBuf error: %d.", ret);
-        return ret;
-    }
-    for (size_t offset = 0; offset < bufLen;) {
-        struct ProcessMemBitmap pmb = { 0 };
-        SMAP_LOGGER_INFO("Parse bitmap from %zu.", offset);
-        ret = ParseBitmap(bufLen, buf, &offset, &pmb);
-        if (ret < 0) {
-            SMAP_LOGGER_ERROR("parse bitmap failed.");
+    int failedCount = 0;
+    struct ProcessManager *manager = GetProcessManager();
+    struct PidSlot *slots[MAX_PID_SLOTS];
+    size_t count = PidSlotCollectRefs(manager, slots, MAX_PID_SLOTS);
+
+    for (size_t i = 0; i < count; i++) {
+        ProcessAttr *current = slots[i]->attr;
+        int ret;
+        if (current->scanType != NORMAL_SCAN) {
+            continue;
+        }
+        ret = BuildPidData(current);
+        if (ret)
             failedCount++;
-            break;
-        }
-        ProcessAttr *current = GetProcessAttr(pmb.pid);
-        if (current && current->scanType == NORMAL_SCAN) {
-            SMAP_LOGGER_INFO("Pid %d, numaNodes %#x, nrLocalNuma %u.", current->pid, current->numaAttr.numaNodes,
-                             GetProcessManager()->nrLocalNuma);
-            SetPidNrPages(current, pmb.nrPages, MAX_NODES);
-            ret = FillPidData(current, &pmb);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Fill pid %d actc data failed.", current->pid);
-                failedCount++;
-                PutProcessAttr(current);
-                continue;
-            }
-            if (!current->groupPolicy.enabled) {
-                ret = RefreshManagedLocalTrackingScope(current);
-                if (ret) {
-                    SMAP_LOGGER_ERROR("Refresh pid %d managed local state failed: %d.", current->pid, ret);
-                    failedCount++;
-                }
-                CalibratePairAccount(current);
-            }
-        }
-        PutProcessAttr(current);
     }
+    PidSlotReleaseRefs(slots, count);
     CalcMigrateNrPagesPerPIDMuiltNuma();
-    free(buf);
     return failedCount;
+}
+
+int BuildPidData(ProcessAttr *current)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    struct AccessPidPageNumMsg msg = { .pid = current->pid };
+    struct ProcessMemBitmap pmb = { 0 };
+    int ret = AccessIoctlGetPidPageNum(&msg);
+    if (ret)
+        return ret;
+    pmb.pid = msg.pid;
+    memcpy(pmb.nrPages, msg.pageNum, sizeof(pmb.nrPages));
+    SetPidNrPages(current, pmb.nrPages, MAX_NODES);
+    ret = FillPidData(current, &pmb);
+    if (ret)
+        return ret;
+    if (!current->groupPolicy.enabled) {
+        ret = RefreshManagedLocalTrackingScope(current);
+        if (ret)
+            return ret;
+        CalibratePairAccount(current);
+    }
+    return 0;
 }

@@ -18,11 +18,7 @@
 #include <stdint.h>
 #include "numa_nodes.h"
 
-/*
- * cmd 0->Tracking able config:
- * arg 0->Tracking disable
- * arg 1->Tracking enable
- */
+/* cmd 0 starts the next scan window for one PID. */
 
 #define SMAP_DEVICE "/dev/smap_device"
 

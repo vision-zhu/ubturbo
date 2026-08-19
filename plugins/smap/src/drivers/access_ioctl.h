@@ -18,7 +18,7 @@
 #define ACCESS_DEVICE "smap_access_device"
 #define BASE_MINOR 0
 #define NR_MINOR 1
-#define MAX_SCAN_DURATION_SEC 300
+#define MAX_SCAN_DURATION_MS (300 * 1000)
 
 #define SMAP_PROC_ROOT "smap"
 
@@ -92,6 +92,11 @@ struct smap_scan_cpu_range {
 	u32 cpu_max;
 };
 
+struct access_pid_page_num_msg {
+	pid_t pid;
+	size_t page_num[SMAP_MAX_NUMNODES];
+};
+
 extern kuid_t procfs_kuid;
 extern kgid_t procfs_kgid;
 extern struct proc_dir_entry *smap_procfs_root;
@@ -102,7 +107,6 @@ extern struct proc_dir_entry *smap_procfs_root;
 #define SMAP_ACCESS_REMOVE_PID \
 	_IOW(SMAP_ACCESS_MAGIC, 2, struct access_remove_pid_msg)
 #define SMAP_ACCESS_REMOVE_ALL_PID _IOW(SMAP_ACCESS_MAGIC, 3, int)
-#define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
 #define SMAP_ACCESS_GET_TRACKING \
 	_IOW(SMAP_ACCESS_MAGIC, 5, struct tracking_info_payload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct user_info)
@@ -110,6 +114,8 @@ extern struct proc_dir_entry *smap_procfs_root;
 #define SMAP_ACCESS_REFRESH_REMOTE_RAM _IO(SMAP_ACCESS_MAGIC, 8)
 #define SMAP_ACCESS_SET_SCAN_CPU \
 	_IOW(SMAP_ACCESS_MAGIC, 9, struct smap_scan_cpu_range)
+#define SMAP_ACCESS_GET_PID_PAGE_NUM \
+	_IOWR(SMAP_ACCESS_MAGIC, 10, struct access_pid_page_num_msg)
 
 void access_ioctl_exit(void);
 int access_ioctl_init(void);

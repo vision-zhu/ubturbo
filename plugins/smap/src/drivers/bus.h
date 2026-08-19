@@ -14,6 +14,7 @@
 struct tracking_operations {
 	void (*tracking_enable)(struct device *ldev);
 	int (*tracking_disable)(struct device *ldev);
+	int (*tracking_restart_pid)(struct device *ldev, pid_t pid);
 	int (*tracking_set_page_size)(struct device *ldev, u8 page_size);
 	int (*tracking_set_sample_rate)(struct device *ldev, u32 sample_rate);
 	int (*tracking_read)(struct device *ldev, void *buffer, u32 length);

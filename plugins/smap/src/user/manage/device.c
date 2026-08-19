@@ -27,8 +27,6 @@
 #include "smap_ioctl.h"
 #include "device.h"
 
-#define DISABLE_TRACKING_RETRY_DELAY_US 50000
-
 #define SYS_NODE_CRITICAL_ERR_LEN 60
 
 typedef enum {
@@ -39,17 +37,15 @@ typedef enum {
 static int SendCmdToAllNodes(int fds[], unsigned long cmd, int arg)
 {
     int i;
-    int ret = 0;
-
     for (i = 0; i < MAX_NODES; i++) {
         if (fds[i] >= 0) {
             if (ioctl(fds[i], cmd, arg) < 0) {
                 SMAP_LOGGER_DEBUG("ioctl for node%d failed: %s, skipped.", i, strerror(errno));
-                return -EBADF;
+                return -errno;
             }
         }
     }
-    return ret;
+    return 0;
 }
 
 static int FindFdByNode(int fds[], int fdsLength)
@@ -64,36 +60,11 @@ static int FindFdByNode(int fds[], int fdsLength)
     return -EINVAL;
 }
 
-int EnableTracking(struct ProcessManager *manager)
+int RestartPidScan(pid_t pid)
 {
-    int ret = SendCmdToAllNodes(manager->fds.nodes, SMAP_IOCTL_TRACKING_CMD, 1);
-    if (!ret) {
-        manager->tracking.trackingEnabled = true;
-    }
-    return ret;
-}
-
-static inline int DisableTrackingInternal(struct ProcessManager *manager)
-{
-    return SendCmdToAllNodes(manager->fds.nodes, SMAP_IOCTL_TRACKING_CMD, 0);
-}
-
-int DisableTracking(struct ProcessManager *manager)
-{
-    int ret;
-
-    while (1) {
-        ret = DisableTrackingInternal(manager);
-        if (!ret) {
-            break;
-        }
-        SMAP_LOGGER_DEBUG("Scanning still in progress, will retry.");
-        usleep(DISABLE_TRACKING_RETRY_DELAY_US);
-    }
-    if (!ret) {
-        manager->tracking.trackingEnabled = false;
-    }
-    return ret;
+    struct ProcessManager *manager = GetProcessManager();
+    /* 内核态找不到这个pid时才会报错 */
+    return SendCmdToAllNodes(manager->fds.nodes, SMAP_IOCTL_TRACKING_CMD, pid);
 }
 
 bool IsNumaCriticalErr(int nid)
@@ -293,7 +264,6 @@ void DeinitTrackingDev(struct ProcessManager *manager)
 {
     int i;
 
-    DisableTracking(manager);
     for (i = 0; i < MAX_NODES; i++) {
         if (manager->fds.nodes[i] >= 0) {
             close(manager->fds.nodes[i]);

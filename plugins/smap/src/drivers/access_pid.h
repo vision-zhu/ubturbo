@@ -16,23 +16,22 @@
 
 #define MAX_PATH_LENGTH 64
 #define AP_PROCFS_DIR_LEN 32
-#define SEC_TO_MS 1000
 #define NON_EXIST_PID (-1)
 #define DUPLICATE_PID (-2) /* completely duplicate, skip processing */
 extern int nr_local_numa;
 
 enum ap_state {
-	AP_STATE_WALK = (1UL << 0),
-	AP_STATE_READ = (1UL << 1),
-	AP_STATE_FREQ = (1UL << 2),
-	AP_STATE_MIG = (1UL << 3),
+	/* A scan window is in progress; its data must not be consumed yet. */
+	AP_STATE_SCANNING,
+	/* The completed window's frequency data can be read. */
+	AP_STATE_FREQ_READY,
+	/* The completed frequency data was read in full and can be migrated. */
+	AP_STATE_MIG_READY,
 };
 
 struct access_pid_struct {
 	struct list_head list;
 	struct rw_semaphore lock;
-	spinlock_t state_lock;
-	unsigned long state_flag;
 };
 extern struct access_pid_struct ap_data;
 
@@ -64,8 +63,10 @@ struct access_pid {
 	u32 scan_time;
 	u32 ntimes;
 	u32 cur_times;
+	spinlock_t state_lock;
+	unsigned long state_flag;
 	struct delayed_work scan_work;
-	struct completion work_done;
+	wait_queue_head_t wq;
 	u32 scan_count[SMAP_MAX_NUMNODES];
 	size_t page_num[SMAP_MAX_NUMNODES];
 	size_t bm_len[SMAP_MAX_NUMNODES];
@@ -145,25 +146,35 @@ static inline void clear_vm_mapping(u8 *priors, u32 len)
 		memset(priors, 0xff, len * sizeof(u8));
 }
 
-static inline void set_ap_whole_state(struct access_pid_struct *aps,
-				      unsigned long state)
+static inline void set_ap_state(struct access_pid *ap, enum ap_state state)
 {
-	spin_lock(&aps->state_lock);
-	aps->state_flag = state;
-	spin_unlock(&aps->state_lock);
+	spin_lock(&ap->state_lock);
+	ap->state_flag = state;
+	spin_unlock(&ap->state_lock);
 }
 
-static inline bool check_and_clear_ap_state(struct access_pid_struct *aps,
-					    enum ap_state state)
+static inline bool ap_state_is(struct access_pid *ap, enum ap_state state)
 {
-	spin_lock(&aps->state_lock);
-	if (!(aps->state_flag & state)) {
-		spin_unlock(&aps->state_lock);
-		return false;
+	bool match;
+
+	spin_lock(&ap->state_lock);
+	match = ap->state_flag == state;
+	spin_unlock(&ap->state_lock);
+	return match;
+}
+
+static inline bool ap_state_transition(struct access_pid *ap,
+				       enum ap_state from, enum ap_state to)
+{
+	bool transitioned = false;
+
+	spin_lock(&ap->state_lock);
+	if (ap->state_flag == from) {
+		ap->state_flag = to;
+		transitioned = true;
 	}
-	aps->state_flag = 0;
-	spin_unlock(&aps->state_lock);
-	return true;
+	spin_unlock(&ap->state_lock);
+	return transitioned;
 }
 
 #endif /* _SRC_ACCESS_PID_H */

@@ -32,7 +32,8 @@ void UpdateMigResult(struct MigrateMsg *mMsg, struct ProcessManager *manager);
 
 int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager);
 
-int ScanMigrateWork(struct ProcessManager *manager);
+int ManagerDaemonWork(struct ProcessManager *manager);
+void PidMigrationWork(struct ProcessManager *manager, struct PidSlot *slot, pid_t pid);
 
 int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg *msg);
 
