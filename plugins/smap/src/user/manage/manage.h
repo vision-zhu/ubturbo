@@ -361,7 +361,7 @@ struct ProcessAttribute {
     pid_t pid;
     enum ProcessState state;
     uint32_t scanTime;
-    uint32_t duration; // scanType为统计模式时记录统计时长
+    uint32_t duration; // scanType为统计模式时记录统计时长，单位毫秒
     ScanType scanType; // 标识添加进程组件
     time_t scanStart;
     SceneInfo sceneInfo; // 场景：轻载/重载/稳态/非稳态，扫描周期等
@@ -424,6 +424,8 @@ struct PidSlot {
     ProcessAttr *attr;
     EnvAtomic refs;
     EnvMutex attrLock;
+    int memFreqFd;
+    EnvAtomic eventEnqueued;
 } __attribute__((aligned(64)));
 
 /*
@@ -489,7 +491,6 @@ struct MigPidRemoteNumaIoctlMsg {
 // 反向扫描参数，所有process共享
 typedef struct {
     uint32_t pageSize;
-    bool trackingEnabled; // tracking当前是否处于enable状态
 } TrackingAttr;
 
 typedef struct { // tracking设备与迁移设备的fd
@@ -519,6 +520,30 @@ struct UbBwMonitor {
     int currentFluxRet; // 当前周期UB带宽查询结果
 };
 
+typedef struct {
+    int epfd;
+    int wakeFd;
+    EnvAtomic stop;
+    pthread_t thread;
+} EventLoop;
+
+typedef struct {
+    struct PidSlot *slot;
+    pid_t pid;
+} ThreadPoolTask;
+
+#define MAX_POOL_WORKERS 10
+
+typedef struct {
+    ThreadPoolTask ring[MAX_PID_SLOTS];
+    uint32_t head, tail, count;
+    EnvMutex lock;
+    EnvCond cond;
+    EnvAtomic stop;
+    pthread_t workers[MAX_POOL_WORKERS];
+    int nrWorkers;
+} ThreadPool;
+
 struct ProcessManager {
     struct PidSlot slots[MAX_PID_SLOTS];
     SceneInfo sceneInfo;
@@ -526,11 +551,13 @@ struct ProcessManager {
     uint16_t nrLocalNuma; // local numa数量
     DevFds fds;
     TrackingAttr tracking; // 反向扫描参数
-    uint32_t migPeriod; // 迁移周期，运行时动态调整
-    EnvAtomic scanMigrateStop; // 扫描迁移线程停止标志
-    pthread_t scanMigrateThread; // 扫描迁移线程
+    uint32_t daemonPeriod; // 管家维护线程的调度周期
+    pthread_t daemonThread; // 管家维护线程
+    EnvAtomic stop; // 管家维护线程停止标志
     struct RemoteNumaInfo remoteNumaInfo; // 借用远端内存数量
     EnvMutex threadLock;
+    EventLoop eventLoop;
+    ThreadPool threadPool;
     struct UbBwMonitor ubBwMonitor; // UB带宽监控
 };
 
@@ -617,7 +644,7 @@ void RemoveManagedProcess(int nr, pid_t *pidArr);
 
 int MigrateMemoryBack(pid_t pid, int srcNid, int desNid, uint64_t paStart, uint64_t paEnd);
 
-int BuildAllPidData(void);
+int BuildPidData(ProcessAttr *current);
 void CalibratePairAccount(ProcessAttr *attr);
 int BuildPairRequestedTargets(const ProcessAttr *attr, const PairRequestContext *context, PairTarget targets[],
                               size_t targetCap, size_t *targetCnt, PairRequestSummary *summary);
@@ -655,6 +682,7 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr);
 void PidSlotRemove(struct ProcessManager *manager, pid_t pid);
 bool PidSlotEmpty(struct ProcessManager *manager);
 struct PidSlot *PidSlotGetRef(pid_t pid);
+bool PidSlotTryGetRef(struct PidSlot *slot);
 size_t PidSlotCollectRefs(struct ProcessManager *manager, struct PidSlot *arr[], size_t cap);
 void PidSlotReleaseRefs(struct PidSlot *arr[], size_t n);
 void PutProcessAttr(ProcessAttr *attr);

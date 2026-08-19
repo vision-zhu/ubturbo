@@ -77,6 +77,31 @@ typedef struct {
     pthread_mutex_t lock;
 } EnvMutex;
 
+typedef struct {
+    pthread_cond_t cond;
+} EnvCond;
+
+static inline int EnvCondInit(EnvCond *cond)
+{
+    return pthread_cond_init(&cond->cond, NULL);
+}
+static inline int EnvCondDestroy(EnvCond *cond)
+{
+    return pthread_cond_destroy(&cond->cond);
+}
+static inline void EnvCondWait(EnvCond *cond, EnvMutex *mutex)
+{
+    pthread_cond_wait(&cond->cond, &mutex->lock);
+}
+static inline void EnvCondSignal(EnvCond *cond)
+{
+    pthread_cond_signal(&cond->cond);
+}
+static inline void EnvCondBroadcast(EnvCond *cond)
+{
+    pthread_cond_broadcast(&cond->cond);
+}
+
 static inline int EnvMutexDestroy(EnvMutex *mutex)
 {
     if (pthread_mutex_destroy(&mutex->lock)) {

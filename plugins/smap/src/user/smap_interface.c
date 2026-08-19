@@ -31,6 +31,7 @@
 #include "manage/oom_migrate.h"
 #include "manage/device.h"
 #include "manage/thread.h"
+#include "manage/thread_pool.h"
 #include "manage/access_ioctl.h"
 #include "manage/smap_ioctl.h"
 #include "manage/smap_config.h"
@@ -246,15 +247,24 @@ static int InitAllThreads(struct ProcessManager *manager)
 {
     int ret;
     EnvMutexLock(&manager->threadLock);
-    uint32_t migPeriod = IsHugeMode() ? LIGHT_STABLE_MIGRATE_CYCLE : PROCESS_LIGHT_STABLE_MIGRATE_CYCLE;
-    if (GetFileConfSwitchConfig()) {
-        migPeriod = GetMigratePeriodConfig();
-    }
-    ret = InitScanMigrateThread(manager, migPeriod);
+    uint32_t daemonPeriod =
+        IsHugeMode() ? LIGHT_STABLE_MIGRATE_CYCLE : PROCESS_LIGHT_STABLE_MIGRATE_CYCLE;
+    ret = ThreadPoolInit(manager, 0);
     if (ret) {
-        SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
-        /* InitScanMigrateThread 失败时 scanMigrateThread 已被清零，
-         * 无需调用 DestroyScanMigrateThread，避免对未定义 pthread_t 执行操作 */
+        EnvMutexUnlock(&manager->threadLock);
+        return ret;
+    }
+    ret = InitEventLoop(manager);
+    if (ret) {
+        ThreadPoolDestroy(manager);
+        EnvMutexUnlock(&manager->threadLock);
+        return ret;
+    }
+    ret = InitDaemonThread(manager, daemonPeriod);
+    if (ret) {
+        SMAP_LOGGER_ERROR("init manager daemon thread error: %d.", ret);
+        DestroyEventLoop(manager);
+        ThreadPoolDestroy(manager);
     }
     EnvMutexUnlock(&manager->threadLock);
     return ret;
@@ -663,6 +673,10 @@ static int ProcessAddGroupedTrackingManageFiltered(struct GroupedMigrateOutMsg *
         payload[count].type = NORMAL_SCAN;
         payload[count].pid = msg->payload[i].pid;
         payload[count].scanTime = SCAN_TIME_2M;
+        ProcessAttr *attr = GetProcessAttr(msg->payload[i].pid);
+        payload[count].duration = attr ? attr->sceneInfo.cycles.migCycle :
+                                        GetProcessManager()->daemonPeriod;
+        PutProcessAttr(attr);
         payload[count].numaNodes = nodeBitmap[i];
         payload[count].pidType = VM_TYPE; /* grouped 准入保证 VM-only */
         if (!PidIsValid(msg->payload[i].pid)) {
@@ -955,7 +969,7 @@ static int TrackMigrateOutCandidates(ProcessManageCandidate *candidates, int cou
             .type = NORMAL_SCAN,
             .pid = prepared->pid,
             .scanTime = prepared->scanTime,
-            .duration = prepared->duration,
+            .duration = prepared->sceneInfo.cycles.migCycle,
             .numaNodes = prepared->numaAttr.numaNodes,
             .pidType = prepared->type,
         };
@@ -974,7 +988,17 @@ static int TrackMigrateOutCandidates(ProcessManageCandidate *candidates, int cou
 static void PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int count)
 {
     for (int i = 0; i < count; i++) {
+        ProcessAttr *prepared = candidates[i].prepared;
+        bool registerEvent = prepared && candidates[i].isNew && prepared->scanType == NORMAL_SCAN;
+        pid_t pid = registerEvent ? prepared->pid : 0;
+
         PublishProcessManageCandidate(&candidates[i]);
+        if (registerEvent) {
+            int ret = EventLoopRegisterPid(pid);
+            if (ret) {
+                SMAP_LOGGER_WARNING("Register migration event for pid %d failed: %d.", pid, ret);
+            }
+        }
     }
 }
 
@@ -1329,7 +1353,7 @@ static int AccessUpdateProcessRemoteNodes(ProcessAttr *attr, uint32_t numaNodes)
     struct AccessAddPidPayload payload = { .pid = attr->pid };
     payload.numaNodes = numaNodes;
     payload.scanTime = attr->scanTime;
-    payload.duration = attr->duration;
+    payload.duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration;
     payload.type = attr->scanType;
     payload.pidType = attr->type;
     int ret = AccessIoctlAddPid(1, &payload);
@@ -1754,7 +1778,7 @@ static int SyncProcessToKernel(void)
         payload[i].numaNodes = attr->numaAttr.numaNodes;
         payload[i].scanTime = attr->scanTime;
         payload[i].type = attr->scanType;
-        payload[i].duration = attr->duration;
+        payload[i].duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration;
         payload[i].pidType = attr->type;
         i++;
     }
@@ -2004,9 +2028,11 @@ int ubturbo_smap_stop(void)
 
     struct ProcessManager *manager = GetProcessManager();
     EnvMutexLock(&manager->threadLock);
-    DestroyScanMigrateThread(manager);
+    DestroyDaemonThread(manager);
+    DestroyEventLoop(manager);
+    ThreadPoolDestroy(manager);
     EnvMutexUnlock(&manager->threadLock);
-    SMAP_LOGGER_INFO("ScanMigrate thread destroyed.");
+    SMAP_LOGGER_INFO("Manager daemon thread destroyed.");
 
     RemoveAllManagedProcess();
     SMAP_LOGGER_INFO("All managed processes removed.");
@@ -2111,7 +2137,8 @@ static int CheckQueryVMFreqMsgValid(int pid, uint16_t *data, uint32_t lengthIn, 
         SMAP_LOGGER_ERROR("get time error");
     }
     SMAP_LOGGER_INFO("Current time: %s\n", ctime(&currentTime));
-    if (dataSource == STATISTIC_DATA_SOURCE && (currentTime - attr->scanStart < attr->duration)) {
+    if (dataSource == STATISTIC_DATA_SOURCE &&
+        (currentTime - attr->scanStart) * MS_PER_SEC < attr->duration) {
         SMAP_LOGGER_ERROR("pid %d scan duaration did not meet the expected threshold\n", pid);
         PutProcessAttr(attr);
         return -EAGAIN;
@@ -2336,6 +2363,8 @@ static int AddProcessTracking(pid_t *pidArr, uint32_t *scanTime, uint32_t *durat
             }
             /* Keep every historically tracked remote node when changing scan type. */
             payload[i].numaNodes |= attr->numaAttr.numaNodes & REMOTE_NUMA_MASK;
+            if (scanType == NORMAL_SCAN)
+                payload[i].duration = attr->sceneInfo.cycles.migCycle;
         } else if (scanType == NORMAL_SCAN) {
             SMAP_LOGGER_ERROR("pid %d is not managed, scan type can not be %d.", pidArr[i], scanType);
             free(payload);
@@ -2387,6 +2416,12 @@ int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_
     if (ret) {
         SMAP_LOGGER_ERROR("Smap check add process tracking msg failed.");
         return ret;
+    }
+
+    if (scanType == STATISTIC_SCAN) {
+        for (int i = 0; i < len; i++) {
+            duration[i] *= MS_PER_SEC;
+        }
     }
 
     ret = AddProcessTracking(pidArr, scanTime, duration, len, scanType);

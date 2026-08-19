@@ -710,7 +710,7 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
         .type = NORMAL_SCAN,
         .pid = attr->pid,
         .scanTime = attr->scanTime,
-        .duration = attr->duration,
+        .duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration,
         .numaNodes = candidate.numaAttr.numaNodes,
         .pidType = attr->type,
     };
@@ -1012,7 +1012,7 @@ static void SetChangePidRemoteMsgPayload(int srcNid, int destNid, int *i, int ma
         payload[*i].numaNodes = attr->numaAttr.numaNodes;
         SetL2ByNid(&payload[*i].numaNodes, destNid);
         payload[*i].scanTime = attr->scanTime;
-        payload[*i].duration = attr->duration;
+        payload[*i].duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration;
         payload[*i].type = attr->scanType;
         payload[*i].pidType = attr->type;
         (*i)++;
@@ -1390,7 +1390,7 @@ static void SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRe
 
         AddL2ByNid(&payload[i].numaNodes, msg->payloads[i].destNid);
         payload[i].scanTime = attr->scanTime;
-        payload[i].duration = attr->duration;
+        payload[i].duration = attr->scanType == NORMAL_SCAN ? attr->sceneInfo.cycles.migCycle : attr->duration;
         payload[i].type = attr->scanType;
         payload[i].pidType = attr->type;
         PutProcessAttr(attr);

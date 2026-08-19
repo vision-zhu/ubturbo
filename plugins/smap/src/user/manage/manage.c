@@ -34,6 +34,7 @@
 #include "strategy/migration.h"
 #include "manage.h"
 #include "manage_internal.h"
+#include "thread.h"
 
 #define UPDATE_CRITICAL_ERR_COUNT 5
 
@@ -184,10 +185,10 @@ int ApplyManagedLocalObservation(ProcessAttr *attr, const ManagedLocalObservatio
     return 0;
 }
 
-static uint32_t GetManagedLocalRefreshPeriodMs(void)
+static uint32_t GetManagedLocalRefreshPeriodMs(const ProcessAttr *attr)
 {
-    if (g_processManager.migPeriod != 0) {
-        return g_processManager.migPeriod;
+    if (attr->sceneInfo.cycles.migCycle != 0) {
+        return attr->sceneInfo.cycles.migCycle;
     }
     return DEFAULT_MIGRATE_PERIOD;
 }
@@ -195,7 +196,7 @@ static uint32_t GetManagedLocalRefreshPeriodMs(void)
 static void AdvanceManagedLocalAffinityRefresh(ProcessAttr *attr)
 {
     uint32_t elapsed = attr->managedLocalState.affinityRefreshElapsedMs;
-    uint32_t period = GetManagedLocalRefreshPeriodMs();
+    uint32_t period = GetManagedLocalRefreshPeriodMs(attr);
     if (elapsed >= MANAGED_LOCAL_AFFINITY_REFRESH_INTERVAL_MS ||
         period >= MANAGED_LOCAL_AFFINITY_REFRESH_INTERVAL_MS - elapsed) {
         attr->managedLocalState.affinityRefreshElapsedMs = MANAGED_LOCAL_AFFINITY_REFRESH_INTERVAL_MS;
@@ -362,10 +363,8 @@ int ProcessManagerInit(uint32_t pageType)
     g_pageSizeNormal = size;
     g_pageSizeHuge = PAGESIZE_2M;
     g_processManager.tracking.pageSize = (pageType == PAGETYPE_NORMAL) ? g_pageSizeNormal : g_pageSizeHuge;
-    g_processManager.migPeriod = IsHugeMode() ? LIGHT_STABLE_MIGRATE_CYCLE : PROCESS_LIGHT_STABLE_MIGRATE_CYCLE;
-    if (GetFileConfSwitchConfig()) {
-        g_processManager.migPeriod = GetMigratePeriodConfig();
-    }
+    g_processManager.daemonPeriod =
+        IsHugeMode() ? LIGHT_STABLE_MIGRATE_CYCLE : PROCESS_LIGHT_STABLE_MIGRATE_CYCLE;
 
     for (i = 0; i < MAX_NODES; i++) {
         g_processManager.fds.nodes[i] = DEFAULT_FD;
@@ -491,6 +490,8 @@ void PidSlotInit(struct ProcessManager *manager)
         manager->slots[i].attr = NULL;
         EnvAtomicSet(&manager->slots[i].refs, 0);
         EnvMutexInit(&manager->slots[i].attrLock);
+        manager->slots[i].memFreqFd = -1;
+        EventLoopResetEnqueued(&manager->slots[i]);
     }
 }
 
@@ -524,6 +525,8 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
         }
         s->pid = attr->pid;
         s->attr = attr;
+        s->memFreqFd = -1;
+        EventLoopResetEnqueued(s);
         EnvAtomicSet(&s->refs, 1);
         EnvAtomicSet(&s->state, PID_SLOT_INUSE);
         return i;
@@ -538,9 +541,16 @@ void PidSlotRemove(struct ProcessManager *manager, pid_t pid)
         if (s->pid != pid) {
             continue;
         }
+        EnvMutexLock(&s->attrLock);
+        /* CAS 与注销必须与 EventLoopRegisterPid 持同一把 attrLock 串行化：
+         * 若 CAS 后不加锁直接注销，注册路径在"检查 INUSE 通过、赋值 memFreqFd 前"
+         * 的空隙里可能把 fd 写进来，而这里读到的还是 -1，造成 fd 泄漏并残留 epoll 条目。 */
         if (EnvAtomicCmpAndSwap(PID_SLOT_INUSE, PID_SLOT_REMOVING, &s->state) != PID_SLOT_INUSE) {
+            EnvMutexUnlock(&s->attrLock);
             return;
         }
+        EventLoopUnregisterSlotLocked(s);
+        EnvMutexUnlock(&s->attrLock);
         if (AtomicDecrease(&s->refs, 1) == 1) {
             PidSlotTryReclaim(manager, i);
         }
@@ -575,6 +585,21 @@ struct PidSlot *PidSlotGetRef(pid_t pid)
         return s;
     }
     return NULL;
+}
+
+bool PidSlotTryGetRef(struct PidSlot *s)
+{
+    if (EnvAtomicRead(&s->state) != PID_SLOT_INUSE) {
+        return false;
+    }
+    AtomicIncrease(&s->refs, 1);
+    if (EnvAtomicRead(&s->state) == PID_SLOT_INUSE) {
+        return true;
+    }
+    if (AtomicDecrease(&s->refs, 1) == 1) {
+        PidSlotTryReclaim(&g_processManager, (int)(s - g_processManager.slots));
+    }
+    return false;
 }
 
 size_t PidSlotCollectRefs(struct ProcessManager *manager, struct PidSlot *arr[], size_t cap)
@@ -858,6 +883,7 @@ void SetBasicProcessConfig(ProcessAttr *attr, ProcessParam *param)
     attr->scanType = param->scanType;
     attr->isFirstScan = true;
     attr->enableSwap = true;
+    (void)InitSceneInfo(&attr->sceneInfo, IsHugeMode() ? PAGETYPE_HUGE : PAGETYPE_NORMAL);
 
     if (time(&attr->scanStart) == (time_t)-1) {
         SMAP_LOGGER_ERROR("get time error");

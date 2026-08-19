@@ -28,9 +28,4 @@ struct ub_watch_config {
 
 #define SMAP_IOCTL_UB_WATCH_CONFIG_CMD _IOW('N', 6, struct ub_watch_config)
 
-enum node_tracking_cmd {
-	TRACKING_DISABLED,
-	TRACKING_ENABLED,
-};
-
 #endif

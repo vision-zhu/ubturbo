@@ -294,6 +294,7 @@ int ApplyPendingGroupedPolicy(ProcessAttr *attr)
         .type = NORMAL_SCAN,
         .pid = attr->pid,
         .scanTime = SCAN_TIME_2M,
+        .duration = attr->sceneInfo.cycles.migCycle,
         .numaNodes = nodeBitmap,
         .pidType = attr->type,
     };

@@ -48,22 +48,13 @@ static int node_cdev_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-void node_tracking_enable(struct tracking_node_dev *node_dev)
-{
-	struct tracking_dev *trk_dev;
-	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_enable)
-			trk_dev->ops->tracking_enable(trk_dev->dev);
-	}
-}
-
-int node_tracking_disable(struct tracking_node_dev *node_dev)
+int node_tracking_restart_pid(struct tracking_node_dev *node_dev, pid_t pid)
 {
 	struct tracking_dev *trk_dev;
 
 	list_for_each_entry(trk_dev, &node_dev->dev_list, list) {
-		if (trk_dev->ops && trk_dev->ops->tracking_disable) {
-			int ret = trk_dev->ops->tracking_disable(trk_dev->dev);
+		if (trk_dev->ops && trk_dev->ops->tracking_restart_pid) {
+			int ret = trk_dev->ops->tracking_restart_pid(trk_dev->dev, pid);
 			if (ret)
 				return ret;
 		}
@@ -87,12 +78,7 @@ int node_tracking_set_page_size(struct tracking_node_dev *node_dev,
 static long handle_tracking_cmd(struct tracking_node_dev *node_dev,
 				unsigned long arg)
 {
-	if (arg == TRACKING_DISABLED) {
-		return node_tracking_disable(node_dev);
-	} else {
-		node_tracking_enable(node_dev);
-		return 0;
-	}
+	return node_tracking_restart_pid(node_dev, (pid_t)arg);
 }
 
 static long handle_page_size_set_cmd(struct tracking_node_dev *node_dev,

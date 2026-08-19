@@ -244,6 +244,149 @@ static bool IsOnlyLocalForRemote(const PairPlan plans[], size_t planCnt, size_t 
     return activeLocalCnt == 1;
 }
 
+static int RemoteSizeToPages(uint64_t sizeMB, uint64_t pageSize, uint64_t *pages)
+{
+    if (!pages || pageSize == 0 || sizeMB > UINT64_MAX / MIB) {
+        return -EINVAL;
+    }
+    *pages = sizeMB * MIB / pageSize;
+    return 0;
+}
+
+static int BuildPidCapacityContext(struct ProcessManager *manager, ProcessAttr *process, PairRequestContext *context,
+                                   uint64_t privatePages[LOCAL_NUMA_NUM][REMOTE_NUMA_NUM],
+                                   uint64_t sharedPages[REMOTE_NUMA_NUM])
+{
+    context->nrLocalNuma = manager->nrLocalNuma;
+    context->pageSizeKB = manager->tracking.pageSize / KIB;
+    EnvMutexLock(&manager->remoteNumaInfo.lock);
+    for (int remote = 0; remote < REMOTE_NUMA_NUM; remote++) {
+        int ret = RemoteSizeToPages(manager->remoteNumaInfo.sharedSize[remote], manager->tracking.pageSize,
+                                    &sharedPages[remote]);
+        if (ret) {
+            EnvMutexUnlock(&manager->remoteNumaInfo.lock);
+            return ret;
+        }
+        for (int local = 0; local < manager->nrLocalNuma; local++) {
+            ret = RemoteSizeToPages(manager->remoteNumaInfo.privateSize[local][remote], manager->tracking.pageSize,
+                                    &privatePages[local][remote]);
+            if (ret) {
+                EnvMutexUnlock(&manager->remoteNumaInfo.lock);
+                return ret;
+            }
+            if (privatePages[local][remote] > 0) {
+                AddL1(&context->capacityLocalMask[remote], local);
+            }
+        }
+        if (sharedPages[remote] > 0) {
+            context->capacityLocalMask[remote] |= process->managedLocalState.managedLocalMask;
+        }
+    }
+    EnvMutexUnlock(&manager->remoteNumaInfo.lock);
+    return 0;
+}
+
+static void ClipPidTargetsToCapacity(PairTarget targets[], size_t targetCnt, int nrLocalNuma,
+                                     uint64_t privatePages[LOCAL_NUMA_NUM][REMOTE_NUMA_NUM],
+                                     uint64_t sharedPages[REMOTE_NUMA_NUM])
+{
+    for (size_t i = 0; i < targetCnt; i++) {
+        int remote = targets[i].remoteNid - nrLocalNuma;
+        int local = targets[i].localNid;
+        uint64_t privateTarget = MIN(targets[i].requestedPages, privatePages[local][remote]);
+        uint64_t sharedTarget = MIN(targets[i].requestedPages - privateTarget, sharedPages[remote]);
+        targets[i].requestedPages = privateTarget + sharedTarget;
+        privatePages[local][remote] -= privateTarget;
+        sharedPages[remote] -= sharedTarget;
+    }
+}
+
+/* Build migration pages for one PID without updating plans owned by other PIDs. */
+static int BuildPidPairPlans(struct ProcessManager *manager, ProcessAttr *process)
+{
+    PairRequestContext requestContext = { 0 };
+    PairTarget targets[LOCAL_NUMA_NUM * REMOTE_NUMA_NUM] = { 0 };
+    PairPlan plans[LOCAL_NUMA_NUM * REMOTE_NUMA_NUM] = { 0 };
+    PairRequestSummary summary = { 0 };
+    uint32_t nrMigratePages[MAX_NODES][MAX_NODES] = { 0 };
+    uint64_t privatePages[LOCAL_NUMA_NUM][REMOTE_NUMA_NUM] = { 0 };
+    uint64_t sharedPages[REMOTE_NUMA_NUM] = { 0 };
+    size_t targetCnt = 0;
+    uint64_t plannedPages = 0;
+
+    if (!manager || !process || process->groupPolicy.enabled || manager->nrLocalNuma <= 0 ||
+        manager->nrLocalNuma > LOCAL_NUMA_NUM || manager->tracking.pageSize == 0) {
+        return -EINVAL;
+    }
+    int ret = BuildPidCapacityContext(manager, process, &requestContext, privatePages, sharedPages);
+    if (ret) {
+        return ret;
+    }
+    ret = BuildPairRequestedTargets(process, &requestContext, targets, LOCAL_NUMA_NUM * REMOTE_NUMA_NUM, &targetCnt,
+                                    &summary);
+    if (ret) {
+        return ret;
+    }
+    ClipPidTargetsToCapacity(targets, targetCnt, manager->nrLocalNuma, privatePages, sharedPages);
+
+    for (size_t i = 0; i < targetCnt; i++) {
+        PairPlan *plan = &plans[i];
+        int remoteIndex = targets[i].remoteNid - manager->nrLocalNuma;
+        uint64_t requestedPages;
+
+        if (IsNodeForbidden(targets[i].remoteNid)) {
+            continue;
+        }
+        plan->pid = process->pid;
+        plan->localNid = targets[i].localNid;
+        plan->remoteNid = targets[i].remoteNid;
+        plan->remoteIndex = remoteIndex;
+        plan->targetPages = targets[i].requestedPages;
+        plan->actualPages = process->strategyAttr.remoteNrPagesAfterMigrate[plan->localNid][remoteIndex];
+        if (plan->actualPages < plan->targetPages) {
+            requestedPages = plan->targetPages - plan->actualPages;
+            plan->demotePages = (uint32_t)MIN(requestedPages, process->walkPage.nrPage - plannedPages);
+        } else {
+            requestedPages = plan->actualPages - plan->targetPages;
+            plan->promotePages = (uint32_t)MIN(requestedPages, process->walkPage.nrPage - plannedPages);
+        }
+        plannedPages += plan->demotePages + plan->promotePages;
+    }
+
+    uint64_t selectedFrom[MAX_NODES] = { 0 };
+    for (size_t i = 0; i < targetCnt; i++) {
+        selectedFrom[plans[i].localNid] += plans[i].demotePages;
+        selectedFrom[plans[i].remoteNid] += plans[i].promotePages;
+    }
+    for (size_t i = 0; i < targetCnt && plannedPages < process->walkPage.nrPage; i++) {
+        PairPlan *plan = &plans[i];
+        if (!process->enableSwap || IsNodeForbidden(plan->remoteNid) || !IsOnlyLocalForRemote(plans, targetCnt, i) ||
+            (plan->targetPages == 0 && plan->demotePages == 0 && plan->promotePages == 0)) {
+            continue;
+        }
+        uint64_t swapLimit = MIN((process->walkPage.nrPage - plannedPages) / 2, (uint64_t)UINT32_MAX);
+        uint64_t swapPages = CountPairSwapPages(process, plan->localNid, plan->remoteNid,
+                                                selectedFrom[plan->localNid], selectedFrom[plan->remoteNid]);
+        swapPages = MIN(swapPages, swapLimit);
+        swapPages += CalcPairRemoteGuaranteeExtraSwap(process, plan, selectedFrom[plan->localNid],
+                                                       selectedFrom[plan->remoteNid], swapPages,
+                                                       swapLimit - swapPages);
+        plan->swapPages = (uint32_t)swapPages;
+        selectedFrom[plan->localNid] += swapPages;
+        selectedFrom[plan->remoteNid] += swapPages;
+        plannedPages += swapPages * 2;
+    }
+
+    for (size_t i = 0; i < targetCnt; i++) {
+        PairPlan *plan = &plans[i];
+        nrMigratePages[plan->localNid][plan->remoteNid] = plan->demotePages + plan->swapPages;
+        nrMigratePages[plan->remoteNid][plan->localNid] = plan->promotePages + plan->swapPages;
+    }
+    ret = memcpy_s(process->strategyAttr.nrMigratePages, sizeof(process->strategyAttr.nrMigratePages), nrMigratePages,
+                   sizeof(nrMigratePages));
+    return ret == EOK ? 0 : -ret;
+}
+
 int BuildPairSwapPlans(struct ProcessManager *manager, PairPlan plans[], size_t planCnt, PairPlanContext *context,
                        PairPidBudget pidBudgets[], size_t pidBudgetCnt)
 {
@@ -1017,11 +1160,11 @@ static void FreezeFailedCompPlans(struct ProcessManager *manager, GroupSwapCompP
 }
 
 static int RunGroupedSwapCompensation(struct ProcessManager *manager, struct MigrateMsg *mMsg,
-                                      GroupSwapCompPlan plans[], int planCnt)
+                                      GroupSwapCompPlan plans[], int planCnt, ProcessAttr *process)
 {
     struct MigrateMsg compMsg = { 0 };
     int compPlanIdx[MAX_GROUP_SWAP_COMP_PLANS] = { 0 };
-    int ret = BuildAllPidData();
+    int ret = BuildPidData(process);
     if (ret) {
         SMAP_LOGGER_ERROR("grouped swap compensation refresh pid data failed: %d.", ret);
         for (int i = 0; i < planCnt; i++) {
@@ -1301,76 +1444,6 @@ static int InitMigrateMsg(struct MigrateMsg *mMsg, struct ProcessManager *manage
         return -ENOMEM;
     }
     mMsg->pageSize = manager->tracking.pageSize;
-    return 0;
-}
-
-static int CleanStrategyAttribute(struct ProcessManager *manager)
-{
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n; k++) {
-        ProcessAttr *current = all[k]->attr;
-        int ret;
-        StrategyAttribute *strAttr = &current->strategyAttr;
-        for (int i = 0; i < LOCAL_NUMA_NUM; i++) {
-            ret = memset_s(strAttr->l3RemoteMemRatio[i], sizeof(strAttr->l3RemoteMemRatio[0]), 0,
-                           sizeof(strAttr->l3RemoteMemRatio[0]));
-            if (ret != EOK) {
-                PidSlotReleaseRefs(all, n);
-                return ret;
-            }
-            ret = memset_s(strAttr->allocRemoteNrPages[i], sizeof(strAttr->allocRemoteNrPages[0]), 0,
-                           sizeof(strAttr->allocRemoteNrPages[0]));
-            if (ret != EOK) {
-                PidSlotReleaseRefs(all, n);
-                return ret;
-            }
-        }
-        ret = memset_s(strAttr->nrPagesPerLocalNuma, sizeof(strAttr->nrPagesPerLocalNuma), 0,
-                       sizeof(strAttr->nrPagesPerLocalNuma));
-        if (ret != EOK) {
-            PidSlotReleaseRefs(all, n);
-            return ret;
-        }
-        for (int i = 0; i < MAX_NODES; i++) {
-            ret = memset_s(strAttr->nrMigratePages[i], sizeof(strAttr->nrMigratePages[0]), 0,
-                           sizeof(strAttr->nrMigratePages[0]));
-            if (ret != EOK) {
-                PidSlotReleaseRefs(all, n);
-                return ret;
-            }
-        }
-        ret = memset_s(strAttr->ubBwRestrict, sizeof(strAttr->ubBwRestrict), 0, sizeof(strAttr->ubBwRestrict));
-        if (ret != EOK) {
-            PidSlotReleaseRefs(all, n);
-            return ret;
-        }
-    }
-    PidSlotReleaseRefs(all, n);
-    return 0;
-}
-
-static int PerformMigrationPreparation(struct ProcessManager *manager)
-{
-    int ret = 0;
-    if (PidSlotEmpty(manager)) {
-        return -EINVAL;
-    }
-    ret = CleanStrategyAttribute(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Clean StrategyAttribute failed! ret: %d.", ret);
-        return ret;
-    }
-    ret = BuildAllPidData();
-    if (ret < 0) {
-        SMAP_LOGGER_ERROR("Build all pid data failed! ret:%d.", ret);
-        return ret;
-    }
-    if (ret > 0) {
-        SMAP_LOGGER_WARNING("Build pid data failed! nums:%d.", ret);
-        return 0;
-    }
-    SmapAutoRemoveRemoteEmptyProcessesWithFreshData();
     return 0;
 }
 
@@ -1659,82 +1732,34 @@ OUT:
     return ret;
 }
 
-static void PostMigration(struct ProcessManager *manager, struct MigrateMsg *mMsg)
+static void PostPidMigration(struct ProcessManager *manager, ProcessAttr *process, struct MigrateMsg *mMsg)
 {
     GroupSwapCompPlan plans[MAX_GROUP_SWAP_COMP_PLANS] = { 0 };
     int planCnt = 0;
-
     int ret = BuildGroupedSwapCompPlans(mMsg, manager, plans, &planCnt);
     if (!ret && planCnt > 0) {
-        ret = RunGroupedSwapCompensation(manager, mMsg, plans, planCnt);
+        ret = RunGroupedSwapCompensation(manager, mMsg, plans, planCnt, process);
         if (ret) {
-            SMAP_LOGGER_ERROR("Run grouped swap compensation failed: %d.", ret);
+            SMAP_LOGGER_ERROR("Run grouped pid %d swap compensation failed: %d.", process->pid, ret);
         }
-    } else if (ret) {
-        for (int i = 0; i < mMsg->cnt; i++) {
-            ProcessAttr *process = GetProcessAttr(mMsg->migList[i].pid);
-            if (process && process->groupPolicy.enabled) {
-                ResetGroupedSwapRuntimeLocked(process, true);
-            }
-            PutProcessAttr(process);
-        }
+    } else if (ret && process->groupPolicy.enabled) {
+        ResetGroupedSwapRuntimeLocked(process, true);
     }
 
     UpdateMigResult(mMsg, manager);
     free(mMsg->migList);
     mMsg->migList = NULL;
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t postCnt = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < postCnt; k++) {
-        ProcessAttr *current = all[k]->attr;
-        if (current->state == PROC_MIGRATE) {
-            /*
-             * The old migration result is now settled; it is safe to publish
-             * pending normal targets and grouped policy.
-             */
-            int ret = ApplyPendingMigrationTargets(current);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Apply pending migration target after migration failed, "
-                                  "pid %d ret %d.",
-                                  current->pid, ret);
-            }
-            ret = ApplyPendingGroupedPolicy(current);
-            if (ret) {
-                SMAP_LOGGER_ERROR("Apply pending grouped policy after migration failed, pid %d ret %d.", current->pid,
-                                  ret);
-            }
-            SMAP_LOGGER_DEBUG("set pid %d state from migrate to idle.", current->pid);
-            current->state = PROC_IDLE;
+    if (process->state == PROC_MIGRATE) {
+        ret = ApplyPendingMigrationTargets(process);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Apply pending migration target after pid %d migration failed: %d.", process->pid, ret);
         }
+        ret = ApplyPendingGroupedPolicy(process);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Apply pending grouped policy after pid %d migration failed: %d.", process->pid, ret);
+        }
+        process->state = PROC_IDLE;
     }
-    PidSlotReleaseRefs(all, postCnt);
-}
-
-static int PerformMigration(struct ProcessManager *manager)
-{
-    int ret;
-    uint64_t migratePages = 0;
-    struct MigrateMsg mMsg;
-    struct timeval start, end;
-
-    ret = PreMigration(manager, &mMsg, &migratePages);
-    if (ret) {
-        SMAP_LOGGER_ERROR("PreMigration failed! ret: %d.", ret);
-        return ret;
-    }
-
-    // 调用迁移接口
-    gettimeofday(&start, NULL);
-    ret = DoMigration(&mMsg, manager);
-    gettimeofday(&end, NULL);
-    PrintMigSpeed(manager, migratePages, start, end);
-    SMAP_LOGGER_INFO("Do migration result: %d.", ret);
-    PostMigration(manager, &mMsg);
-    if (ret) {
-        SMAP_LOGGER_INFO("Do migration failed! migration_failure_count=%d.", ret);
-        return ret;
-    }
-    return ret;
 }
 
 static int UpdateScanTime(ProcessAttr *process)
@@ -1743,7 +1768,7 @@ static int UpdateScanTime(ProcessAttr *process)
     payload.pid = process->pid;
     payload.numaNodes = process->numaAttr.numaNodes;
     payload.type = process->scanType;
-    payload.duration = process->duration;
+    payload.duration = GetFileConfSwitchConfig() ? GetMigratePeriodConfig() : process->sceneInfo.cycles.migCycle;
     payload.pidType = process->type;
     payload.scanTime = GetFileConfSwitchConfig() ? GetScanPeriodConfig() : process->sceneInfo.cycles.scanCycle;
     int ret = AccessIoctlAddPid(1, &payload);
@@ -1751,23 +1776,17 @@ static int UpdateScanTime(ProcessAttr *process)
         SMAP_LOGGER_ERROR("Update scan time failed for pid %d, ret=%d.", process->pid, ret);
     } else {
         process->scanTime = payload.scanTime;
+        process->duration = payload.duration;
         SMAP_LOGGER_INFO("Update pid %d scan cycle to %dms.", process->pid, payload.scanTime);
     }
 
     return ret;
 }
 
-static void UpdateScene(struct ProcessManager *manager)
+static void UpdateScene(ProcessAttr *process)
 {
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n; k++) {
-        ProcessAttr *current = all[k]->attr;
-        if (current->scanType == NORMAL_SCAN) {
-            SetProcessSceneAttr(current);
-        }
-    }
-    PidSlotReleaseRefs(all, n);
+    if (process->scanType == NORMAL_SCAN)
+        SetProcessSceneAttr(process);
 }
 
 static inline void HandleHighScan(ProcessAttr *current)
@@ -1780,105 +1799,48 @@ static inline void HandleHighScan(ProcessAttr *current)
     }
 }
 
-static int HandleScene(struct ProcessManager *manager)
+static int HandleScene(ProcessAttr *current)
 {
-    int ret = 0;
-    Scene worstScene = LIGHT_STABLE_SCENE, scene;
     PageType pageType = IsHugeMode() ? PAGETYPE_HUGE : PAGETYPE_NORMAL;
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n; k++) {
-        ProcessAttr *current = all[k]->attr;
-        // 更新进程的场景
-        SceneInfo *info = &current->sceneInfo;
-        GetProcessSceneAttr(info->currScene, info, pageType);
-        if (current->isFirstScan) {
-            if (current->walkPage.nrPage == 0) {
-                current->scanTime = DEFAULT_SCAN_PERIOD;
-            } else {
-                HandleHighScan(current);
-            }
-        } else if (info->currScene != info->lastScene) {
-            if (UpdateScanTime(current)) {
-                SMAP_LOGGER_WARNING("Update scan time failed for pid %d.", current->pid);
-            }
+    SceneInfo *info = &current->sceneInfo;
+    GetProcessSceneAttr(info->currScene, info, pageType);
+    if (current->isFirstScan) {
+        if (current->walkPage.nrPage == 0) {
+            current->scanTime = DEFAULT_SCAN_PERIOD;
+            return 0;
         }
-        scene = current->sceneInfo.currScene;
-        if (scene > worstScene) {
-            worstScene = scene;
-        }
+        HandleHighScan(current);
+        return 0;
     }
-    PidSlotReleaseRefs(all, n);
-
-    if (manager->sceneInfo.currScene != worstScene) {
-        SMAP_LOGGER_INFO("Manager changed scene from %d to %d.", manager->sceneInfo.currScene, worstScene);
-        manager->sceneInfo.currScene = worstScene;
-        GetProcessSceneAttr(worstScene, &manager->sceneInfo, pageType);
-        SceneCycle *cycles = &manager->sceneInfo.cycles;
-        manager->migPeriod = cycles->migCycle;
+    if (info->currScene != info->lastScene && UpdateScanTime(current)) {
+        SMAP_LOGGER_WARNING("Update scan time failed for pid %d.", current->pid);
     }
-    return ret;
+    return 0;
 }
 
-static void UpdateAllProcessScanTime(struct ProcessManager *manager)
+static void RestoreProcessScanTime(ProcessAttr *process)
 {
-    int ret;
-
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n; k++) {
-        ProcessAttr *current = all[k]->attr;
-        if (current->isFirstScan) {
-            continue;
-        }
-        if (current->scanType == NORMAL_SCAN) {
-            ret = UpdateScanTime(current);
-            if (ret) {
-                SMAP_LOGGER_WARNING("Update pid %d scan cycle failed, ret=%d.", current->pid, ret);
-            }
-        }
-    }
-    PidSlotReleaseRefs(all, n);
-}
-
-static void RestoreProcessScanTime(struct ProcessManager *manager)
-{
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n; k++) {
-        ProcessAttr *current = all[k]->attr;
-        if (current->isFirstScan) {
-            if (current->walkPage.nrPage == 0) {
-                current->scanTime = DEFAULT_SCAN_PERIOD;
-                SMAP_LOGGER_INFO("Skip pid %d scan cycle restore, nrPages=0, keep high-freq scan.", current->pid);
-                continue;
-            }
-            if (current->scanType == NORMAL_SCAN) {
-                HandleHighScan(current);
-            }
-        }
-    }
-    PidSlotReleaseRefs(all, n);
-}
-
-static void UpdatePeriodFromConfig(struct ProcessManager *manager)
-{
-    if (!GetFileConfSwitchConfig()) {
+    if (!process->isFirstScan) {
         return;
     }
-
-    RestoreProcessScanTime(manager);
-    if (GetMigratePeriodChanged()) {
-        SMAP_LOGGER_INFO("Start update migrate period time from config to %u.", GetMigratePeriodConfig());
-        manager->migPeriod = GetMigratePeriodConfig();
-        SetMigratePeriodChanged(false);
+    if (process->walkPage.nrPage == 0) {
+        process->scanTime = DEFAULT_SCAN_PERIOD;
+        SMAP_LOGGER_INFO("Skip pid %d scan cycle restore, nrPages=0, keep high-freq scan.", process->pid);
+        return;
     }
+    if (process->scanType == NORMAL_SCAN) {
+        HandleHighScan(process);
+    }
+}
 
-    // 为了计算ntimes需要先更新迁移周期
-    if (GetScanPeriodChanged()) {
-        SMAP_LOGGER_INFO("Start update scan period time from config\n");
-        UpdateAllProcessScanTime(manager);
-        SetScanPeriodChanged(false);
+static void UpdatePeriodFromConfig(ProcessAttr *process)
+{
+    RestoreProcessScanTime(process);
+    if (!process->isFirstScan &&
+        (process->scanTime != GetScanPeriodConfig() || process->duration != GetMigratePeriodConfig())) {
+        if (UpdateScanTime(process)) {
+            SMAP_LOGGER_WARNING("Update pid %d scan and migrate periods from config failed.", process->pid);
+        }
     }
 }
 
@@ -1899,37 +1861,89 @@ static void MigrationUpdateMigrateModeAndScanCpu(void)
     }
 }
 
-// 无管理进程时仅在tracking仍enable时关闭一次，之后直接跳过整个周期，
-// 避免内核空转扫描和重复disable；新进程加入后下一周期恢复正常流程
-static bool SkipCycleIfNoProcess(struct ProcessManager *manager, int *ret)
+// No managed process means there is no global migration work to perform.
+static bool SkipCycleIfNoProcess(struct ProcessManager *manager)
 {
-    if (!PidSlotEmpty(manager)) {
-        return false;
-    }
-    if (manager->tracking.trackingEnabled) {
-        SMAP_LOGGER_DEBUG("No managed process, disable tracking and skip cycle.");
-        *ret = DisableTracking(manager);
-        if (*ret) {
-            SMAP_LOGGER_ERROR("Disable tracking failed! ret:%d.", *ret);
-        }
-    }
-    return true;
+    return PidSlotEmpty(manager);
 }
 
-// 管理线程函数
-int ScanMigrateWork(struct ProcessManager *manager)
+/* The caller holds a slot reference for the whole migration cycle. */
+static int ProcessPidScanMigrate(struct ProcessManager *manager, struct PidSlot *slot, pid_t pid)
 {
+    struct MigrateMsg msg = { 0 };
+    ProcessAttr *attr = PidSlotAttr(slot);
+    uint64_t migratePages = 0;
+    struct timeval start, end;
     int ret = 0;
-    if (SkipCycleIfNoProcess(manager, &ret)) {
-        return ret;
+
+    if (!attr || attr->scanType != NORMAL_SCAN || attr->state != PROC_IDLE) {
+        goto enable;
+    }
+    ret = BuildPidData(attr);
+    if (ret)
+        goto enable;
+    if (GetFileConfSwitchConfig()) {
+        UpdatePeriodFromConfig(attr);
+    } else {
+        UpdateScene(attr);
+        ret = HandleScene(attr);
+        if (ret)
+            goto enable;
+    }
+    ApplyUbBwStop(attr, manager);
+    attr->state = PROC_MIGRATE;
+
+    if (!attr->groupPolicy.enabled) {
+        ret = BuildPidPairPlans(manager, attr);
+    }
+    if (ret) {
+        goto settle;
+    }
+    ret = InitMigrateMsg(&msg, manager);
+    if (ret)
+        goto settle;
+    if (attr->state == PROC_MIGRATE) {
+        if (attr->groupPolicy.enabled)
+            NumaMigReduceDeal(attr);
+        ret = BuildMigrationMsg(attr, &msg, &migratePages);
+    }
+    if (!ret && msg.cnt > 0) {
+        gettimeofday(&start, NULL);
+        ret = DoMigration(&msg, manager);
+        gettimeofday(&end, NULL);
+        PrintMigSpeed(manager, migratePages, start, end);
+    }
+settle:
+    PostPidMigration(manager, attr, &msg);
+enable:
+    if (RestartPidScan(pid) && ret == 0)
+        ret = -EIO;
+    return ret;
+}
+
+void PidMigrationWork(struct ProcessManager *manager, struct PidSlot *slot, pid_t pid)
+{
+    (void)ProcessPidScanMigrate(manager, slot, pid);
+    EventLoopResetEnqueued(slot);
+    /*
+    epoll 事件
+    → PidSlotTryGetRef()       // 持有 slot
+    → eventEnqueued: 0 → 1    // 去重
+    → ThreadPoolSubmit()
+    → PidMigrationWork()
+        → 执行迁移
+        → eventEnqueued: 1 → 0
+        → ReleaseRefs()       // 归还 slot
+    */
+    PidSlotReleaseRefs(&slot, 1);
+}
+
+int ManagerDaemonWork(struct ProcessManager *manager)
+{
+    if (SkipCycleIfNoProcess(manager)) {
+        return 0;
     }
 
-    ret = DisableTracking(manager);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Disable tracking failed! ret:%d.", ret);
-        goto out;
-    }
-    SMAP_LOGGER_DEBUG("Tracking disabled.");
     StrategyConfigRead(STRATEGY_CONFIG_PATH); // 从配置文件中读取策略配置
     manager->ubBwMonitor.ubBwThreshold = GetUbBwThresholdConfig();
     if (GetFileConfSwitchConfig()) {
@@ -1937,46 +1951,20 @@ int ScanMigrateWork(struct ProcessManager *manager)
     }
     // 由于进程销毁是异步，后续涉及ProcessAttr需要合理处理异常
     CheckAndRemoveInvalidProcess();
-    ret = PerformMigrationPreparation(manager);
-    if (ret) {
-        SMAP_LOGGER_DEBUG("Migration preparation failed: %d.", ret);
-        goto out;
-    }
-
     GetUbFluxMb();
 
-    // 更新虚机所处的场景
-    UpdateScene(manager);
-    SMAP_LOGGER_DEBUG("Scene updated.");
     // 根据内存使用情况更新配比
     ConfigRatios(manager);
     SMAP_LOGGER_DEBUG("Ratio configured.");
     // 处理迁移参数
     MigrationUpdateMigrateModeAndScanCpu();
-    if (GetFileConfSwitchConfig()) {
-        SMAP_LOGGER_DEBUG("Updating period from config.");
-        UpdatePeriodFromConfig(manager);
-    } else {
-        ret = HandleScene(manager);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Handle scene failed! ret:%d.", ret);
-            goto out;
-        }
-        SMAP_LOGGER_DEBUG("Handle scene done.");
-    }
     UpdateRemoteNumaCriticalErr();
-    ret = PerformMigration(manager);
-    SMAP_LOGGER_INFO("Migration result: %d.", ret);
     // 迁移结束后：仅在开启带宽限制时配置ub_watch开启统计（下周期查询时得到纯业务带宽）
     if (IsBwMonitorEnabled(manager)) {
-        ConfigUbWatch(manager->migPeriod);
+        ConfigUbWatch(manager->daemonPeriod);
     }
-out:
     RefreshRemoteRam(manager);
-    // 启动扫描
-    EnableTracking(manager);
-    SMAP_LOGGER_DEBUG("Tracking enabled.");
-    return ret;
+    return 0;
 }
 
 int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg *msg)

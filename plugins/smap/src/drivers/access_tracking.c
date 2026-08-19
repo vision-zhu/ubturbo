@@ -168,25 +168,10 @@ void submit_one_work(struct access_pid *ap)
 		 ap->scan_time);
 	/* check if work was already initialized */
 	cancel_ap_scan_work(ap);
-	init_completion(&ap->work_done);
+	set_ap_state(ap, AP_STATE_SCANNING);
 	INIT_DELAYED_WORK(&ap->scan_work, access_work_func);
 	queue_delayed_work(adev_head->scanq, &ap->scan_work,
 			   msecs_to_jiffies(ap->scan_time));
-}
-
-static void submit_scan_works(struct access_tracking_dev *adev)
-{
-	struct access_pid *ap;
-	/* only the first adev in the list submits scan works */
-	if (adev != get_first_access_dev()) {
-		return;
-	}
-	down_read(&ap_data.lock);
-	list_for_each_entry(ap, &ap_data.list, node) {
-		ap->cur_times = 0;
-		submit_one_work(ap);
-	}
-	up_read(&ap_data.lock);
 }
 
 static int create_scan_workqueue(void)
@@ -214,14 +199,6 @@ static void destroy_scan_workqueue(void)
 	up_read(&ap_data.lock);
 	flush_workqueue(adev->scanq);
 	destroy_workqueue(adev->scanq);
-}
-
-static inline void access_init_actc_data(struct access_tracking_dev *adev)
-{
-	size_t len = adev->page_count * sizeof(actc_t);
-
-	if (adev->access_bit_actc_data)
-		memset(adev->access_bit_actc_data, 0, len);
 }
 
 static void access_print_acpi_mem(void)
@@ -264,10 +241,8 @@ static int actc_buffer_reinit(struct access_tracking_dev *adev)
 
 	access_print_acpi_mem();
 	page_count = calc_access_len_v2(adev);
-	if (adev->page_count == page_count) {
-		access_init_actc_data(adev);
+	if (adev->page_count == page_count)
 		return 0;
-	}
 	pr_debug(
 		"page amount of tracking device on node %d has been changed from %llu to %llu\n",
 		adev->node, adev->page_count, page_count);
@@ -284,63 +259,27 @@ static int actc_buffer_reinit(struct access_tracking_dev *adev)
 	return 0;
 }
 
-static void access_tracking_enable(struct device *ldev)
-{
-	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
-	int ret;
-
-	if (adev->is_hist)
-		return;
-	down_write(&adev->buffer_lock);
-	ret = actc_buffer_reinit(adev);
-	if (ret) {
-		pr_err("unable to reinit ACTC buffer\n");
-		up_write(&adev->buffer_lock);
-		return;
-	}
-	up_write(&adev->buffer_lock);
-	adev->enable_on = true;
-	submit_scan_works(adev);
-}
-
-static int access_tracking_disable(struct device *ldev)
+static int access_tracking_restart_pid_dev(struct device *ldev, pid_t pid)
 {
 	struct access_tracking_dev *adev = to_accessbit_dev(ldev);
 	struct access_pid *ap;
-	bool all_complete = true;
-
 	if (adev->is_hist)
 		return 0;
 	if (adev != get_first_access_dev())
 		return 0;
-
-	/*
-	 * 必须在 ap_data.lock 写锁的同一临界区内完成"检查所有扫描任务完成
-	 * 并切换为 disabled"。add_pid 的 move_to_ap_data_list 同样在
-	 * down_write(&ap_data.lock) 下读 enable_on 并提交扫描，二者互斥，
-	 * 才能保证 disable 成功返回后不会再有新扫描任务被提交，避免迁移与
-	 * 扫描并发（prepare 重分配 bitmap 与迁移读侧竞态）。
-	 *
-	 * complete(&ap->work_done) 在 access_work_func 释放 ap_data.lock 读锁之后才
-	 * 调用，故 completion_done 为真时该 work 已不持读锁，此处持写锁检查
-	 * 不会与在跑的 work 互斥死锁。
-	 */
 	down_write(&ap_data.lock);
 	list_for_each_entry(ap, &ap_data.list, node) {
-		/* completion_done 为 false 表示仍有在排队/在跑的扫描，
-		 * 返回 -EBUSY 让上层重试。disable 期新加的 pid 因
-		 * complete(work_done) 使 completion_done() 返回 true，不会误判 -EBUSY。
-		 */
-		if (!completion_done(&ap->work_done)) {
-			all_complete = false;
+		if (ap->pid == pid)
 			break;
-		}
 	}
-	if (all_complete)
-		adev->enable_on = false;
+	if (list_entry_is_head(ap, &ap_data.list, node)) {
+		up_write(&ap_data.lock);
+		return -ENOENT;
+	}
+	ap->cur_times = 0;
+	submit_one_work(ap);
 	up_write(&ap_data.lock);
-
-	return all_complete ? 0 : -EBUSY;
+	return 0;
 }
 
 static int access_tracking_set_page_size(struct device *ldev,
@@ -365,8 +304,7 @@ static int access_tracking_set_page_size(struct device *ldev,
 }
 
 static struct tracking_operations access_tracking_ops = {
-	.tracking_enable = access_tracking_enable,
-	.tracking_disable = access_tracking_disable,
+	.tracking_restart_pid = access_tracking_restart_pid_dev,
 	.tracking_set_page_size = access_tracking_set_page_size,
 };
 
@@ -576,7 +514,9 @@ static void access_work_func(struct work_struct *work)
 				   msecs_to_jiffies(scan_delay_ms));
 		ap->last_scan_end = ktime_get();
 	} else {
-		complete(&ap->work_done);
+		/* A completed window makes this pid's frequency data consumable. */
+		set_ap_state(ap, AP_STATE_FREQ_READY);
+		wake_up_all(&ap->wq);
 	}
 }
 

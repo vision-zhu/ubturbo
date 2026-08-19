@@ -37,9 +37,6 @@ kuid_t procfs_kuid;
 kgid_t procfs_kgid;
 struct proc_dir_entry *smap_procfs_root = NULL;
 
-static char *smap_bitmap_buf = NULL;
-static size_t smap_buf_len = 0;
-
 static int check_msg_validity(struct access_add_pid_msg *msg)
 {
 	if (!msg) {
@@ -231,158 +228,27 @@ static long ioctl_create_smap_procfs(void __user *argp)
 	return 0;
 }
 
-#ifndef BYTES_PER_LONG
-#define BYTES_PER_LONG 8
-#endif
-
-static size_t calc_bitmap_len(void)
+static long ioctl_get_pid_page_num(void __user *argp)
 {
-	size_t buf_len = 0;
+	struct access_pid_page_num_msg msg;
 	struct access_pid *ap;
-
-	/*
-	 * Each process's information layout is as follows:
-	 * +----------+------------------------------------------------------+
-	 * | PID (4B) |        NR_NODE0_PAGE-NR_NODEn_PAGE (n * 8B)          |
-	 * +----------+------------------------------------------------------+
-	 *
-	 * Note: bitmap/mapping data is not transmitted here since mem_freq_read
-	 * already assembles complete actc_data including freq, prior, and white_list.
-	 */
-	down_read(&ap_data.lock);
-	list_for_each_entry(ap, &ap_data.list, node) {
-		if (ap->type != NORMAL_SCAN) {
-			continue;
-		}
-		buf_len += sizeof(pid_t);
-		buf_len += sizeof(size_t) * SMAP_MAX_NUMNODES;
-	}
-	up_read(&ap_data.lock);
-
-	return buf_len;
-}
-
-static long ioctl_walk_pagemap(void __user *argp)
-{
-	size_t buf_len;
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_WALK)) {
-		pr_err("walk pagemap of access pid is not allowed\n");
-		return -EAGAIN;
-	}
-	buf_len = calc_bitmap_len();
-	if (!buf_len || copy_to_user(argp, &buf_len, sizeof(buf_len))) {
-		set_ap_whole_state(&ap_data, AP_STATE_WALK);
-		return -EFAULT;
-	} else {
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ);
-		vfree(smap_bitmap_buf);
-		smap_bitmap_buf = NULL;
-		smap_buf_len = 0;
-	}
-	return 0;
-}
-
-static inline void write_bitmap_pid(char **buffer, struct access_pid *ap)
-{
-	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("invalid buffer or access pid passed to write bitmap\n");
-		return;
-	}
-	memcpy(*buffer, &ap->pid, sizeof(ap->pid));
-	*buffer += sizeof(ap->pid);
-}
-
-static inline void write_bitmap_nrpage(char **buffer, struct access_pid *ap)
-{
 	int i;
-	if (unlikely(!buffer || !(*buffer) || !ap)) {
-		pr_err("invalid buffer or access pid passed to write page number\n");
-		return;
-	}
-	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
-		memcpy(*buffer, &ap->page_num[i], sizeof(ap->page_num[i]));
-		*buffer += sizeof(ap->page_num[i]);
-	}
-}
 
-static void write_bitmap_buffer(char **buffer)
-{
-	struct access_pid *ap;
-
-	if (unlikely(!buffer || !(*buffer))) {
-		pr_err("invalid buffer passed to write bitmap buffer\n");
-		return;
-	}
+	if (copy_from_user(&msg, argp, sizeof(msg)))
+		return -EFAULT;
 	down_read(&ap_data.lock);
 	list_for_each_entry(ap, &ap_data.list, node) {
-		if (ap->type != NORMAL_SCAN)
-			continue;
-
-		write_bitmap_pid(buffer, ap);
-		write_bitmap_nrpage(buffer, ap);
+		if (ap->pid == msg.pid)
+			break;
 	}
+	if (list_entry_is_head(ap, &ap_data.list, node)) {
+		up_read(&ap_data.lock);
+		return -ENOENT;
+	}
+	for (i = 0; i < SMAP_MAX_NUMNODES; i++)
+		msg.page_num[i] = ap->page_num[i];
 	up_read(&ap_data.lock);
-}
-
-static ssize_t read_bitmap(char __user *buf, size_t cnt, loff_t *loff,
-			   bool *completed)
-{
-	char *tmp_buf;
-	ssize_t len;
-
-	*completed = false;
-	pr_debug("reading bitmap, smap_buf_len %zu, loff %lld, cnt %zu\n",
-		 smap_buf_len, *loff, cnt);
-	if (cnt == 0) {
-		*completed = true;
-		return 0;
-	}
-	if (*loff > 0)
-		goto copy_data;
-
-	smap_buf_len = calc_bitmap_len();
-	if (smap_buf_len == 0) {
-		*completed = true;
-		return 0;
-	}
-
-	vfree(smap_bitmap_buf);
-	smap_bitmap_buf = vmalloc(smap_buf_len);
-	if (!smap_bitmap_buf) {
-		pr_err("failed to alloc memory in read_bitmap\n");
-		return -ENOMEM;
-	}
-
-	tmp_buf = smap_bitmap_buf;
-	write_bitmap_buffer(&smap_bitmap_buf);
-	smap_bitmap_buf = tmp_buf;
-
-copy_data:
-	if (unlikely(*loff >= smap_buf_len)) {
-		len = -ERANGE;
-		goto free_buf;
-	}
-	if (*loff + cnt > smap_buf_len)
-		len = smap_buf_len - *loff;
-	else
-		len = cnt;
-	if (copy_to_user(buf, smap_bitmap_buf + (*loff), len)) {
-		len = -EFAULT;
-		goto free_buf;
-	}
-	if (*loff + len == smap_buf_len) {
-		*completed = true;
-		goto free_buf;
-	}
-	*loff += len;
-	return len;
-
-free_buf:
-	vfree(smap_bitmap_buf);
-	smap_bitmap_buf = NULL;
-	smap_buf_len = 0;
-	*loff = 0;
-	return len;
+	return copy_to_user(argp, &msg, sizeof(msg)) ? -EFAULT : 0;
 }
 
 static int smap_access_open(struct inode *inode, struct file *file)
@@ -523,8 +389,8 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 		return ioctl_remove_pid(argp);
 	case SMAP_ACCESS_REMOVE_ALL_PID:
 		return ioctl_remove_all_pid(argp);
-	case SMAP_ACCESS_WALK_PAGEMAP:
-		return ioctl_walk_pagemap(argp);
+	case SMAP_ACCESS_GET_PID_PAGE_NUM:
+		return ioctl_get_pid_page_num(argp);
 	case SMAP_ACCESS_GET_TRACKING:
 		return ioctl_get_tracking(argp);
 	case SMAP_ACCESS_CREATE_PROCFS:
@@ -546,31 +412,9 @@ static long smap_access_ioctl(struct file *file, unsigned int cmd,
 	return rc;
 }
 
-static ssize_t smap_access_read(struct file *file, char __user *buf, size_t cnt,
-				loff_t *loff)
-{
-	ssize_t ret;
-	bool completed = false;
-
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_READ)) {
-		pr_err("read bitmap of access pid is not allowed\n");
-		return -EPERM;
-	}
-
-	ret = read_bitmap(buf, cnt, loff, &completed);
-	if (ret < 0)
-		set_ap_whole_state(&ap_data, AP_STATE_WALK);
-	else if (completed)
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_FREQ);
-	else
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ);
-	return ret;
-}
-
 static struct file_operations smap_access_fops = {
 	.owner = THIS_MODULE,
 	.open = smap_access_open,
-	.read = smap_access_read,
 	.unlocked_ioctl = smap_access_ioctl,
 	.release = smap_access_release,
 };
@@ -627,9 +471,6 @@ err_cdev:
 
 void access_ioctl_exit(void)
 {
-	vfree(smap_bitmap_buf);
-	smap_bitmap_buf = NULL;
-	smap_buf_len = 0;
 	access_remove_all_pid();
 	remove_procfs_root();
 	access_dev_exit();

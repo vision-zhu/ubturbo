@@ -302,7 +302,7 @@ struct MigrateNumaMsg {
  *
  * @param pidArr   [IN] 进程数组
  * @param scanTime [IN] 扫描间隔
- * @param duration [IN] 扫描持续时长
+ * @param duration [IN] 扫描持续时长（秒）
  * @param len      [IN] 进程数组大小
  * @param scanType [IN] 扫描类型
  * @return int  0：操作成功；非0：操作失败

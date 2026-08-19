@@ -25,6 +25,7 @@ struct AccessAddPidPayload {
     pid_t pid;
     uint32_t numaNodes;
     uint32_t scanTime;
+    /* Scan duration in milliseconds. */
     uint32_t duration;
     ScanType type;
     uint32_t nTimes;
@@ -67,11 +68,16 @@ struct SmapScanCpuRange {
     uint32_t cpuMax;
 };
 
+struct AccessPidPageNumMsg {
+    pid_t pid;
+    size_t pageNum[MAX_NODES];
+};
+
 #define SMAP_ACCESS_MAGIC 0xBB
 #define SMAP_ACCESS_ADD_PID _IOW(SMAP_ACCESS_MAGIC, 1, struct AccessAddPidMsg)
 #define SMAP_ACCESS_REMOVE_PID _IOW(SMAP_ACCESS_MAGIC, 2, struct AccessRemovePidMsg)
 #define SMAP_ACCESS_REMOVE_ALL_PID _IOW(SMAP_ACCESS_MAGIC, 3, int)
-#define SMAP_ACCESS_WALK_PAGEMAP _IOW(SMAP_ACCESS_MAGIC, 4, size_t)
+#define SMAP_ACCESS_GET_PID_PAGE_NUM _IOWR(SMAP_ACCESS_MAGIC, 10, struct AccessPidPageNumMsg)
 #define SMAP_ACCESS_GET_TRACKING _IOW(SMAP_ACCESS_MAGIC, 5, struct TrakingInfoPayload)
 #define SMAP_ACCESS_CREATE_PROCFS _IOW(SMAP_ACCESS_MAGIC, 6, struct UserInfo)
 #define SMAP_ACCESS_GET_NR_LOCAL_NUMA _IOR(SMAP_ACCESS_MAGIC, 7, int)
@@ -81,9 +87,8 @@ struct SmapScanCpuRange {
 int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
 int AccessIoctlRemovePid(int len, struct AccessRemovePidPayload *payload);
 int AccessIoctlRemoveAllPid(void);
-int AccessIoctlWalkPagemap(size_t *len);
+int AccessIoctlGetPidPageNum(struct AccessPidPageNumMsg *msg);
 int AccessIoctlCreateProcfs(struct UserInfo *ui);
-int AccessRead(size_t len, char *buf);
 void IoctlUpdateUbDmaAvail(uint32_t value);
 void IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
 

@@ -11,6 +11,7 @@
 #include <linux/limits.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
+#include <linux/poll.h>
 #include <linux/pid.h>
 #include <linux/namei.h>
 #include <linux/sizes.h>
@@ -28,15 +29,12 @@
 #define NODE_PATH "/dev/smap_node%d"
 
 #define VM_MEMSLOT_PRIOR_THRE (3 * (1 << GB_TO_NORMAL_PAGE_SHIFT))
-#define SEC_TO_MS 1000
 #define SCAN_TIMES_NEEDED_BY_NEW_PID 2
 #define DEFAULT_PERIOD_MS 50
 
 struct access_pid_struct ap_data = {
 	.list = LIST_HEAD_INIT(ap_data.list),
 	.lock = __RWSEM_INITIALIZER(ap_data.lock),
-	.state_lock = __SPIN_LOCK_UNLOCKED(ap_data.state_lock),
-	.state_flag = AP_STATE_WALK,
 };
 
 void destroy_access_pid(struct access_pid *elem)
@@ -282,8 +280,9 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 		}
 
 		u8 flags = 0;
-		/* 填充freq */
+		/* 填充freq，并在读取后清零，供下一轮扫描重新累计。 */
 		actc[len_cnt].freq = adev->access_bit_actc_data[acidx];
+		adev->access_bit_actc_data[acidx] = 0;
 
 		/* 填充prior - 从priors获取 */
 		if (ap->info.vm_size && ap->info.priors) {
@@ -354,18 +353,16 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	u32 actc_len[SMAP_MAX_NUMNODES];
 
 	pr_debug("enter mem_freq_read\n");
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_FREQ)) {
-		len = -EAGAIN;
-		goto out;
-	}
-
 	down_read(&ap_data.lock);
+	if (!ap_state_is(ap, AP_STATE_FREQ_READY)) {
+		up_read(&ap_data.lock);
+		return -EAGAIN;
+	}
 	total_len = calc_process_page_number(ap) * sizeof(struct actc_data);
 	actc = kvmalloc(total_len, GFP_KERNEL);
 	if (!actc) {
-		len = -ENOMEM;
 		up_read(&ap_data.lock);
-		goto out;
+		return -ENOMEM;
 	}
 
 	len = -EINVAL;
@@ -388,27 +385,29 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 		len = -EFAULT;
 		goto out_free;
 	}
-	if (*ppos + cnt <= total_len)
-		*ppos += len;
+	*ppos += len;
+	if (*ppos == total_len)
+		ap_state_transition(ap, AP_STATE_FREQ_READY,
+				    AP_STATE_MIG_READY);
 out_free:
 	kvfree(actc);
 	up_read(&ap_data.lock);
-out:
-	if (len < 0) {
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ);
-	} else {
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ |
-						     AP_STATE_MIG);
-	}
 	return len;
+}
+
+static __poll_t mem_freq_poll(struct file *file, poll_table *wait)
+{
+	struct access_pid *ap = file->private_data;
+
+	poll_wait(file, &ap->wq, wait);
+	return ap_state_is(ap, AP_STATE_FREQ_READY) ? EPOLLIN : 0;
 }
 
 static const struct proc_ops ap_mem_freq_fops = {
 	.proc_open = mem_freq_open,
 	.proc_release = mem_freq_release,
 	.proc_read = mem_freq_read,
+	.proc_poll = mem_freq_poll,
 };
 
 static int create_procfs_freq(struct access_pid *ap)
@@ -495,7 +494,9 @@ int init_access_pid(struct access_add_pid_payload *payload,
 	ap->scan_time = payload->scan_time;
 	ap->ntimes = payload->ntimes;
 	ap->type = payload->type;
-	init_completion(&ap->work_done);
+	spin_lock_init(&ap->state_lock);
+	init_waitqueue_head(&ap->wq);
+	ap->state_flag = 0;
 	for (int i = 0; i < SMAP_MAX_NUMNODES; i++) {
 		ap->scan_count[i] = 0;
 		ap->page_num[i] = 0;
@@ -742,7 +743,7 @@ static int init_statistic_window(u8 ***sliding_windows, u32 duration,
 	u64 win_nr;
 	u8 **wins;
 	u64 i, j;
-	win_nr = (duration * SEC_TO_MS + scan_time - 1) / scan_time;
+	win_nr = (duration + scan_time - 1) / scan_time;
 	*windows_num = win_nr;
 	wins = vzalloc(win_nr * sizeof(u8 *));
 	if (!wins) {
@@ -928,7 +929,7 @@ int access_add_statistic_pid(int len, struct access_add_pid_payload *payload,
 	for (i = 0; i < len; i++) {
 		if (payload[i].type != STATISTIC_SCAN)
 			continue;
-		if (payload[i].duration > MAX_SCAN_DURATION_SEC) {
+		if (payload[i].duration > MAX_SCAN_DURATION_MS) {
 			pr_err("invalid scan duration: %u of pid: %d passed to add statistic access tracking\n",
 			       payload[i].duration, payload[i].pid);
 			return -EINVAL;
@@ -970,17 +971,8 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 	/* move all new pids to ap_data.list */
 	list_for_each_entry_safe(ap, tmp, tmp_head, node) {
 		ap->cur_times = 0;
-		if (access_scan_enabled()) {
-			submit_one_work(ap);
-		} else {
-			/* Disable/migrate 窗口内新加的 pid 不提交扫描，留在
-			 * ap_data.list 等下次 enable 由 submit_scan_works 拉起，
-			 * 避免扫描与 migrate 的 paddr_bm 重分配竞态。
-			 * 同时 complete(work_done) 使 completion_done() 返回
-			 * true，避免 disable 误判 -EBUSY。
-			 */
-			complete(&ap->work_done);
-		}
+		/* Every new PID owns an independent scan/migrate cycle. */
+		submit_one_work(ap);
 		list_move_tail(&ap->node, &ap_data.list);
 	}
 	up_write(&ap_data.lock);
@@ -1345,10 +1337,6 @@ static int check_parameters_and_state(u64 len, u64 *addr)
 		pr_err("invalid length or address passed to check\n");
 		return -EINVAL;
 	}
-	if (!check_and_clear_ap_state(&ap_data, AP_STATE_MIG)) {
-		pr_err("ap_data is a state that not allowed to migrate\n");
-		return -EAGAIN;
-	}
 	return 0;
 }
 
@@ -1414,11 +1402,13 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 	if (!found) {
 		pr_err("invalid pid: %d passed to convert position to PA\n",
 		       pid);
-		set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-						     AP_STATE_FREQ |
-						     AP_STATE_MIG);
 		up_read(&ap_data.lock);
 		return -EINVAL;
+	}
+	if (!ap_state_is(ap, AP_STATE_MIG_READY)) {
+		up_read(&ap_data.lock);
+		pr_err("pid %d is in a state that not allowed to migrate\n", pid);
+		return -EAGAIN;
 	}
 
 	pr_debug("%llu addresses of pid: %d on node%d has been converted\n",
@@ -1428,8 +1418,6 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 	}
 
 	up_read(&ap_data.lock);
-	set_ap_whole_state(&ap_data, AP_STATE_WALK | AP_STATE_READ |
-					     AP_STATE_FREQ | AP_STATE_MIG);
 	return 0;
 }
 EXPORT_SYMBOL(convert_pos_to_paddr_sorted);
