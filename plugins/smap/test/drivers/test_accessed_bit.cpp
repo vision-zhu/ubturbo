@@ -962,6 +962,7 @@ TEST_F(AccessedBitTest, GetNumaIdByPaddrNoOnlinePage)
 
 extern "C" struct access_tracking_dev *get_access_tracking_dev(int node_id);
 extern "C" void actc_data_update(int nid, u64 pa_index);
+extern struct list_head access_dev;
 TEST_F(AccessedBitTest, ActcDataUpdateAdevNull)
 {
     /* get_access_tracking_dev is static inline, cannot be mocked.
@@ -983,9 +984,36 @@ TEST_F(AccessedBitTest, ActcDataUpdateIncrementSuccess)
     actc_data_update(0, 50);
 }
 
+TEST_F(AccessedBitTest, ActcDataUpdateHistogramDeviceSaturates)
+{
+    struct access_tracking_dev adev = {};
+    actc_t freq[1] = {U8_MAX - 1};
+
+    adev.node = 1;
+    adev.is_hist = true;
+    adev.page_count = 1;
+    adev.access_bit_actc_data = freq;
+    INIT_LIST_HEAD(&access_dev);
+    list_add(&adev.list, &access_dev);
+
+    actc_data_update(1, 0);
+    EXPECT_EQ(U8_MAX, freq[0]);
+    actc_data_update(1, 0);
+    EXPECT_EQ(U8_MAX, freq[0]);
+
+    list_del(&adev.list);
+}
+
 // ========== DT supplement: actc_data_add_fast ==========
 
 extern "C" void actc_data_add_fast(phys_addr_t paddr, u32 page_size);
+
+static int calc_paddr_acidx_set_index_zero(u64 pa, int nid, u64 *index, int page_size)
+{
+    *index = 0;
+    return 0;
+}
+
 TEST_F(AccessedBitTest, ActcDataAddFastNumaNoNode)
 {
     MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(NUMA_NO_NODE));
@@ -999,6 +1027,30 @@ TEST_F(AccessedBitTest, ActcDataAddFastCalcAcpiSuccess)
     MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(0));
     MOCKER(calc_paddr_acidx_acpi_known_nid).stubs().will(returnValue(0));
     actc_data_add_fast(0x1000, PAGE_SIZE_4K);
+}
+
+TEST_F(AccessedBitTest, ActcDataAddFastUpdatesHistogramDevice)
+{
+    struct access_tracking_dev adev = {};
+    actc_t freq[1] = {10};
+    int saved_nr_local_numa = nr_local_numa;
+
+    adev.node = 0;
+    adev.is_hist = true;
+    adev.page_count = 1;
+    adev.access_bit_actc_data = freq;
+    INIT_LIST_HEAD(&access_dev);
+    list_add(&adev.list, &access_dev);
+    nr_local_numa = 1;
+    MOCKER(get_numa_id_by_paddr).stubs().will(returnValue(0));
+    MOCKER(calc_paddr_acidx_acpi_known_nid)
+        .stubs().will(invoke(calc_paddr_acidx_set_index_zero));
+
+    actc_data_add_fast(0x1000, PAGE_SIZE_4K);
+    EXPECT_EQ(11, freq[0]);
+
+    nr_local_numa = saved_nr_local_numa;
+    list_del(&adev.list);
 }
 
 TEST_F(AccessedBitTest, ActcDataAddFastCalcIomemFallback)
@@ -1769,4 +1821,3 @@ TEST_F(AccessedBitTest, ProcessMemslotPagesWalkError)
     EXPECT_EQ(-EAGAIN, ret);
     GlobalMockObject::verify();
 }
-

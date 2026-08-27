@@ -801,6 +801,7 @@ TEST_F(HistOpsTest, update_actc_direct_to_hdev)
     hdev.is_hist = true;
     hdev.page_count = 10;
     hdev.access_bit_actc_data = (actc_t *)calloc(10, sizeof(actc_t));
+    hdev.access_bit_actc_data[0] = 1;
     init_rwsem(&hdev.buffer_lock);
 
     /* Setup ram_segment list */
@@ -818,9 +819,9 @@ TEST_F(HistOpsTest, update_actc_direct_to_hdev)
     g_smap_hist_dev.freq_register_cnt = 16384;
     update_actc_direct(&rmem_info, &scan_seg, freq_buffer, 4, STS_SIZE_4K);
 
-    /* Verify: access_bit_actc_data should be updated with compress_freq(freq) */
+    /* Verify: hardware compressed frequencies accumulate into existing data. */
     /* freq 100/200/300/400 -> floor(sqrt) = 10/14/17/20 (sum < U8_MAX) */
-    EXPECT_EQ(10, hdev.access_bit_actc_data[0]);
+    EXPECT_EQ(11, hdev.access_bit_actc_data[0]);
     EXPECT_EQ(14, hdev.access_bit_actc_data[1]);
     EXPECT_EQ(17, hdev.access_bit_actc_data[2]);
     EXPECT_EQ(20, hdev.access_bit_actc_data[3]);
