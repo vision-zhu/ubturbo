@@ -1,67 +1,46 @@
 # RMRS
 
-<p > English | <a href="README.md">简体中文</a>
+[简体中文](README.md) | [English](README_EN.md)
 
-## Project Introduction
+RMRS is a resource migration and scheduling plugin that runs in the UBTurbo daemon. For virtual-machine and
+container workloads, it calculates migration plans from requests, NUMA capacity, and page-access information, then
+uses SMAP to migrate out, migrate back, or roll back memory.
 
-RMRS is an open-source memory migration tool in the form of a plugin of the UBTurbo framework. Working with OBMM and leveraging the underlying SMAP, RMRS provides decision-making and execution capabilities for migrating virtual machines to remote memory and migrating them back.
+RMRS does not move physical pages itself and does not authorize caller-supplied PIDs. SMAP performs page scanning
+and migration, while a trusted resource manager must provide the PID and NUMA information.
 
-For example, in virtualization scenarios, if the local NUMA memory is insufficient during virtual machine creation, the local memory of virtual machines can be migrated to remote memory.
-In such cases, RMRS determines how many local virtual machines need to be migrated to remote memory and invokes SMAP to perform the migration. RMRS also supports rollback of memory migration when virtual machine creation fails or other rollback scenarios occur. In addition, in scenarios such as when a virtual machine is destroyed, the service side may invoke the memory return function. The RMRS can determine whether all virtual machines on remote NUMA nodes can be migrated back to local memory and perform the migration if needed.
+## Capabilities
 
-Migration operations are executed by invoking SMAP, which periodically collects statistics on cold and hot memory to ensure controllable performance of applications on virtual machines that access remote memory.
+- Migration planning for multiple processes or virtual machines.
+- Migration execution and rollback of borrowed memory.
+- Return feasibility checks and migration back.
+- Process and NUMA memory information collection.
+- An optional UCache path controlled by RMRS configuration.
 
-## Directory Structure
+## Architecture
 
-```sh
-├── doc                             # Documentation
-├── src
-│   ├── include                     # Global header files
-│   └── ubturbo_plugin
-│       ├── common                  # Common functions
-│       ├── conf                    # Configuration file
-│       ├── export                  # Collection module
-│       ├── include                 # Header files
-│       ├── intranode_strategy      # Migration module
-│       ├── message                 # Message module
-│       ├── serialization           # Serialization module
-│       └── ucache                  # ucache module
-```
+![RMRS decision and execution flow](docs/images/rmrs-workflow.svg)
 
-## Project Architecture
+See the [architecture document](docs/architecture.md) for details.
 
-**RMRS layered architecture:**
+## Build and enable
 
-The **UBS RMRS** is deployed in the UBS Engine. The agent on each compute node is only responsible for data collection and message forwarding. The active node serves as the functional entry and provides interfaces for borrowing, migrating out, returning, and rolling back fragmented memory. It is responsible for managing fragmented memory between nodes.
-The **RMRS** is deployed in the UBTurbo of each compute node. Based on its own resource collection, it provides virtual machine migration-out/migration-back policies in fragmentation scenarios and uses the SMAP migration capability to migrate virtual machines out and back.
-
-# Quick Start
-
-## Prerequisites
-
-- Install and start the libvirt service.
-
-  ```bash
-  yum install -y qemu*
-  yum install -y libvirt*
-  systemctl start libvirtd
-  ```
-
-- Install and start the UBTurbo service.
-
-- Configure obmm before installing RMRS because RMRS depends on obmm to generate remote NUMA.
-
-- Install SMAP because RMRS requires SMAP's capabilities of memory migration and hot data identification.
-
-## RMRS Compilation
-
-The RMRS plugin is integrated in UBTurbo by default. For details about how to install, deploy, and use the plugin, see [UBTurbo Doc](../../../doc/).
-
-## RMRS Activation
-
-Check whether the following option in the `/opt/ubturbo/conf/ubturbo_plugin_admission.conf` file is enabled:
+RMRS is built by the top-level project:
 
 ```bash
-# The code value must be greater than 200.
-rmrs=777
+cd ../..
+git submodule update --init --recursive
+./build.sh
 ```
+
+After installing `librmrs_ubturbo_plugin.so` and `plugin_rmrs.conf`, enable `rmrs=777` in
+`/opt/ubturbo/conf/ubturbo_plugin_admission.conf` and restart UBTurbo.
+
+## Documentation
+
+- [User guide](docs/user_guide.md)
+- [Architecture](docs/architecture.md)
+- [API reference](docs/api_reference.md)
+- [UBTurbo documentation](../../docs/user_guide.md)
+
+Detailed documents are maintained in Chinese; this README is the synchronized English entry.

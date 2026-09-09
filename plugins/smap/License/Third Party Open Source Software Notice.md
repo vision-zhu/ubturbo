@@ -1,14 +1,16 @@
+# Third Party Open Source Software Notice
+
 Please note we provide an open source software notice for the third party open source software along with this software and/or this software component contributed by openEuler (in the following just “this SOFTWARE”). The open source software licenses are granted by the respective right holders.
 
-## **Warranty Disclaimer**
+## Warranty Disclaimer
 
 **The open source software in this software is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the applicable licenses for more details.**
 
-## **Copyright Notice and License Texts **
+## Copyright Notice and License Texts
 
 Software: openeuler/kernel 6.6.0
 
-**Copyright notice: **
+**Copyright notice:**
 (C) 2007 Rafael J. Wysocki <rjw@sisk.pl>, GPL
 (C) 2011 MyungJoo Ham <myungjoo.ham@samsung.com>, GPL
 (C) Copyright 2013, 2015 Linaro Limited Licensed under the GPL
@@ -49,7 +51,7 @@ Rusty Russell (C) 2000 -- This code is GPL.
 Rusty Russell (C)2000 -- This code is GPL.
 portions Copyright 2005, Red Hat, Inc., Ingo Molnar Released under the General Public License (GPL).
 
-## **License:** The GPL v2 License
+## License: The GPL v2 License
 
 Valid-License-Identifier: GPL-2.0
 Valid-License-Identifier: GPL-2.0-only

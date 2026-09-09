@@ -62,7 +62,7 @@ cd plugins/smap/test && sh run_dt.sh
 ```
 
 | Test binary | Scope |
-|-------------|-------|
+| --- | --- |
 | `ubturbo_ut` | UBTurbo core modules (config, log, ipc, plugin, smap) |
 | `rmrs_ut` | RMRS plugin (migrate, smap_helper, ucache) |
 | `smap_dt` | SMAP plugin (drivers, tiering, user, ucache) |
@@ -96,7 +96,7 @@ cd plugins/smap/test && sh run_dt.sh
 
 ## Architecture
 
-```
+```text
 src/
 ├── include/        # Internal shared headers
 ├── config/         # Config module (parses ubturbo.conf etc.)
@@ -117,7 +117,7 @@ plugins/
 
 3rdparty/           # libboundscheck, rapidjson (git submodules)
 conf/               # ubturbo.conf, ubturbo_plugin_admission.conf
-doc/                # Documentation and architecture diagrams
+docs/               # Documentation and architecture diagrams
 test/
 ├── 3rdparty/       # googletest, mockcpp (submodules)
 └── testcase/       # Unit tests -> ubturbo_ut, rmrs_ut
