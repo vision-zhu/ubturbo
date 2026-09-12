@@ -1,117 +1,192 @@
-# UBTurbo
+<div align="center">
 
-<p > English | <a href="README.md">简体中文</a> </p>
+<h1><img src="docs/images/ubturbo-logo.png" alt="UBTurbo" width="50%" /></h1>
 
-## Project Overview
+In-node resource management and tiered-memory scheduling for openEuler
 
-UBTurbo is an open source intra-node resource management framework. It provides configuration reading, plugin loading, log printing, and IPC communication capabilities, and integrates the SMAP capability to provide basic multi-level memory scheduling services.
+[![License](https://img.shields.io/badge/license-MulanPSL--2.0-orange.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-openEuler%20aarch64-blue.svg)](#software-and-hardware-compatibility)
+[![Language](https://img.shields.io/badge/language-C%20%7C%20C%2B%2B-lightgrey.svg)](CMakeLists.txt)
 
-For example, in virtualization scenarios, the RMRS memory migration tool is developed based on the UBTurbo framework and runs in the UBTurbo process. It provides memory migration decision-making and execution services through the IPC and SMAP capabilities. External processes use the UBTurbo client to send instructions and message flows to the RMRS. The configuration items of the RMRS are stored in the configuration file and can be obtained through the configuration reading function of the UBTurbo. In addition, logs can be printed using the UBTurbo framework.
+[简体中文](README.md) | [English](README_EN.md)
 
-## Directory Structure
+</div>
 
-```sh
-UBTURBO/
-├── 3rdparty                    // Third-party source code library
-├── build                       // Project script
-├── conf                        // Configuration file
-├── doc                         // Documentation
-├── include                     // Global header file
-├── plugins                     // UBTurbo plugin library
-├── src                         
-│   ├── include                 // Header file
-│   ├── config                  // Configuration module
-│   ├── ipc                     // Communication module
-│   ├── log                     // Log module
-│   ├── main                    // UBTurbo main
-│   ├── plugin                  // Plugin module
-│   ├── smap                    // SMAP encoding/decoding
-│   ├── utils                   // Tool
-└── test
-    ├── 3rdparty                // Third-party test library
-    └── testcase                // Test case
+UBTurbo is an in-node resource-management framework for openEuler. It provides configuration loading, dynamic
+plugin management, asynchronous logging, and Unix Domain Socket (UDS) IPC. Its SMAP integration adds page scanning
+and migration for tiered memory, while services such as RMRS and UCache run as plugins in the UBTurbo daemon.
+
+> [!IMPORTANT]
+> UBTurbo currently supports **aarch64 only**. SMAP, UCache, and UBDMA contain kernel modules; the build environment
+> must use a kernel compatible with the runtime environment.
+
+## Project updates
+
+- The current package version is `1.1.1`; `ubturbo.spec` and the CPack configuration are the authoritative sources.
+- The documentation is organized by audience and task. Start from the [documentation center](docs/README.md).
+- See the [release notes](docs/release_notes.md) for current capabilities, known limitations, and release-maintenance
+  requirements.
+
+## Overview
+
+UBTurbo uses a daemon as its runtime, plugins as capability extensions, and UDS as the local invocation channel.
+The framework manages configuration, logging, lifecycle, and service registration. RMRS, SMAP, UCache, and UBDMA
+provide resource decisions, hot/cold page identification, and page migration.
+
+In a typical deployment, a cluster resource manager sends migration requests to RMRS through the client SDK. RMRS
+uses SMAP to scan and migrate pages, while UBTurbo provides shared configuration and logging throughout the process.
+
+## Core capabilities
+
+- Ordered lifecycle management for configuration, logging, SMAP, plugins, and IPC.
+- Runtime plugin loading through a common initialization and deinitialization contract.
+- A client SDK that invokes daemon and plugin services over local UDS IPC.
+- Hot/cold page identification and page migration across local and remote NUMA nodes through SMAP.
+- RMRS migration decisions and execution for virtual-machine and container scenarios.
+
+## Architecture
+
+![UBTurbo components and data flow](docs/images/ubturbo-architecture.svg)
+
+External processes link `libubturbo_client.so` and invoke registered services over UDS. The daemon loads RMRS,
+UCache, and other admitted plugins, while its SMAP adapter loads `libsmap.so` and connects to the SMAP user-space
+policy and kernel modules. See the [architecture document](docs/architecture.md) for the authoritative description.
+
+## Repository layout
+
+```text
+├── 3rdparty/          # Third-party dependencies
+├── conf/              # Daemon and plugin configuration
+├── docs/              # Project documentation
+├── include/           # Public headers
+├── plugins/           # RMRS, SMAP, UBDMA, and UCache plugins
+├── src/               # Framework, client SDK, and shared module sources
+├── test/              # UBTurbo and RMRS unit tests
+├── tools/             # Operations and capability invocation tools
+├── CMakeLists.txt
+└── build.sh
 ```
 
-## Constraints
+## Software and hardware compatibility
 
-- When using UBTurbo to borrow memory, ensure that the security of the source memory address is the same as that of the destination memory address.
-- The user permissions of the VMs or containers to be migrated must be the same as those of the remote memory.
-- To use UBTurbo, you need to add the user to the UBTurbo owner group. The added user must have the permissions of the node memory resource administrator to use the UBTurbo memory migration functionality. During memory migration, PIDs are managed and delivered by the cluster resource management center. The UBTurbo component cannot verify the validity of PIDs. Therefore, developers need to consider the security of transmission and storage of parameters such as PID, srcNid, and destNid in the overall solution.
+| Category | Supported scope |
+| -------- | --------------- |
+| CPU architecture | aarch64 |
+| Operating system | openEuler 24.03 LTS releases |
+| Build toolchain | CMake 3.22+ and a GCC toolchain with C++17/C11 support |
+| RMRS dependency | `libvirt-devel` |
+| SMAP dependencies | Matching `kernel-devel`, user-space library, and kernel modules |
 
-## Project Architecture
+> [!NOTE]
+> CMake reads `/etc/openEuler-release`; direct builds on x86 or other Linux distributions are not currently
+> supported. See [Installing SMAP](docs/installation.md#安装-smap) for its modules, load order, and runtime settings.
 
-![UBTURBO_ARCHITECTURE.png](./doc/images/UBTURBO_ARCHITECTURE.png "UBTURBO_ARCHITECTURE")
+## Quick start
 
-The **UBTurbo** component provides the following services:
+Requirements:
 
-- **UBTurboSDK**: SDK provided by the UBTurbo service. As an independent SDK, it provides the UBTurbo capability for external modules and components through interfaces.
-- **Common**: Common component that provides some common capabilities.
-  - **Log**: Log module.
-  - **Config**: Configuration module that parses the configuration information of the UBTurbo service.
-  - **Daemon**: UBTurbo process that provides process services.
-- **MessageServer**: Receives requests from the UBTurboSDK to the UBTurboServer through the UDS to enable the acceleration capability.
-- **RMRS**: Resource scheduling module that schedules memory resources of VMs and containers.
-- **SMAP**: Hierarchical memory enabling module that enables hierarchical memory capabilities through page scanning and migration.
-
-Key technologies and solutions:
-
-1. **Configuration loading**: Reads **ubturbo.conf**, **ubturbo_plugin_admission.conf**, and the configuration file of each plugin from the **/opt/ubturbo/conf** directory.
-2. **Plugin loading**: Searches for the **.so** file in the specified directory; uses dlopen to load the plugin and, during plugin uninstallation, uses dlclose to close the dynamic library.
-3. **Process communication**: Uses the Unix domain socket mechanism to enable communication between processes on a node and provides connection-oriented reliable data transmission. Using the Reactor pattern, the server starts a thread to listen on a specified socket file. After accepting a client connection, it creates a new thread, calls a specified callback function, and sends the result back to the client.
-4. **Log management**:
-
-  - (1) **Asynchronous ring buffer**: An asynchronous ring buffer is used to implement asynchronous logging, preventing the main thread from being blocked.
-  - (2) **Lock mechanism**: An appropriate lock mechanism is used to ensure thread security in a multi-thread environment.
-  - (3) **Timestamp processing**: The system time function is used to obtain timestamp information.
-  - (4) **File operations**: APIs related to file operations are used to write and manage log files. Logs of the UBTurbo framework and each plugin are independent, with the maximum size of each log file being 200 MB. Log files are wrapped and a maximum of 10 files can be stored for each plugin.
-
-# Quick Start
-
-## Prerequisites
-
-- UBTurbo integrates the SMAP functionality. To use such functionality, you need to install SMAP in advance.
-
-- The **/dev/shm/smap_config** file stores Information such as NUMA and process configurations. If the UBTurbo process needs to switch to another user, delete this file first.
-
-- The **/dev/shm/ubturbo_page_type.dat** file stores the SMAP initialization type information. If the UBTurbo process needs to switch to another user or scenario (for example, from a virtualization scenario to a big data scenario), delete this file first.
-
-- By default, no plug-in is enabled for UBTurbo. You can enable the plug-ins by uncommenting them in the **ubturbo_plugin_admission.conf** file based on the service scenario.
-
-- Before enabling a plug-in in the **ubturbo_plugin_admission.conf** file, ensure that it has been installed and configured. Otherwise, UBTurbo and the corresponding plug-in will fail to start.
-
-## UBTurbo Compilation
-
-Run the following commands in the root directory:
+- An aarch64 server running an openEuler 24.03 LTS release.
+- CMake 3.22 or later and a GCC toolchain with C++17/C11 support.
+- `libvirt-devel` for RMRS. Running SMAP additionally requires matching kernel development files and platform
+  dependencies.
 
 ```bash
+sudo dnf install -y make gcc gcc-c++ cmake ninja-build dos2unix chrpath \
+    patchelf libboundscheck libvirt-devel findutils git
 git submodule update --init --recursive
 dos2unix build.sh
-sh build.sh
+./build.sh
 ```
 
-Compilation products:
+Default outputs are `dist/release/bin/ub_turbo_exec`, `dist/release/lib/libubturbo_client.so`, and the configuration
+files under `dist/release/conf/`. Install the SMAP user-space library and kernel modules before starting the complete
+service. See the [installation guide](docs/installation.md).
 
-- `ub_turbo_exec`, a binary file in the **dist/release/bin** directory
+### Start the service and invoke IPC capabilities
 
-- `libubturbo_client.so`, a library file in the **dist/release/lib** directory
-
-- `ubturbo_plugin_admission.conf` and `ubturbo.conf`, configuration files in the **dist/release/conf** directory
-
-## UBTurbo Running
-
-- Configure the **ubturbo.conf** file for log level control.
-
-| No.| Parameter| Description| Value| Configuration Node| Application Scenario|
-|-----|-----|-----|-----|-----|-----|
-| 1 | log.level| Log level| Default value: **INFO**. Value range: **DEBUG**, **INFO**, **WARN**, **ERROR**, and **CRIT**| All nodes| Used for determining the log output level of the main process and plug-ins.|
-
-- Run the following commands while maintaining the relative positions of the preceding compilation products:
+After installation, start the service and confirm that its default UDS file exists:
 
 ```bash
-chmod +x ub_turbo_exec
-./ub_turbo_exec
+sudo systemctl start ubturbo
+test -S /opt/ubturbo/ubturbo_ipc
 ```
 
-# Illustrate
+The Python client under `tools/ubturbo_ipc/` invokes SMAP capabilities through UBTurbo without loading `libsmap.so`
+directly into the caller. For example, start 4K (container) mode and query its status:
 
-This open-source project is not a Huawei product. Huawei offers only limited support.
+```bash
+python3 tools/ubturbo_ipc/ubturbo_ipc.py start 0
+python3 tools/ubturbo_ipc/ubturbo_ipc.py is_running
+```
+
+A `pageType` of `0` selects 4K mode, while `1` selects 2M (virtual-machine) mode. See the
+[IPC client guide](tools/ubturbo_ipc/README.md) for all commands, argument formats, and security notes.
+
+Run UBTurbo and RMRS unit tests with:
+
+```bash
+./build.sh -t test
+```
+
+Run SMAP tests separately:
+
+```bash
+cd plugins/smap/test
+sh run_dt.sh
+```
+
+## Documentation
+
+- [Documentation center](docs/README.md)
+- [Installation](docs/installation.md)
+- [Operations and usage](docs/user_guide.md)
+- [Configuration reference](docs/configuration.md)
+- [Architecture](docs/architecture.md)
+- [Developer guide](docs/developer_guide.md)
+- [API reference](docs/api_reference.md)
+- [Security](docs/security.md)
+- [Release notes](docs/release_notes.md)
+- [RMRS](docs/rmrs/README_EN.md)
+- [SMAP](docs/smap/README_EN.md)
+- [UBDMA](docs/ubdma/README.md)
+- [UCache](docs/ucache/README.md)
+
+The detailed documents are maintained primarily in Chinese. The Chinese README also includes the project roadmap
+and links to the performance-testing methodology.
+
+## FAQ
+
+**Why does the build fail on x86 or a non-openEuler distribution?**
+
+The current build supports aarch64 openEuler only and reads `/etc/openEuler-release` during CMake configuration.
+
+**Why does the daemon fail after a plugin is enabled?**
+
+Make sure the plugin library is installed and its admission entry and module code are valid. See the
+[user guide](docs/user_guide.md#常见故障).
+
+**Why does an SMAP module fail to load?**
+
+The kernel modules must match the running kernel and be loaded in dependency order. See the
+[installation guide](docs/installation.md#安装-smap).
+
+## Contributing
+
+Before submitting a change, run the relevant build, tests, clang-format, and clang-tidy checks, and add tests for
+behavior changes. Follow the repository's existing commit prefixes, such as `Feature:`, `fix:`, `doc:`, or a
+component name.
+
+## Security
+
+UBTurbo does not validate the business ownership or validity of a PID supplied by a caller. PIDs and source or
+destination NUMA identifiers must be delivered by a trusted cluster resource manager. Do not place credentials,
+private keys, sensitive addresses, or personal information in configuration files or logs.
+
+## License
+
+See [LICENSE](LICENSE). Individual kernel components and third-party dependencies may use different licenses; refer
+to their component-level notices and the [third-party component list](docs/third_party_components.md).
+
+## Support
+
+This open-source project is not a commercial product and provides community support only.
