@@ -112,6 +112,8 @@ Use the following guides to get started:
 
 - [Build and installation](docs/installation.md): dependencies, source builds, RPM installation, SMAP loading, and
   service verification.
+- [Build and unit testing](docs/unit_testing.md): step-by-step repository build and UBTurbo, RMRS, and SMAP unit
+  test instructions.
 - [Service usage](docs/user_guide.md): plugin configuration, service startup, status checks, and troubleshooting.
 - [Examples](docs/tutorial.md): invoking the Client SDK, RMRS, and SMAP capabilities.
 

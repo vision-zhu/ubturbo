@@ -111,35 +111,9 @@ UBTURBO_LOG_INFO("example", 779) << "plugin initialized";
 
 ## 测试
 
-构建并运行 UBTurbo 与 RMRS 测试：
-
-```bash
-./build.sh -t test
-```
-
-仅构建测试：
-
-```bash
-./build.sh ut --skip-run-tests
-```
-
-执行单个用例：
-
-```bash
-./test/build/ubturbo_ut --gtest_filter='SuiteName.CaseName'
-./test/build/rmrs_ut --gtest_filter='SuiteName.CaseName'
-```
-
-SMAP 测试使用独立构建流程：
-
-```bash
-cd plugins/smap/test
-sh run_dt.sh
-```
-
-测试脚本还会生成覆盖率报告。`lcov` 不是 openEuler 24.03 官方仓库的默认包；即使测试二进制已经
-通过，缺少或不兼容的 `lcov`/`genhtml` 仍可能使完整脚本返回失败。排查时应同时查看 gtest 结果和
-覆盖率阶段日志。
+UBTurbo、RMRS 和 SMAP 单元测试的环境准备、完整执行命令、结果判断及覆盖率问题处理，见
+[构建与单元测试指南](unit_testing.md)。修改代码后应运行与变更范围相关的测试；提交前应完成指南中的
+全部测试。
 
 ## 提交检查
 

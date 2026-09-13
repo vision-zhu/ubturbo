@@ -8,6 +8,7 @@
 | 文档 | 内容 |
 | ---- | ---- |
 | [安装指南](installation.md) | 构建、RPM、SMAP 安装和验证 |
+| [构建与单元测试指南](unit_testing.md) | 源码构建以及 UBTurbo、RMRS、SMAP 单元测试 |
 | [用户指南](user_guide.md) | 配置、服务管理、运行检查和排障 |
 | [配置参考](configuration.md) | 框架及插件配置项 |
 | [架构设计](architecture.md) | 系统边界、生命周期和数据流 |

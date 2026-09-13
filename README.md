@@ -97,6 +97,7 @@ UBTurbo 是一款开源的节点内资源管理框架，面向 openEuler aarch64
 请访问以下文档获取简易教程。
 
 - [编译安装](docs/installation.md)：介绍依赖准备、源码构建、RPM 安装、SMAP 加载和服务验证。
+- [构建与单元测试](docs/unit_testing.md)：按步骤编译仓库并运行 UBTurbo、RMRS 和 SMAP 单元测试。
 - [服务使用](docs/user_guide.md)：介绍配置插件、启动服务、检查状态和常见故障处理。
 - [样例执行](docs/tutorial.md)：介绍如何调用 Client SDK、RMRS 与 SMAP 能力。
 
