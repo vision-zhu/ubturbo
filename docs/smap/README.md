@@ -1,6 +1,6 @@
 # SMAP
 
-[简体中文](README.md) | [English](README_EN.md)
+[简体中文](README.md) | [English](readme_en.md)
 
 SMAP 是 UBTurbo 集成的多级内存扫描与页面迁移组件。它由 `libsmap.so` 用户态库以及扫描、迁移内核
 模块组成，支持 4K 普通进程和 2M 静态大页虚机场景。

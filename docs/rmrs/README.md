@@ -1,6 +1,6 @@
 # RMRS
 
-[简体中文](README.md) | [English](README_EN.md)
+[简体中文](README.md) | [English](readme_en.md)
 
 RMRS 是运行在 UBTurbo 守护进程中的资源迁移与调度插件。它面向虚机和容器场景，根据业务请求、
 NUMA 容量及页面冷热信息计算迁移方案，并通过 SMAP 执行迁出、迁回和回滚。

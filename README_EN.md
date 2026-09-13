@@ -138,7 +138,7 @@ Use the following guides to get started:
 
 ## 📌 FAQ
 
-See the [FAQ](docs/FAQ.md) for frequently asked questions.
+See the [FAQ](docs/faq.md) for frequently asked questions.
 
 ## 📝 Related Information
 

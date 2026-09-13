@@ -1,6 +1,6 @@
 # RMRS
 
-[简体中文](README.md) | [English](README_EN.md)
+[简体中文](README.md) | [English](readme_en.md)
 
 RMRS is a resource migration and scheduling plugin that runs in the UBTurbo daemon. For virtual-machine and
 container workloads, it calculates migration plans from requests, NUMA capacity, and page-access information, then

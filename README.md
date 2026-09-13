@@ -121,7 +121,7 @@ UBTurbo 是一款开源的节点内资源管理框架，面向 openEuler aarch64
 
 ## 📌 FAQ
 
-常见问题请参考：[FAQ](docs/FAQ.md)
+常见问题请参考：[FAQ](docs/faq.md)
 
 ## 📝 相关信息
 

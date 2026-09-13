@@ -1,6 +1,6 @@
 # SMAP
 
-[简体中文](README.md) | [English](README_EN.md)
+[简体中文](README.md) | [English](readme_en.md)
 
 SMAP is the tiered-memory scanning and page-migration component integrated by UBTurbo. It consists of the
 `libsmap.so` user-space library and kernel modules for access tracking and migration. It supports ordinary 4 KiB

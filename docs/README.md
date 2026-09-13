@@ -19,7 +19,7 @@
 | [权限机制迁移说明](ubturbo_capability_migration.md) | 从 sudo 辅助脚本迁移到 Linux capabilities 的设计与改造清单 |
 | [版本说明](release_notes.md) | 当前能力、限制和维护要求 |
 | [Roadmap](roadmap.md) | 当前版本、规划方向和维护原则 |
-| [FAQ](FAQ.md) | 构建、插件、SMAP、IPC 和测试常见问题 |
+| [FAQ](faq.md) | 构建、插件、SMAP、IPC 和测试常见问题 |
 
 ## 插件文档
 
@@ -33,7 +33,7 @@
 ## 维护约定
 
 - 插件文档统一放在 `docs/<plugin>/`，插件图片放在 `docs/<plugin>/images/`。
-- 文件和目录使用小写蛇形命名；组件首页统一命名为 `README.md`，顶层常见问题保留 `FAQ.md`。
+- 文件和目录使用小写蛇形命名；组件中文首页统一命名为 `README.md`，英文首页命名为 `readme_en.md`。
 - 文档使用相对链接，不引用旧的 `doc/` 或 `plugins/<plugin>/docs/` 路径。
 - 架构图优先使用可审查的 SVG，连线应从节点边界出入，不得穿过文字或无关框体。
 - 修改图片后应重新渲染，检查文字截断、线框重叠、箭头遮挡和画布裁切。
