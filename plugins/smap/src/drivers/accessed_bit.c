@@ -555,6 +555,7 @@ static void last_scan_update_page_flags(u64 pa, struct page *page, bool young,
 				     struct access_pid *ap)
 {
 	int nid = page_to_nid(page);
+	bool queued = false;
 
 	/*
 	 * End of period: update cold-period counter and
@@ -571,12 +572,14 @@ static void last_scan_update_page_flags(u64 pa, struct page *page, bool young,
 		if (PageAnon(page) &&
 		    smap_page_cold_periods_inc(page) >= cold_period_thresh &&
 		    !smap_cold_queue_enqueue(nid, PHYS_PFN(pa))) {
-			/* enqueued into cold_queue; skip bitmap */
+			/* The queue owns this page reference until drain. */
+			queued = true;
 		} else {
 			add_to_bm_page(pa, page, ap);
 		}
 	}
-	put_page(page);
+	if (!queued)
+		put_page(page);
 }
 
 static int hva_to_hpa_hugetlb(struct kvm *kvm, u64 host_va,
@@ -1816,9 +1819,6 @@ static void process_scan_results(struct pte_walk *pte_walk)
 			actc_data_update(entry->nid, pa_idx);
 		if (!is_last_scan)
 			continue;
-
-		add_to_bm_page_fast(entry->paddr, entry->nid, pa_idx,
-				    pte_walk->ap);
 
 		adev = get_access_tracking_dev(entry->nid);
 		if (!adev || pa_idx >= adev->page_count || adev->is_hist)

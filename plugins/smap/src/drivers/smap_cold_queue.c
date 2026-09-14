@@ -117,6 +117,18 @@ void smap_cold_queue_free(void)
 	int i;
 
 	for (i = 0; i < SMAP_MAX_NUMNODES; i++) {
+		struct smap_cold_queue *q = &smap_cold_numa_queue[i];
+
+		while (q->pfn && atomic_read(&q->count) > 0) {
+			struct page *page;
+			u64 pfn = q->pfn[q->head & SMAP_COLD_QUEUE_MAX_MASK];
+
+			q->head++;
+			atomic_dec(&q->count);
+			page = pfn_to_online_page(pfn);
+			if (page)
+				put_page(page);
+		}
 		vfree(smap_cold_numa_queue[i].pfn);
 		smap_cold_numa_queue[i].pfn = NULL;
 		smap_cold_numa_queue[i].head = 0;
@@ -136,9 +148,10 @@ void smap_cold_queue_free(void)
  * disabled), so no memory barrier is needed between the PFN store and
  * the atomic_inc(&count) commit.
  *
- * Return: 0 on success, -1 if the per-node ring is full or swap-out is
- * disabled via swap_enable; in both cases the caller records the page
- * in the bitmap (normal migration path) instead of swapping it out.
+ * The caller transfers one page reference to the queue on success. Return:
+ * 0 on success, -1 if the per-node ring is full or swap-out is disabled via
+ * swap_enable; on failure the caller retains its reference and records the
+ * page in the bitmap (normal migration path) instead of swapping it out.
  */
 int smap_cold_queue_enqueue(int nid, u64 pfn)
 {

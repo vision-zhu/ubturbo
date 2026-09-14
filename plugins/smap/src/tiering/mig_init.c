@@ -224,25 +224,34 @@ static bool is_migrate_msg_valid(struct migrate_msg *msg)
 	return true;
 }
 
-static struct folio *smap_get_folio(unsigned long pfn)
+/* The queue owns a reference to the page represented by @pfn. */
+static struct folio *smap_get_queued_folio(unsigned long pfn, int nid)
 {
 	struct page *page = pfn_to_online_page(pfn);
 	struct folio *folio;
 
-	if (!page || PageTail(page))
+	if (!page)
 		return NULL;
+	if (PageTail(page) || !PageAnon(page) || page_to_nid(page) != nid) {
+		put_page(page);
+		return NULL;
+	}
 
 	folio = page_folio(page);
 	if (folio_test_hugetlb(folio)) {
-		if (unlikely(page_folio(page) != folio))
-			folio = NULL;
-	} else {
-		if (!folio_test_lru(folio) || !folio_try_get(folio))
+		if (unlikely(page_folio(page) != folio)) {
+			put_page(page);
 			return NULL;
+		}
+	} else {
+		if (!folio_test_lru(folio)) {
+			put_page(page);
+			return NULL;
+		}
 		if (unlikely(page_folio(page) != folio ||
 			     !folio_test_lru(folio))) {
-			folio_put(folio);
-			folio = NULL;
+			put_page(page);
+			return NULL;
 		}
 	}
 	return folio;
@@ -272,6 +281,28 @@ static void drain_stats_log(int nid, const struct drain_stats *s)
 		nid, s->nr_total, s->nr_dequeued, s->nr_skip_lru,
 		s->nr_skip_isolated, s->nr_unevictable, s->nr_isolated,
 		s->nr_reclaimed);
+}
+
+static void smap_cold_queue_discard_entry(struct smap_cold_queue *q)
+{
+	while (atomic_read(&q->count) > 0) {
+		struct page *page;
+		u64 pfn = q->pfn[q->head & SMAP_COLD_QUEUE_MAX_MASK];
+
+		q->head++;
+		atomic_dec(&q->count);
+		page = pfn_to_online_page(pfn);
+		if (page)
+			put_page(page);
+	}
+}
+
+static void smap_cold_queue_discard_all(void)
+{
+	int nid;
+
+	for (nid = 0; nid < SMAP_MAX_NUMNODES; nid++)
+		smap_cold_queue_discard_entry(&smap_cold_numa_queue[nid]);
 }
 
 static u64 smap_cold_queue_drain_entry(int nid, struct smap_cold_queue *q,
@@ -312,7 +343,7 @@ static u64 smap_cold_queue_drain_entry(int nid, struct smap_cold_queue *q,
 		stats.nr_dequeued += dequeued;
 
 		for (i = 0; i < dequeued; i++) {
-			folio = smap_get_folio(batch[i]);
+			folio = smap_get_queued_folio(batch[i], nid);
 			if (!folio) {
 				stats.nr_skip_lru++;
 				continue;
@@ -321,8 +352,11 @@ static u64 smap_cold_queue_drain_entry(int nid, struct smap_cold_queue *q,
 			if (folio_test_hugetlb(folio)) {
 				if (!fp_isolate_hugetlb(folio, &folio_list)) {
 					stats.nr_skip_isolated++;
+					folio_put(folio);
 					continue;
 				}
+				/* isolate_hugetlb holds the isolation reference. */
+				folio_put(folio);
 			} else {
 				folio_clear_referenced(folio);
 				if (!fp_folio_isolate_lru(folio)) {
@@ -376,8 +410,10 @@ static int smap_cold_queue_drain(void)
 	 * drain path reclaims nothing. Return 0 so the periodic drain ioctl
 	 * does not warn.
 	 */
-	if (!READ_ONCE(swap_out_enable))
+	if (!READ_ONCE(swap_out_enable)) {
+		smap_cold_queue_discard_all();
 		return 0;
+	}
 
 	if (!fp_reclaim_pages || !fp_isolate_hugetlb || !fp_folio_putback_lru ||
 	    !fp_folio_isolate_lru) {
@@ -386,6 +422,7 @@ static int smap_cold_queue_drain(void)
 		       "folio_isolate_lru=%p)\n",
 		       fp_reclaim_pages, fp_isolate_hugetlb,
 		       fp_folio_putback_lru, fp_folio_isolate_lru);
+		smap_cold_queue_discard_all();
 		return -ENOSYS;
 	}
 

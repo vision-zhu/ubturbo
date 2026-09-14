@@ -54,8 +54,10 @@ int smap_swap_enable_sysfs_init(void);
 void smap_swap_enable_sysfs_exit(void);
 
 /*
- * Enqueue a PFN for swap-out. Returns 0 on success, -1 if the queue is
- * full or swap-out is disabled via swap_enable; the caller then records
+ * Enqueue a PFN for swap-out. The caller must hold a page reference. On
+ * success ownership of that reference transfers to the queue; on failure
+ * ownership remains with the caller. Returns 0 on success, -1 if the queue
+ * is full or swap-out is disabled via swap_enable; the caller then records
  * the page in the bitmap (normal migration path) instead. Must be called
  * only during the scan phase (producers only).
  */
