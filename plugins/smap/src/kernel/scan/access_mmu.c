@@ -409,6 +409,39 @@ static int pagemap_pte_range(pte_t *pte, unsigned long addr, unsigned long next,
 	return add_to_bm(addr, &pme, pm);
 }
 
+/*
+ * Without ->pmd_entry walk_pmd_range() splits every PMD-mapped THP before
+ * calling ->pte_entry. Report PMD-mapped THPs at 4K granularity instead,
+ * like fs/proc's pagemap_pmd_range(), and do not descend.
+ */
+static int pagemap_pmd_range(pmd_t *pmd, unsigned long addr, unsigned long next,
+			     struct mm_walk *walk)
+{
+	struct pagemapread *pm = walk->private;
+	pagemap_entry_t pme;
+	spinlock_t *ptl;
+	pmd_t pmdv;
+	u64 frame;
+	int err = 0;
+
+	ptl = pmd_trans_huge_lock(pmd, walk->vma);
+	if (!ptl)
+		return 0;
+	pmdv = *pmd;
+	if (pmd_present(pmdv) && pmd_trans_huge(pmdv)) {
+		frame = pmd_pfn(pmdv) + ((addr & ~PMD_MASK) >> PAGE_SHIFT);
+		for (; addr < next; addr += PAGE_SIZE, frame++) {
+			pme = make_pme(frame, PM_PRESENT);
+			err = add_to_bm(addr, &pme, pm);
+			if (err)
+				break;
+		}
+	}
+	spin_unlock(ptl);
+	walk->action = ACTION_CONTINUE;
+	return err;
+}
+
 static int pagemap_hugetlb_range(pte_t *ptep, unsigned long hmask,
 				 unsigned long addr, unsigned long end,
 				 struct mm_walk *walk)
@@ -434,6 +467,7 @@ static int pagemap_hugetlb_range(pte_t *ptep, unsigned long hmask,
 }
 
 static const struct mm_walk_ops pagemap_mm_ops = {
+	.pmd_entry = pagemap_pmd_range,
 	.pte_entry = pagemap_pte_range,
 };
 

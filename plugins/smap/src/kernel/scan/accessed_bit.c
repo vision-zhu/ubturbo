@@ -9,6 +9,7 @@
 #include <asm/stage2_pgtable.h>
 
 #include <linux/rmap.h>
+#include <linux/huge_mm.h>
 #include <linux/vmalloc.h>
 #include <linux/sort.h>
 #include <linux/kvm_host.h>
@@ -1433,24 +1434,17 @@ static int huge_vma_walk(struct mm_struct *mm, struct smap_vma_struct *vma,
 			 struct pte_walk *pte_walk,
 			 const struct mm_walk_ops *ops);
 
-static int fill_pte_va(pte_t *pte, unsigned long addr, unsigned long next,
-		       struct mm_walk *walk)
+static void fill_va_one(struct pte_walk *pte_walk, unsigned long addr,
+			phys_addr_t paddr)
 {
-	struct pte_walk *pte_walk = walk->private;
 	struct hva_info *hva_vec = pte_walk->hva_info;
 	int page_size = pte_walk->page_size;
 	int nid;
 	int ret;
 	u64 pa_index;
-	phys_addr_t paddr;
-	pte_t ptent = ptep_get(pte);
 
-	if (is_swap_pte(ptent) || !pte_present(ptent))
-		return 0;
-
-	paddr = (phys_addr_t)__pte_to_phys(ptent);
 	if (paddr == 0)
-		return 0;
+		return;
 
 	ret = calc_paddr_acidx_acpi(paddr, &nid, &pa_index, page_size);
 	if (ret == 0) {
@@ -1459,7 +1453,7 @@ static int fill_pte_va(pte_t *pte, unsigned long addr, unsigned long next,
 		hva_vec[pte_walk->index].va = addr;
 		hva_vec[pte_walk->index++].nid = nid;
 		pte_walk->nr_page[L1]++;
-		return 0;
+		return;
 	}
 
 	ret = calc_paddr_nid_iomem(paddr, &nid, page_size);
@@ -1472,10 +1466,49 @@ static int fill_pte_va(pte_t *pte, unsigned long addr, unsigned long next,
 	} else {
 		pr_debug("unable to calc %#llx nid\n", paddr);
 	}
+}
+
+static int fill_pte_va(pte_t *pte, unsigned long addr, unsigned long next,
+		       struct mm_walk *walk)
+{
+	pte_t ptent = ptep_get(pte);
+
+	if (is_swap_pte(ptent) || !pte_present(ptent))
+		return 0;
+
+	fill_va_one(walk->private, addr, (phys_addr_t)__pte_to_phys(ptent));
+	return 0;
+}
+
+/*
+ * A walker that only provides ->pte_entry makes walk_pmd_range() call
+ * split_huge_pmd() on every PMD-mapped THP, so each scan used to split all
+ * THPs of the target. Handle PMD-mapped THPs here at 4K granularity under
+ * the PMD lock and tell the walker not to descend (ACTION_CONTINUE).
+ */
+static int fill_pmd_va(pmd_t *pmd, unsigned long addr, unsigned long next,
+		       struct mm_walk *walk)
+{
+	spinlock_t *ptl;
+	pmd_t pmdv;
+	phys_addr_t paddr;
+
+	ptl = pmd_trans_huge_lock(pmd, walk->vma);
+	if (!ptl)
+		return 0;
+	pmdv = *pmd;
+	if (pmd_present(pmdv) && pmd_trans_huge(pmdv)) {
+		paddr = PFN_PHYS(pmd_pfn(pmdv)) + (addr & ~PMD_MASK);
+		for (; addr < next; addr += PAGE_SIZE, paddr += PAGE_SIZE)
+			fill_va_one(walk->private, addr, paddr);
+	}
+	spin_unlock(ptl);
+	walk->action = ACTION_CONTINUE;
 	return 0;
 }
 
 static const struct mm_walk_ops stat_ops = {
+	.pmd_entry = fill_pmd_va,
 	.pte_entry = fill_pte_va,
 };
 
@@ -1760,19 +1793,20 @@ static inline void smap_flush_tlb_mm(struct mm_struct *mm)
 	dsb(ish);
 }
 
-static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
-			   struct mm_walk *walk)
+/*
+ * Record one 4K scan result. Returns true when the caller must clear the
+ * accessed flag of the entry mapping @addr.
+ */
+static bool record_scan_result(struct pte_walk *pte_walk, unsigned long addr,
+			       phys_addr_t paddr, bool is_young)
 {
-	struct pte_walk *pte_walk = walk->private;
-	pte_t ptent = ptep_get(pte);
-	phys_addr_t paddr = (phys_addr_t)__pte_to_phys(ptent);
-	bool is_young = pte_young(ptent);
+	bool clear = false;
 
-	if (paddr == 0 || is_swap_pte(ptent) || !pte_present(ptent))
-		return 0;
+	if (paddr == 0)
+		return false;
 
 	if (pte_walk->scan_result_cnt >= SCAN_RESULT_CAPACITY)
-		return 0;
+		return false;
 
 	/* 64KiB group optimization: for NORMAL_SCAN, skip the rest of the group
 	 * when the first page is young.
@@ -1791,11 +1825,7 @@ static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 		if (pte_walk->type == STATISTIC_SCAN)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] =
 				addr;
-#ifdef OS_VENDOR_V1
-		__ptep_test_and_clear_young(pte);
-#else
-		__ptep_test_and_clear_young(NULL, 0, pte);
-#endif
+		clear = true;
 		pte_walk->flag = true;
 	}
 
@@ -1804,10 +1834,62 @@ save_res:
 	pte_walk->scan_results[pte_walk->scan_result_cnt].hot = is_young;
 	pte_walk->scan_result_cnt++;
 
+	return clear;
+}
+
+static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
+			   struct mm_walk *walk)
+{
+	pte_t ptent = ptep_get(pte);
+
+	if (is_swap_pte(ptent) || !pte_present(ptent))
+		return 0;
+
+	if (record_scan_result(walk->private, addr,
+			       (phys_addr_t)__pte_to_phys(ptent),
+			       pte_young(ptent))) {
+#ifdef OS_VENDOR_V1
+		__ptep_test_and_clear_young(pte);
+#else
+		__ptep_test_and_clear_young(NULL, 0, pte);
+#endif
+	}
+	return 0;
+}
+
+/* PMD-mapped THP: scan at 4K granularity without splitting it. */
+static int check_pmd_young(pmd_t *pmd, unsigned long addr, unsigned long next,
+			   struct mm_walk *walk)
+{
+	spinlock_t *ptl;
+	pmd_t pmdv;
+	phys_addr_t paddr;
+	bool clear = false;
+
+	ptl = pmd_trans_huge_lock(pmd, walk->vma);
+	if (!ptl)
+		return 0;
+	pmdv = *pmd;
+	if (pmd_present(pmdv) && pmd_trans_huge(pmdv)) {
+		paddr = PFN_PHYS(pmd_pfn(pmdv)) + (addr & ~PMD_MASK);
+		for (; addr < next; addr += PAGE_SIZE, paddr += PAGE_SIZE)
+			clear |= record_scan_result(walk->private, addr, paddr,
+						    pmd_young(pmdv));
+		if (clear) {
+#ifdef OS_VENDOR_V1
+			__ptep_test_and_clear_young((pte_t *)pmd);
+#else
+			__ptep_test_and_clear_young(NULL, 0, (pte_t *)pmd);
+#endif
+		}
+	}
+	spin_unlock(ptl);
+	walk->action = ACTION_CONTINUE;
 	return 0;
 }
 
 static const struct mm_walk_ops pte_range_ops = {
+	.pmd_entry = check_pmd_young,
 	.pte_entry = check_pte_young,
 };
 
