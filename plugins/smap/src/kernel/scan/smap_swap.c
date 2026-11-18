@@ -7,6 +7,7 @@
  *              helpers.
  */
 
+#include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/mm_inline.h>
 #include <linux/mmzone.h>
@@ -76,8 +77,53 @@ static struct workqueue_struct *smap_swap_wq;
  * the swap-config ioctl; default off so hugetlb folios are never staged */
 static bool hugetlb_swap_enabled = false;
 
+/*
+ * The kernel itself reports hugetlb swap support through the
+ * "HugePages_Swap" line of /proc/meminfo. Check it here instead of
+ * trusting the capability flag passed by the ioctl caller: on kernels
+ * without it, shrink_folio_list()/folio_putback_lru() treat a hugetlb
+ * folio as a normal LRU folio and corrupt the hstate and LRU lists.
+ */
+#define SMAP_MEMINFO_READ_MAX 8192
+static bool smap_kernel_has_hugetlb_swap(void)
+{
+	static int cached = -1; /* -1 unknown, 0 no, 1 yes */
+	struct file *filp;
+	char *buf;
+	loff_t pos = 0;
+	ssize_t len;
+	bool found = false;
+
+	if (READ_ONCE(cached) >= 0)
+		return READ_ONCE(cached) == 1;
+
+	buf = kvzalloc(SMAP_MEMINFO_READ_MAX + 1, GFP_KERNEL);
+	if (!buf)
+		return false;
+	filp = filp_open("/proc/meminfo", O_RDONLY, 0);
+	if (IS_ERR(filp)) {
+		kvfree(buf);
+		return false;
+	}
+	len = kernel_read(filp, buf, SMAP_MEMINFO_READ_MAX, &pos);
+	filp_close(filp, NULL);
+	if (len > 0) {
+		buf[len] = '\0';
+		found = strstr(buf, "\nHugePages_Swap:") != NULL;
+	}
+	kvfree(buf);
+	if (len > 0)
+		WRITE_ONCE(cached, found ? 1 : 0);
+	return found;
+}
+
 void smap_swap_set_hugetlb(bool enable)
 {
+	if (enable && !smap_kernel_has_hugetlb_swap()) {
+		pr_warn_once(
+			"hugetlb swap requested but not supported by the running kernel, ignored\n");
+		enable = false;
+	}
 	WRITE_ONCE(hugetlb_swap_enabled, enable);
 }
 
@@ -219,7 +265,10 @@ bool smap_swap_stage(struct access_pid *ap, struct page *page)
 		return false;
 
 	if (PageHuge(page)) {
-		if (!smap_swap_hugetlb_enabled() || !PageHead(page))
+		/* only anonymous (private) hugetlb folios can be swapped;
+		 * hugetlbfs shared mappings are page cache */
+		if (!smap_swap_hugetlb_enabled() || !PageHead(page) ||
+		    !folio_test_anon(folio))
 			return false;
 	} else {
 		if (!folio_test_anon(folio) || page_mapcount(page) > 1 ||
