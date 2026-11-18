@@ -998,6 +998,8 @@ static int smap_pre_migrate_range(struct folio **folios,
 	struct page *page, *head;
 	int nr_hugepage = 0;
 	int nr_normalpage = 0;
+	bool huge = is_smap_pg_huge();
+
 	for (pfn = start_pfn; pfn < end_pfn; pfn++) {
 		struct folio *folio;
 
@@ -1011,8 +1013,16 @@ static int smap_pre_migrate_range(struct folio **folios,
 		}
 		folio = page_folio(page);
 		head = &folio->page;
-		if (is_smap_pg_huge()) {
-			if (PageHuge(page) && !PageHead(page)) {
+		if (huge) {
+			/*
+			 * Huge mode collects hugetlb heads only and takes no
+			 * reference on them (the migrate path does not drop
+			 * one for hugetlb). Any other page in the range must be
+			 * skipped: smap_migrate() drops a reference for every
+			 * non-hugetlb folio, so collecting 4K/THP/slab pages
+			 * here without holding one freed pages still in use.
+			 */
+			if (!PageHuge(page) || !PageHead(page)) {
 				continue;
 			}
 			if (!folio_ref_count(folio)) {
@@ -1044,7 +1054,6 @@ static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 {
 	int nr_pre_migrate_cnt;
 	int cnt = 0;
-	int j;
 	unsigned nr_migrate_fail = 0;
 	unsigned long start_pfn = PHYS_PFN(start_pa);
 	unsigned long end_pfn = PHYS_PFN(end_pa);
@@ -1087,14 +1096,8 @@ static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 			 * acquires and releases it itself). On normal completion
 			 * nr_pre_migrate_cnt is 0.
 			 */
-			if (!is_smap_pg_huge()) {
-				for (j = cnt * NR_BATCHED_MIGRATION;
-				     j < cnt * NR_BATCHED_MIGRATION +
-						 nr_pre_migrate_cnt;
-				     j++) {
-					folio_put(migrate_folios[j]);
-				}
-			}
+			put_folios(&migrate_folios[cnt * NR_BATCHED_MIGRATION],
+				   nr_pre_migrate_cnt);
 			vfree(migrate_folios);
 			return nr_migrate_fail;
 		}
