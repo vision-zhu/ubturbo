@@ -15,7 +15,18 @@ enum migrate_back_task_status {
 	MB_TASK_WAITING,
 	MB_TASK_DONE,
 	MB_TASK_ERR,
+	/*
+	 * Picked by the migrate-back worker, which holds a task reference
+	 * until it publishes DONE/ERR. Appended so the values above, exposed
+	 * through debugfs, keep their meaning (debugfs reports it as WAITING).
+	 */
+	MB_TASK_RUNNING,
 };
+
+static inline bool mb_task_finished(int status)
+{
+	return status == MB_TASK_DONE || status == MB_TASK_ERR;
+}
 
 struct migrate_back_task {
 	unsigned long long task_id;

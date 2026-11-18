@@ -1204,7 +1204,9 @@ bool is_folio_in_migrate_back_range(struct folio *folio)
 	struct migrate_back_task *task;
 	spin_lock(&migrate_back_task_lock);
 	list_for_each_entry(task, &migrate_back_task_list, task_node) {
-		if (task->status != MB_TASK_WAITING) {
+		/* ranges of queued and in-flight tasks are being vacated */
+		if (task->status != MB_TASK_WAITING &&
+		    task->status != MB_TASK_RUNNING) {
 			continue;
 		}
 

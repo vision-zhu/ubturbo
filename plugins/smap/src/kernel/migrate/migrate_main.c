@@ -68,8 +68,7 @@ static void migrate_back_work_func(struct work_struct *work)
 {
 	struct migrate_back_subtask *subtask;
 	struct migrate_back_task *task;
-	struct migrate_back_task *prev_task = NULL;
-	bool found;
+	bool found, failed;
 	int i, ret;
 
 	ret = iterate_obmm_dev();
@@ -83,8 +82,15 @@ next:
 	spin_lock(&migrate_back_task_lock);
 	list_for_each_entry(task, &migrate_back_task_list, task_node) {
 		if (task->status == MB_TASK_WAITING) {
+			/*
+			 * Claim the task: RUNNING keeps clear/retry paths away
+			 * from it and the reference keeps it alive even if a
+			 * waiter times out and drops its own.
+			 */
+			task->status = MB_TASK_RUNNING;
+			task->progress = 0;
+			kref_get(&task->ref);
 			found = true;
-			prev_task = task;
 			break;
 		}
 	}
@@ -96,7 +102,12 @@ next:
 		return;
 	}
 
-	task = prev_task;
+	/*
+	 * Track failure locally: the shared status is only written once,
+	 * under the lock, when the run is over. Writing ERR mid-run let a
+	 * RETRY reset it to WAITING and this run then reported DONE.
+	 */
+	failed = false;
 	list_for_each_entry(subtask, &task->subtask, task_list) {
 		if (node_is_critical_err(subtask->src_nid)) {
 			pr_err_ratelimited("critical error on node %d\n",
@@ -117,17 +128,22 @@ next:
 				pr_debug("migrate back retry time %d\n", i);
 			}
 		}
-		if (subtask->status == MB_SUBTASK_ERR) {
-			task->status = MB_TASK_ERR;
-		}
-		task->progress += HUNDRED / task->subtask_cnt;
+		if (subtask->status == MB_SUBTASK_ERR)
+			failed = true;
+		if (task->subtask_cnt > 0)
+			WRITE_ONCE(task->progress,
+				   task->progress +
+					   HUNDRED / task->subtask_cnt);
 	}
-	if (task->status != MB_TASK_ERR) {
-		task->status = MB_TASK_DONE;
+
+	spin_lock(&migrate_back_task_lock);
+	task->status = failed ? MB_TASK_ERR : MB_TASK_DONE;
+	if (!failed)
 		task->progress = HUNDRED;
-	}
-	/* 唤醒 SMAP_MIGRATE_BACK 同步等待者（含 ERR 任务被 RETRY_ID 重置的场景） */
+	/* 唤醒 SMAP_MIGRATE_BACK 同步等待者 */
 	complete(&task->done);
+	spin_unlock(&migrate_back_task_lock);
+	kref_put(&task->ref, migrate_back_task_release);
 	goto next;
 }
 

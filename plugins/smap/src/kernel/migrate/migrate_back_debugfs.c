@@ -20,7 +20,9 @@ ssize_t smap_migrate_back_debugfs_read(struct file *filp, char __user *user_buf,
 	ssize_t ret;
 	struct migrate_back_task *task = filp->private_data;
 
-	ret = scnprintf(buf, BUF_MAX_SIZE, "%d\n%u\n", task->status,
+	ret = scnprintf(buf, BUF_MAX_SIZE, "%d\n%u\n",
+			task->status == MB_TASK_RUNNING ? MB_TASK_WAITING
+							: task->status,
 			task->progress);
 	return simple_read_from_buffer(user_buf, count, ppos, buf, ret);
 }

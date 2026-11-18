@@ -94,8 +94,9 @@ void clear_migrate_back_task(void)
 	spin_lock(&migrate_back_task_lock);
 	list_for_each_entry_safe(t, ttmp, &migrate_back_task_list, task_node) {
 		count++;
+		/* never reclaim a task that is still queued or running */
 		if (count > MAX_MIGRATE_BACK_TASK_COUNT &&
-		    t->status > MB_TASK_WAITING) {
+		    mb_task_finished(t->status)) {
 			list_del(&t->task_node);
 			list_add(&t->task_node, &dead);
 		}

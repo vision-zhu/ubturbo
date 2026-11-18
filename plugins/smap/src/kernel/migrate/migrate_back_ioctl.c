@@ -119,18 +119,12 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 		goto err_param;
 	}
 
-	/* Deduplicate */
-	ret = -EINVAL;
-	task_ret = check_duplicate_task(task);
-	if (task_ret == DUP_ID) {
-		goto err_dup_task;
-	}
-	if (task_ret == RETRY_ID) {
-		kref_put(&task->ref, migrate_back_task_release);
-		/* 残留 ERR 任务已重置回 WAITING，同步等待新一轮执行结果 */
-		return wait_migrate_back_result(msg->task_id);
-	}
-
+	/*
+	 * Build the whole task before publishing it on the global list: once
+	 * listed, a concurrent ioctl's start_migrate_back_work() may hand it to
+	 * the worker, which used to walk a subtask list still being filled
+	 * (with subtask_cnt == 0) and report a half-built task as DONE.
+	 */
 	for (i = 0; i < msg->count; i++) {
 		ret = init_migrate_back_subtask(task, &msg->payload[i],
 						&subtask);
@@ -138,11 +132,24 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 			pr_err("failed to init migrate back subtask, source node: %d, destination node: %d\n",
 			       msg->payload[i].src_nid,
 			       msg->payload[i].dest_nid);
-			goto err_subtask;
+			goto err_put_task;
 		}
 		list_add(&subtask->task_list, &task->subtask);
 	}
 	task->subtask_cnt = msg->count;
+
+	/* Deduplicate and publish */
+	ret = -EINVAL;
+	task_ret = check_duplicate_task(task);
+	if (task_ret == DUP_ID) {
+		goto err_put_task;
+	}
+	if (task_ret == RETRY_ID) {
+		kref_put(&task->ref, migrate_back_task_release);
+		/* 残留 ERR 任务已重置回 WAITING，同步等待新一轮执行结果 */
+		return wait_migrate_back_result(msg->task_id);
+	}
+
 	clear_migrate_back_task();
 	ret = start_migrate_back_work();
 	if (ret)
@@ -150,16 +157,8 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 	/* 入队成功后等待迁回任务完成并返回状态。 */
 	return wait_migrate_back_result(msg->task_id);
 
-err_subtask:
-	/* 引用释放交给 migrate_back_task_release：subtask 清理与 debugfs
-	 * 移除统一在其内完成（此时尚未创建 debugfs 文件，为 no-op） */
-	spin_lock(&migrate_back_task_lock);
-	list_del(&task->task_node);
-	spin_unlock(&migrate_back_task_lock);
-	kref_put(&task->ref, migrate_back_task_release);
-	return ret;
-err_dup_task:
-	/* 任务从未入列表，引用计数为 1，put 即释放 */
+err_put_task:
+	/* 任务从未入列表，引用计数为 1，put 即释放（含已建立的 subtask） */
 	kref_put(&task->ref, migrate_back_task_release);
 err_param:
 	return ret;
