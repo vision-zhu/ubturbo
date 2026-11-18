@@ -36,6 +36,8 @@ static struct class *scan_class;
 static struct cdev scan_cdev;
 static struct device *scan_device;
 static struct user_info ubturbo_ui = { 0 };
+/* Serializes creation/ownership updates of /proc/smap and ubturbo_ui. */
+static DEFINE_MUTEX(procfs_root_lock);
 kuid_t procfs_kuid;
 kgid_t procfs_kgid;
 struct proc_dir_entry *smap_procfs_root = NULL;
@@ -242,18 +244,35 @@ static long ioctl_create_smap_procfs(void __user *argp)
 	if (copy_from_user(&temp_ui, argp, sizeof(temp_ui)))
 		return -EFAULT;
 
-	if (smap_procfs_root && is_user_unchanged(&temp_ui)) {
-		pr_info("procfs root directory unchanged\n");
+	mutex_lock(&procfs_root_lock);
+	if (smap_procfs_root) {
+		/*
+		 * Never tear down an existing /proc/smap: tracked pids keep
+		 * pointers to their /proc/smap/<pid> entries (ap->proc_root),
+		 * and removing the root recursively frees them, leaving those
+		 * pointers dangling. Only refresh the ownership; per-pid
+		 * entries created from now on use the new owner.
+		 */
+		if (!is_user_unchanged(&temp_ui)) {
+			procfs_kuid = make_kuid(&init_user_ns, temp_ui.uid);
+			procfs_kgid = make_kgid(&init_user_ns, temp_ui.gid);
+			proc_set_user(smap_procfs_root, procfs_kuid,
+				      procfs_kgid);
+			ubturbo_ui = temp_ui;
+			pr_info("procfs root directory owner updated\n");
+		}
+		mutex_unlock(&procfs_root_lock);
 		return 0;
 	}
-
-	remove_procfs_root();
 
 	ret = create_procfs_root(&temp_ui);
 	if (ret) {
 		remove_procfs_root();
+		mutex_unlock(&procfs_root_lock);
 		return ret;
 	}
+	ubturbo_ui = temp_ui;
+	mutex_unlock(&procfs_root_lock);
 
 	pr_info("procfs root directory create\n");
 	return 0;
