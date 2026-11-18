@@ -30,6 +30,7 @@
 struct ub_hist_ba_device {
 	struct device *dev;
 	void __iomem *base_addr;
+	u64 mem_len; /* length of the base_addr mapping */
 	struct list_head list;
 	struct ub_hist_ba_info info;
 };
@@ -76,10 +77,24 @@ static int ub_hist_find_ba_tag_by_addr(uint64_t addr, uint64_t *ba_tag)
 	return -ENODEV;
 }
 
+static inline bool ub_hist_reg_in_range(struct ub_hist_ba_device *ba_dev,
+					u32 off)
+{
+	if (likely((u64)off + sizeof(u32) <= ba_dev->mem_len))
+		return true;
+	pr_err_ratelimited("BA register offset %#x beyond mapping %#llx\n", off,
+			   ba_dev->mem_len);
+	return false;
+}
+
 static inline u32 ub_hist_read_reg(struct ub_hist_ba_device *ba_dev, u32 off)
 {
 	void __iomem *reg = ba_dev->base_addr + off;
-	u32 out = readl(reg);
+	u32 out;
+
+	if (!ub_hist_reg_in_range(ba_dev, off))
+		return 0;
+	out = readl(reg);
 
 	return le32_to_cpu(*(__le32 *)&out);
 }
@@ -90,6 +105,8 @@ static inline void ub_hist_write_reg(struct ub_hist_ba_device *ba_dev, u32 off,
 	void __iomem *reg = ba_dev->base_addr + off;
 	__le32 val_le = cpu_to_le32(val);
 
+	if (!ub_hist_reg_in_range(ba_dev, off))
+		return;
 	writel(*(u32 *)&val_le, reg);
 }
 
@@ -455,9 +472,16 @@ static int ub_hist_get_ba_resource(struct platform_device *pdev,
 {
 	int ret;
 	uint64_t value;
-	uint64_t device_mem_len = (g_ub_hist_smap_type == UB_HIST_SMAP_TYPE_N7)
-					  ? DEVICE_MEM_LEN_N7
-					  : DEVICE_MEM_LEN_N6;
+	/*
+	 * Probe runs from platform_driver_register(), before
+	 * ub_hist_set_hw_type() knows whether this is N6 or N7, so
+	 * g_ub_hist_smap_type is still its N6 default here. Mapping only the
+	 * N6 length made N7 status reads (offset 0x1000 + 64KiB) run past the
+	 * mapping into the vmalloc guard page. Map the larger window; accesses
+	 * are additionally bounds checked against mem_len.
+	 */
+	uint64_t device_mem_len =
+		max_t(uint64_t, DEVICE_MEM_LEN_N6, DEVICE_MEM_LEN_N7);
 
 	if (!ACPI_COMPANION(&pdev->dev)) {
 		pr_err("ACPI companion not found\n");
@@ -476,6 +500,7 @@ static int ub_hist_get_ba_resource(struct platform_device *pdev,
 		pr_err("failed to remap register base address\n");
 		return -ENOMEM;
 	}
+	ba_dev->mem_len = device_mem_len;
 
 	ret = device_property_read_u64(&pdev->dev, "cc_mem_base_addr", &value);
 	if (ret) {
