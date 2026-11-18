@@ -281,12 +281,12 @@ static bool is_paddr_belong_remote_node(u64 pa, int nid)
 	return numa == nid;
 }
 
-static bool is_page_ready_for_migrate(struct page *page)
+static bool is_page_ready_for_migrate(struct page *page, bool huge)
 {
 	if (is_migrate_isolate_page(page)) {
 		return false;
 	}
-	if (is_access_hugepage()) {
+	if (huge) {
 		if (PageHuge(page) && !PageHead(page))
 			return false;
 	} else {
@@ -330,7 +330,7 @@ static int add_to_bm(unsigned long vaddr, pagemap_entry_t *pme,
 			goto inc_pm_pos;
 		}
 
-		if (!is_page_ready_for_migrate(page)) {
+		if (!is_page_ready_for_migrate(page, pm->mig_info.huge)) {
 			goto inc_pm_pos;
 		}
 
@@ -517,6 +517,9 @@ void walk_pid_pagemap(struct pagemapread *pm)
 	if (IS_ERR_OR_NULL(mm))
 		return;
 	pm->len = PM_LEN;
+	/* sample the scan page mode once: it decides both the walk ops and
+	 * whether collected folios carry a reference */
+	pm->mig_info.huge = is_access_hugepage();
 
 	while (1) {
 		pm->pos = 0;
@@ -538,7 +541,7 @@ void walk_pid_pagemap(struct pagemapread *pm)
 			break;
 		}
 
-		if (is_access_hugepage()) {
+		if (pm->mig_info.huge) {
 			walk_page_range(mm, start_vaddr, end_vaddr,
 					&pagemap_vm_ops, pm);
 		} else {

@@ -126,11 +126,13 @@ struct migration_target_control {
 	gfp_t gfp_mask;
 };
 
+/* Drop the caller references of a batch; hugetlb folios carry none. */
 static void put_folios(struct folio **folios, unsigned int nr_folios)
 {
 	unsigned int i;
 	for (i = 0; i < nr_folios; i++) {
-		folio_put(folios[i]);
+		if (!folio_test_hugetlb(folios[i]))
+			folio_put(folios[i]);
 	}
 }
 
@@ -176,13 +178,32 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 	unsigned int nr_succeeded = 0;
 	ktime_t start_time = 0;
 	ktime_t mig_time = 0;
+	bool huge;
+
 	if (nr_folios == 0 || !folios) {
 		pr_debug("no folio to migrate\n");
 		return nr_folios;
 	}
+	/*
+	 * nr_succeeded is reported in base pages. Convert it with the type of
+	 * the folios actually passed in (callers pass homogeneous batches),
+	 * not with smap_pgtype, which can disagree with the scan page mode
+	 * that collected them and then underflows "nr_folios - nr_succeeded".
+	 */
+	huge = folio_test_hugetlb(folios[0]);
 
 	if (is_node_invalid(to_node)) {
-		put_folios(folios, nr_folios);
+		/*
+		 * Remote batches hold no reference on hugetlb folios (see
+		 * walk_pid_pagemap()/smap_pre_migrate_range()); migrate-back
+		 * and hotness batches hold one on every folio.
+		 */
+		if (type == MIGRATE_TYPE_REMOTE) {
+			put_folios(folios, nr_folios);
+		} else {
+			for (unsigned int k = 0; k < nr_folios; k++)
+				folio_put(folios[k]);
+		}
 		pr_debug(
 			"invalid destination node: %d passed to SMAP migrate\n",
 			to_node);
@@ -214,14 +235,14 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 		else if (err < 0)
 			pr_err("failed to migrate folios, err: %d\n", err);
 	}
-	if (smap_pgtype == HUGE_PAGE) {
+	if (huge) {
 		nr_succeeded >>= (__builtin_ctz(g_pagesize_huge) - PAGE_SHIFT);
 	}
 	mig_time = calc_time_us(start_time);
 	pr_debug(
 		"migration time spend: %lldus, nr_folios: %u, nr_succeeded: %d\n",
 		mig_time, nr_folios, nr_succeeded);
-	if (err == 0 && nr_succeeded == 0 && smap_pgtype == NORMAL_PAGE) {
+	if (err == 0 && nr_succeeded == 0 && !huge) {
 		if (folio_try_get(folios[0])) {
 			shake_page(&folios[0]->page);
 			folio_put(folios[0]);

@@ -34,6 +34,13 @@ struct remote_migrate_info {
 	unsigned int mig_cnt;
 	u64 folios_len;
 	struct folio **folios;
+	/*
+	 * Set by walk_pid_pagemap(): true when the walk collected hugetlb
+	 * folios (no reference taken), false when it collected base pages
+	 * (one folio reference held per entry). Release paths must use this
+	 * instead of re-reading a global page-size mode.
+	 */
+	bool huge;
 };
 
 struct pagemapread {

@@ -444,7 +444,14 @@ static void walkpage_and_migrate(struct mig_payload *payloads, int len,
 			 * smap_migrate(), which drops the reference again.
 			 */
 			mig_cnt = MIN(mig_cnt, (u64)pm.mig_info.mig_cnt);
-			if (smap_pgtype != HUGE_PAGE) {
+			/*
+			 * Only base pages were collected with a reference;
+			 * hugetlb folios were not. Decide by what the walk
+			 * actually collected, not by smap_pgtype, which is set
+			 * by a different ioctl and may disagree with the scan
+			 * page mode used by walk_pid_pagemap().
+			 */
+			if (!pm.mig_info.huge) {
 				for (u64 j = mig_cnt; j < pm.mig_info.mig_cnt;
 				     j++) {
 					folio_put(pm.mig_info.folios[j]);
@@ -483,8 +490,8 @@ static void walkpage_and_migrate(struct mig_payload *payloads, int len,
 			 * 未移交的 folio 必须在此放回引用，否则页面泄漏。
 			 * 正常结束时 mig_cnt_backup 为 0，此循环为空。
 			 */
-			for (u64 j = mig_cnt - mig_cnt_backup; j < mig_cnt;
-			     j++) {
+			for (u64 j = mig_cnt - mig_cnt_backup;
+			     !pm.mig_info.huge && j < mig_cnt; j++) {
 				folio_put(pm.mig_info.folios[j]);
 			}
 			payloads[i].success_cnt += (mig_cnt - failed_cnt);
