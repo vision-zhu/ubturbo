@@ -20,6 +20,9 @@ int (*fp_migrate_pages)(struct list_head *from, new_folio_t get_new_folio,
 void (*fp_putback_movable_pages)(struct list_head *l) = NULL;
 bool (*fp_isolate_folio_to_list)(struct folio *folio,
 				 struct list_head *list) = NULL;
+/* Optional: without it find_page_task() skips the anon rmap walk. */
+struct anon_vma *(*fp_folio_lock_anon_vma_read)(
+	struct folio *folio, struct rmap_walk_control *rwc) = NULL;
 
 /*
  * Cold-page swap-out worker accessors. On openEuler reclaim_pages() is
@@ -77,7 +80,13 @@ int smap_process_symbols(void)
 	 * kprobe, so smap_swap_symbols_ready() self-disables swap-out on
 	 * them (COS/veLinux/V1/T1).
 	 */
+	fp_folio_lock_anon_vma_read =
+		(struct anon_vma *(*)(struct folio *folio,
+				      struct rmap_walk_control *rwc))
+			fp_kallsyms_lookup_name("folio_lock_anon_vma_read");
 	// clang-format on
+	if (!fp_folio_lock_anon_vma_read)
+		pr_warn("folio_lock_anon_vma_read not found, anon rmap lookup disabled\n");
 	if (!(fp_migrate_pages && fp_putback_movable_pages &&
 	      fp_isolate_folio_to_list))
 		return -EFAULT;

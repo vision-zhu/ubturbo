@@ -243,29 +243,54 @@ static void *smap_page_rmapping(struct page *page)
 	return (void *)mapping;
 }
 
+/*
+ * find_page_task - find a task mapping @page (best effort)
+ *
+ * Callers reach here with a page derived from a physical address only, so
+ * nothing pins the folio or its anon_vma: the owning process may unmap or
+ * exit concurrently, freeing (and, SLAB_TYPESAFE_BY_RCU, reusing) the
+ * anon_vma. Like folio_referenced(), pin the folio, lock file/KSM folios,
+ * and take the anon_vma through folio_lock_anon_vma_read(), which revalidates
+ * it under RCU and only returns it locked while the folio is still mapped.
+ */
 void find_page_task(struct page *page, int is_locked, struct page_task_arg *pta)
 {
 	int we_locked = 0;
+	struct folio *folio;
 	struct rmap_walk_control rwc = {
 		.rmap_one = page_task_one,
 		.arg = pta,
 	};
 
-	if (!smap_page_rmapping(page)) {
-		pr_err("page has no mapping\n");
+	folio = page_folio(page);
+	if (!folio_try_get(folio))
 		return;
+	/* the page may have been freed and reused in a new folio */
+	if (unlikely(page_folio(page) != folio))
+		goto out_put;
+
+	if (!smap_page_rmapping(page)) {
+		pr_debug("page has no mapping\n");
+		goto out_put;
 	}
 
-	if (!is_locked && (!PageAnon(page) || PageKsm(page))) {
-		we_locked = trylock_page(page);
-		if (!we_locked) {
-			return;
-		}
+	if (!is_locked && (!folio_test_anon(folio) || folio_test_ksm(folio))) {
+		we_locked = folio_trylock(folio);
+		if (!we_locked)
+			goto out_put;
 	}
 
-	smap_rmap_walk(page_folio(page), &rwc);
-
-	if (we_locked) {
-		unlock_page(page);
+	if (folio_test_anon(folio) && !folio_test_ksm(folio)) {
+		if (!fp_folio_lock_anon_vma_read)
+			goto out_unlock;
+		rwc.anon_lock = fp_folio_lock_anon_vma_read;
 	}
+
+	smap_rmap_walk(folio, &rwc);
+
+out_unlock:
+	if (we_locked)
+		folio_unlock(folio);
+out_put:
+	folio_put(folio);
 }

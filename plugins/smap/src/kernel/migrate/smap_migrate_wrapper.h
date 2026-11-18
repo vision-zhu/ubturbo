@@ -128,6 +128,9 @@ extern int (*fp_migrate_pages)(struct list_head *from,
 			       enum migrate_mode mode, int reason,
 			       unsigned int *ret_succeeded);
 extern void (*fp_putback_movable_pages)(struct list_head *l);
+struct rmap_walk_control;
+extern struct anon_vma *(*fp_folio_lock_anon_vma_read)(
+	struct folio *folio, struct rmap_walk_control *rwc);
 extern bool (*fp_isolate_folio_to_list)(struct folio *folio,
 					struct list_head *list);
 
