@@ -176,6 +176,8 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 {
 	int err = 0;
 	unsigned int nr_succeeded = 0;
+	unsigned long nr_pages_total = 0;
+	unsigned int i;
 	ktime_t start_time = 0;
 	ktime_t mig_time = 0;
 	bool huge;
@@ -185,12 +187,15 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 		return nr_folios;
 	}
 	/*
-	 * nr_succeeded is reported in base pages. Convert it with the type of
-	 * the folios actually passed in (callers pass homogeneous batches),
-	 * not with smap_pgtype, which can disagree with the scan page mode
-	 * that collected them and then underflows "nr_folios - nr_succeeded".
+	 * The migration core reports nr_succeeded in base pages while callers
+	 * expect a count of failed folios. Derive the conversion from the
+	 * folios actually passed in (hugetlb or THP), not from smap_pgtype,
+	 * which can disagree with the mode that collected them; otherwise
+	 * "nr_folios - nr_succeeded" underflows.
 	 */
 	huge = folio_test_hugetlb(folios[0]);
+	for (i = 0; i < nr_folios; i++)
+		nr_pages_total += folio_nr_pages(folios[i]);
 
 	if (is_node_invalid(to_node)) {
 		/*
@@ -235,9 +240,6 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 		else if (err < 0)
 			pr_err("failed to migrate folios, err: %d\n", err);
 	}
-	if (huge) {
-		nr_succeeded >>= (__builtin_ctz(g_pagesize_huge) - PAGE_SHIFT);
-	}
 	mig_time = calc_time_us(start_time);
 	pr_debug(
 		"migration time spend: %lldus, nr_folios: %u, nr_succeeded: %d\n",
@@ -248,7 +250,11 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 			folio_put(folios[0]);
 		}
 	}
-	return nr_folios - nr_succeeded;
+	if (nr_succeeded >= nr_pages_total)
+		return 0;
+	/* exact for homogeneous batches, proportional for mixed ones */
+	return DIV_ROUND_UP((u64)(nr_pages_total - nr_succeeded) * nr_folios,
+			    nr_pages_total);
 }
 
 static inline void refresh_nodes_nr_free(void)
@@ -439,7 +445,7 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 			      page_ref_count(page) != 0)) {
 				continue;
 			}
-			if (PageTransHuge(page) || PageHuge(page)) {
+			if (smap_page_in_large_folio(page) || PageHuge(page)) {
 				continue;
 			}
 		}
@@ -538,8 +544,8 @@ static void process_pages_for_migration(struct migrate_back_subtask *task,
 			continue;
 		}
 		if (__folio_test_movable(page_folio(page)) ||
-		    page_ref_count(page) == 0 || PageTransHuge(page) ||
-		    PageHuge(page)) {
+		    page_ref_count(page) == 0 ||
+		    smap_page_in_large_folio(page) || PageHuge(page)) {
 			continue;
 		}
 		if (is_migrate_isolate_page(page)) {
@@ -664,7 +670,7 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 int is_filter_4k(struct page *page, int page_size)
 {
 	if (page_size == PAGE_SIZE) {
-		if (PageTransHuge(page)) {
+		if (smap_page_in_large_folio(page)) {
 			return PAGE_TYPE_TRANSHUGE;
 		}
 		if (PageHuge(page)) {
@@ -1032,8 +1038,8 @@ static int smap_pre_migrate_range(struct folio **folios,
 			nr_hugepage++;
 		} else {
 			if (__folio_test_movable(page_folio(page)) ||
-			    page_ref_count(page) == 0 || PageTransHuge(page) ||
-			    PageHuge(page)) {
+			    page_ref_count(page) == 0 ||
+			    smap_page_in_large_folio(page) || PageHuge(page)) {
 				continue;
 			}
 			if (!folio_try_get(folio)) {
@@ -1144,7 +1150,7 @@ unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg)
 
 struct folio *alloc_demote_page(struct folio *folio, unsigned long node)
 {
-	unsigned int order = 0;
+	unsigned int order = folio_order(folio);
 	struct migration_target_control mtc = {
 		/*
 		 * Allocate from 'node', or fail quickly and quietly.
@@ -1163,6 +1169,18 @@ struct folio *alloc_demote_page(struct folio *folio, unsigned long node)
 	 */
 	if (node >= nr_local_numa)
 		mtc.gfp_mask |= __GFP_MEMALLOC;
+
+	/*
+	 * The destination must be as large as the source: move_to_new_folio()
+	 * copies folio_nr_pages(src) pages into it, so an order-0 destination
+	 * for a THP overwrites the 511 physical pages that follow it. Mirror
+	 * alloc_migration_target(): if no large folio is available the
+	 * migration core splits the THP and retries with base pages.
+	 */
+	if (folio_test_large(folio)) {
+		mtc.gfp_mask &= ~__GFP_RECLAIM;
+		mtc.gfp_mask |= GFP_TRANSHUGE;
+	}
 
 	return __folio_alloc(mtc.gfp_mask, order, mtc.nid, mtc.nmask);
 }

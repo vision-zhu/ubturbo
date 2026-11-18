@@ -17,6 +17,16 @@
 
 struct access_pid;
 
+/*
+ * smap_page_in_large_folio - @page is part of a THP/mTHP (a large folio that
+ * is not hugetlb). PageTransHuge() only tests the head page, so tail pages of
+ * a THP slipped through the 4K-mode filters that intend to skip THPs.
+ */
+static inline bool smap_page_in_large_folio(struct page *page)
+{
+	return PageCompound(page) && !folio_test_hugetlb(page_folio(page));
+}
+
 typedef enum {
 	NORMAL_MIGRATE,
 	REMOTE_MIGRATE,

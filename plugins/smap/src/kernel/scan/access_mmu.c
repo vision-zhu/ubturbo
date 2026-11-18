@@ -291,8 +291,8 @@ static bool is_page_ready_for_migrate(struct page *page, bool huge)
 			return false;
 	} else {
 		if (__folio_test_movable(page_folio(page)) ||
-		    page_ref_count(page) == 0 || PageTransHuge(page) ||
-		    PageHuge(page)) {
+		    page_ref_count(page) == 0 ||
+		    smap_page_in_large_folio(page) || PageHuge(page)) {
 			return false;
 		}
 	}
