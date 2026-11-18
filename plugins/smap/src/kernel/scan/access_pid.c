@@ -182,7 +182,9 @@ int ap_slot_add(struct access_pid *ap)
 		s->ap = ap;
 		ap->slot = s;
 		init_rwsem(&s->ap_lock);
-		refcount_set(&s->refs, 1); /* initial reference */
+		/* initial reference + one for the caller, who must drop it with
+		 * ap_put_slot() once it no longer touches ap */
+		refcount_set(&s->refs, 2);
 		atomic_set(&s->state, AP_SLOT_INUSE); /* publish */
 		return i;
 	}
@@ -768,6 +770,7 @@ int init_access_pid(struct access_add_pid_payload *payload,
 	ap->ntimes = payload->ntimes;
 	ap->type = payload->type;
 	init_completion(&ap->work_done);
+	init_ap_scan_work(ap);
 	init_waitqueue_head(&ap->wq);
 	INIT_WORK(&ap->swap_work, smap_swap_work_fn);
 	for (int i = 0; i < MAX_NUMNODES; i++) {
@@ -1191,10 +1194,15 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 			list_move_tail(&ap->node, &dup_head);
 			continue;
 		}
+		list_del_init(&ap->node);
 		/* event-driven flow: a tracked pid starts scanning right away;
 		 * per-pid bitmap reallocation races are serialized by the
-		 * slot's ap_lock (see access_work_func). */
+		 * slot's ap_lock (see access_work_func).
+		 * ap_slot_add() returned with an extra reference for us: once
+		 * the slot is published a concurrent remove may drop the
+		 * initial one, and ap must stay alive until submit is done. */
 		submit_one_work(ap);
+		ap_put_slot(ap->slot);
 	}
 	list_for_each_entry_safe(ap, tmp, &dup_head, node) {
 		list_del(&ap->node);

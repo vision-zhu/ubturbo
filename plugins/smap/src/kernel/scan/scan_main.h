@@ -44,6 +44,7 @@ bool is_remote_scan_hist_active(void);
 bool is_freq_hist_only_node(int node);
 int set_scan_cpus(u32 cpu_start, u32 cpu_end);
 void submit_one_work(struct access_pid *ap);
+void init_ap_scan_work(struct access_pid *ap);
 ktime_t calc_time_us(ktime_t start_time);
 u8 get_scan_page_mode(void);
 int get_scan_page_size(void);

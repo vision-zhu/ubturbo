@@ -91,6 +91,8 @@ struct access_pid {
 	u32 ntimes;
 	u32 cur_times;
 	struct delayed_work scan_work;
+	/* serializes submit_one_work() (cancel + requeue of scan_work) */
+	struct mutex submit_lock;
 	struct completion work_done;
 	/* Notify readers only after scanning and bitmap construction finish. */
 	wait_queue_head_t wq;

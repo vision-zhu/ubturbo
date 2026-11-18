@@ -329,21 +329,38 @@ int set_scan_cpus(u32 cpu_start, u32 cpu_end)
 	return sw.result;
 }
 
+/* Called once when the access_pid is created, before it is published. */
+void init_ap_scan_work(struct access_pid *ap)
+{
+	INIT_DELAYED_WORK(&ap->scan_work, access_work_func);
+	mutex_init(&ap->submit_lock);
+}
+
 void submit_one_work(struct access_pid *ap)
 {
 	pr_debug("submit_one_work: pid=%d, delay=%dms\n", ap->pid,
 		 ap->scan_time);
-	/* check if work was already initialized */
+	/*
+	 * Serialize restarts of the same pid: two concurrent callers used to
+	 * re-run INIT_DELAYED_WORK() on a work whose timer the other one had
+	 * just armed, corrupting the timer list. scan_work is now initialized
+	 * once in init_ap_scan_work() and only cancelled/requeued here.
+	 */
+	mutex_lock(&ap->submit_lock);
 	cancel_ap_scan_work(ap);
+	if (!ap->slot || atomic_read(&ap->slot->state) != AP_SLOT_INUSE) {
+		mutex_unlock(&ap->submit_lock);
+		return;
+	}
 	init_completion(&ap->work_done);
-	INIT_DELAYED_WORK(&ap->scan_work, access_work_func);
 	/* take a work-reference: held across all rounds of this scan cycle,
 	 * dropped at the last round (or on cancel / when the slot is removed).
 	 */
-	if (ap->slot)
-		refcount_inc(&ap->slot->refs);
-	queue_delayed_work(scan_state.scanq, &ap->scan_work,
-			   msecs_to_jiffies(ap->scan_time));
+	refcount_inc(&ap->slot->refs);
+	if (!queue_delayed_work(scan_state.scanq, &ap->scan_work,
+				msecs_to_jiffies(ap->scan_time)))
+		ap_put_slot(ap->slot);
+	mutex_unlock(&ap->submit_lock);
 }
 
 static int create_scan_workqueue(void)
