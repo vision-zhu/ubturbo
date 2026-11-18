@@ -72,7 +72,7 @@ static void ap_slot_try_reclaim(int i)
 	destroy_access_pid(s->ap);
 	s->ap = NULL;
 	s->pid = 0;
-	atomic_set(&s->state, AP_SLOT_FREE);
+	atomic_set_release(&s->state, AP_SLOT_FREE);
 }
 
 static inline void ap_slot_release(struct ap_slot *s)
@@ -100,8 +100,12 @@ struct ap_slot *ap_get_slot(pid_t pid)
 			continue;
 		if (!refcount_inc_not_zero(&s->refs))
 			continue; /* being reclaimed */
-		/* double-check: removal raced between read and inc */
-		if (atomic_read(&s->state) != AP_SLOT_INUSE || s->pid != pid) {
+		/* double-check: removal raced between read and inc. Acquire
+		 * pairs with the release in ap_slot_add() so s->pid and s->ap
+		 * are read after the INUSE publication.
+		 */
+		if (atomic_read_acquire(&s->state) != AP_SLOT_INUSE ||
+		    READ_ONCE(s->pid) != pid) {
 			ap_slot_release(s);
 			continue;
 		}
@@ -125,7 +129,8 @@ struct ap_slot *ap_get_slot_at(int i)
 		return NULL;
 	if (!refcount_inc_not_zero(&s->refs))
 		return NULL;
-	if (atomic_read(&s->state) != AP_SLOT_INUSE) {
+	/* acquire: pairs with the publishing release in ap_slot_add() */
+	if (atomic_read_acquire(&s->state) != AP_SLOT_INUSE) {
 		ap_slot_release(s);
 		return NULL;
 	}
@@ -151,7 +156,8 @@ size_t ap_collect_refs(struct ap_slot *arr[], size_t cap)
 			continue;
 		if (!refcount_inc_not_zero(&s->refs))
 			continue;
-		if (atomic_read(&s->state) != AP_SLOT_INUSE) {
+		/* acquire: pairs with the publishing release in ap_slot_add() */
+		if (atomic_read_acquire(&s->state) != AP_SLOT_INUSE) {
 			ap_slot_release(s);
 			continue;
 		}
@@ -185,7 +191,8 @@ int ap_slot_add(struct access_pid *ap)
 		/* initial reference + one for the caller, who must drop it with
 		 * ap_put_slot() once it no longer touches ap */
 		refcount_set(&s->refs, 2);
-		atomic_set(&s->state, AP_SLOT_INUSE); /* publish */
+		/* publish: release orders s->pid/s->ap/refs before INUSE */
+		atomic_set_release(&s->state, AP_SLOT_INUSE);
 		return i;
 	}
 	return -1; /* table full */
