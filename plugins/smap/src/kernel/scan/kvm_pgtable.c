@@ -300,8 +300,14 @@ smap_stage2_test_clear_young_walker(const struct kvm_pgtable_visit_ctx *ctx,
 						 kvm_granule_size(ctx->level));
 		}
 
+		/*
+		 * Lost a race with a vCPU fault or another walker on this
+		 * entry. With KVM_PGTABLE_WALK_HANDLE_FAULT an error aborts
+		 * the walk of the whole range, silently dropping the rest of
+		 * the memslot for this round; just skip the entry.
+		 */
 		if (!stage2_try_set_pte(ctx, pte))
-			return -EAGAIN;
+			return 0;
 	}
 
 	return 0;
@@ -430,8 +436,14 @@ static int smap_stage2_range_walker(const struct kvm_pgtable_visit_ctx *ctx,
 						 kvm_granule_size(ctx->level));
 		}
 
+		/*
+		 * Lost a race with a vCPU fault or another walker on this
+		 * entry. With KVM_PGTABLE_WALK_HANDLE_FAULT an error aborts
+		 * the walk of the whole range, silently dropping the rest of
+		 * the memslot for this round; just skip the entry.
+		 */
 		if (!stage2_try_set_pte(ctx, pte))
-			return -EAGAIN;
+			return 0;
 	}
 
 	return 0;
