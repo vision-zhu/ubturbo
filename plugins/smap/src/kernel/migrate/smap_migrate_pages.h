@@ -53,7 +53,7 @@ void set_remote_migrate_mode(unsigned int mode);
 struct folio *smap_alloc_new_node_page(struct folio *folio, unsigned long node);
 struct folio *smap_alloc_new_node_page_mig_back(struct folio *folio,
 						unsigned long node);
-unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg);
+int smap_migrate_numa(struct migrate_numa_inner_msg *msg);
 unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 			  int to_node, enum smap_migrate_type type);
 struct folio *alloc_demote_page(struct folio *folio, unsigned long node);

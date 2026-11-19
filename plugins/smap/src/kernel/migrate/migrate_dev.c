@@ -347,9 +347,11 @@ static int __ioctl_migrate_numa(void __user *argp)
 			return -EINVAL;
 		}
 	}
-	if (smap_migrate_numa(&i_msg)) {
+	ret = smap_migrate_numa(&i_msg);
+	if (ret < 0)
+		return ret;
+	if (ret)
 		return -ENOMEM;
-	}
 	return 0;
 }
 

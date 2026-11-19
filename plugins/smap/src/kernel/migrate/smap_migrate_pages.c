@@ -1072,7 +1072,11 @@ static int smap_pre_migrate_range(struct folio **folios,
 	return nr_hugepage + nr_normalpage;
 }
 
-static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
+/*
+ * Returns the number of pages that failed to migrate, or a negative errno
+ * for an invalid request. The range is inclusive of end_pa's page.
+ */
+static int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 {
 	int nr_pre_migrate_cnt;
 	int cnt = 0;
@@ -1098,8 +1102,9 @@ static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 		pr_err("unable to allocate memory for migrate folio list\n");
 		return -ENOMEM;
 	}
+	/* end_pfn is inclusive: the array was sized for it, walk it too */
 	nr_pre_migrate_cnt = smap_pre_migrate_range(migrate_folios, &nr_folios,
-						    start_pfn, end_pfn);
+						    start_pfn, end_pfn + 1);
 	do {
 		nr_folios_min = MIN(nr_pre_migrate_cnt, NR_BATCHED_MIGRATION);
 		nr_migrate_fail += smap_migrate(
@@ -1128,9 +1133,9 @@ static unsigned int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 	return nr_migrate_fail;
 }
 
-unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg)
+int smap_migrate_numa(struct migrate_numa_inner_msg *msg)
 {
-	unsigned int ret = 0;
+	int ret = 0;
 	int i;
 	int nid = msg->dest_nid;
 
@@ -1148,7 +1153,11 @@ unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg)
 			ret = smap_migrate_range(nid, start_pa, end_pa);
 			if (ret == 0)
 				break;
-			pr_info("migrate range to %d failed %d pages\n", nid,
+			/* an invalid request does not get better by retrying */
+			if (ret < 0)
+				return ret;
+			pr_info_ratelimited(
+				"migrate range to %d failed %d pages\n", nid,
 				ret);
 			if (node_is_critical_err(msg->src_nid) ||
 			    node_is_critical_err(msg->dest_nid)) {
