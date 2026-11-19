@@ -1187,6 +1187,10 @@ static int get_total_huge_page_nr(struct kvm *kvm, u64 *total_huge_page_nr)
 	}
 	kvm_for_each_memslot(memslot, bkt, slots) {
 		unsigned long hva;
+
+		/* count exactly what fill_vaddrs_info() will fill: RAM only */
+		if (!memslot_is_mem(memslot))
+			continue;
 		for (gpa = memslot->base_gfn << PAGE_SHIFT;
 		     gpa < (memslot->base_gfn + memslot->npages) << PAGE_SHIFT;
 		     gpa += g_pagesize_huge) {
@@ -1278,14 +1282,16 @@ static int get_vma_numa_node(struct kvm *kvm, struct vm_area_struct *vma,
 		return NUMA_NO_NODE;
 	}
 
+	/* not (yet) populated: there is no node, and 0 would wrongly claim
+	 * local node 0 */
 	ptep = huge_pte_offset(kvm->mm, addr & hmask, sz);
 	if (!ptep) {
-		return 0;
+		return NUMA_NO_NODE;
 	}
 
 	pte = smap_huge_ptep_get(ptep);
 	if (!pte_present(pte)) {
-		return 0;
+		return NUMA_NO_NODE;
 	}
 
 	paddr = PFN_PHYS(pte_pfn(pte));
@@ -1328,6 +1334,9 @@ static int fill_vaddrs_info(struct kvm *kvm, struct hva_info *hva_vec, u64 len,
 			if (vma == NULL)
 				continue;
 			cur_node = get_vma_numa_node(kvm, vma, hva);
+			/* unpopulated huge page: nothing to track yet */
+			if (cur_node == NUMA_NO_NODE)
+				continue;
 			hva_vec[idx] = (struct hva_info){ hva, cur_node };
 			if (cur_node >= nr_local_numa &&
 			    cur_node < MAX_NUMNODES)
@@ -1342,11 +1351,11 @@ static int fill_vaddrs_info(struct kvm *kvm, struct hva_info *hva_vec, u64 len,
 			++idx;
 		}
 	}
-	if (l1_page_nr + l2_page_nr != len) {
-		pr_err_ratelimited(
-			"failed to fill page info due to number of pages to fill not equal to that of total pages\n");
-		return -EFAULT;
-	}
+	/*
+	 * len was counted earlier, with the locks dropped in between, and
+	 * unpopulated pages are skipped: fewer filled entries are expected and
+	 * fine (the caller only uses l1 + l2 of them); used to fail the scan.
+	 */
 	*l1_page_num = l1_page_nr;
 	*l2_page_num = l2_page_nr;
 	return 0;
@@ -1371,9 +1380,9 @@ static int get_hva_info_by_scan_kvm_memslots(struct kvm *kvm, u64 *l1_page_num,
 		return -EINVAL;
 	pr_debug("L1 huge page num=%llu, L2 huge page num=%llu\n", l1_page_nr,
 		 l2_page_nr);
-	sort(hva_vec, total_huge_page_num, sizeof(struct hva_info), hva_cmp,
+	sort(hva_vec, l1_page_nr + l2_page_nr, sizeof(struct hva_info), hva_cmp,
 	     NULL);
-	for (i = 0; i < total_huge_page_num; ++i) {
+	for (i = 0; i < l1_page_nr + l2_page_nr; ++i) {
 		vaddrs[i] = hva_vec[i].va;
 	}
 	*l1_page_num = l1_page_nr;
