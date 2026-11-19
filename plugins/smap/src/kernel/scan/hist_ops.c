@@ -1403,12 +1403,21 @@ static int scan_thread_run(void *data)
 	union smap_hist_status st;
 	int flag = 0;
 	while (!kthread_should_stop()) {
+		/*
+		 * dev->info only changes in addr_segs_reinit(), which runs
+		 * below; re-checking it here alone could never clear the
+		 * overflow, so after one overflow the thread idled forever even
+		 * when remote memory shrank or the page size changed. Leave the
+		 * overflow state as soon as a reinit is pending.
+		 */
 		if (flag == 1) {
-			if (is_total_seg_overflow(&dev->info) == 0) {
+			if (is_total_seg_overflow(&dev->info) == 0 ||
+			    READ_ONCE(dev->status.status_all))
 				flag = 0;
+			else {
+				msleep(THREAD_SLEEP);
+				continue;
 			}
-			msleep(1);
-			continue;
 		}
 		st.status_all = hist_status_take();
 		if (st.status_all) {
