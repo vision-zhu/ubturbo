@@ -85,8 +85,9 @@ static int scan_group_size_set(const char *val, const struct kernel_param *kp)
 
 	/* Validate parameter: must be positive and power of 2 */
 	if (new_size == 0 || (new_size & (new_size - 1)) != 0) {
-		pr_err("invalid scan group size: %lu, must be > 0 and power of 2\n",
-		       new_size);
+		pr_err_ratelimited(
+			"invalid scan group size: %lu, must be > 0 and power of 2\n",
+			new_size);
 		return -EINVAL;
 	}
 
@@ -170,7 +171,8 @@ static int get_pid_from_tracking_file(const struct file *file)
 	len = strlen(path);
 	number_str = kmalloc(len, GFP_KERNEL);
 	if (number_str == NULL) {
-		pr_err("unable to allocate memory for tracking file path\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for tracking file path\n");
 		return -ENOMEM;
 	}
 	memset(number_str, '\0', len);
@@ -203,7 +205,8 @@ static struct freq_info *get_freq_info(struct ham_tracking_info *info, u64 *n)
 	total_len = info->len[L1] + info->len[L2];
 	freq_info_array = vzalloc(sizeof(struct freq_info) * total_len);
 	if (!freq_info_array) {
-		pr_err("unable to allocate memory for frequency info array\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for frequency info array\n");
 		return NULL;
 	}
 	for (i = 0; i < info->len[L1]; i++) {
@@ -248,19 +251,21 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 	spin_unlock(&ham_lock);
 
 	if (!info) {
-		pr_err("unable to find tracking file of pid: %d in process file system\n",
-		       pid);
+		pr_err_ratelimited(
+			"unable to find tracking file of pid: %d in process file system\n",
+			pid);
 		return -ENXIO;
 	}
 
 	freq_info_array = get_freq_info(info, &num);
 	if (!freq_info_array) {
-		pr_err("unable to get frequency info array\n");
+		pr_err_ratelimited("unable to get frequency info array\n");
 		return -ENOMEM;
 	}
 	if (*pos == 0) {
 		if (copy_to_user(buf, &num, sizeof(u64))) {
-			pr_err("unable to copy size of frequency info array to user space\n");
+			pr_err_ratelimited(
+				"unable to copy size of frequency info array to user space\n");
 			ret = -EFAULT;
 		}
 		freq_info_num = num;
@@ -271,7 +276,8 @@ static ssize_t proc_file_read(struct file *file, char __user *buf, size_t count,
 	num = min(num, freq_info_num);
 	if (copy_to_user(buf, freq_info_array,
 			 sizeof(struct freq_info) * num)) {
-		pr_err("unable to copy frequency info array to user space\n");
+		pr_err_ratelimited(
+			"unable to copy frequency info array to user space\n");
 		ret = -EFAULT;
 		goto out;
 	}
@@ -299,20 +305,23 @@ int smap_create_tracking_info_file(struct ham_tracking_info *info)
 
 	ret = scnprintf(path, sizeof(path), "%d_t", info->pid);
 	if (!ret) {
-		pr_err("wirte pid to path of pid: %d failed\n", info->pid);
+		pr_err_ratelimited("wirte pid to path of pid: %d failed\n",
+				   info->pid);
 		return ret;
 	}
 	proc_dir = proc_mkdir(path, NULL);
 	if (!proc_dir) {
-		pr_err("unable to create directory of pid: %d in process file system\n",
-		       info->pid);
+		pr_err_ratelimited(
+			"unable to create directory of pid: %d in process file system\n",
+			info->pid);
 		return -ENOENT;
 	}
 	proc_file =
 		proc_create("tracking_info", S_IRUGO, proc_dir, &proc_file_ops);
 	if (!proc_file) {
-		pr_err("unable to create tracking info file of pid: %d in process file system\n",
-		       info->pid);
+		pr_err_ratelimited(
+			"unable to create tracking info file of pid: %d in process file system\n",
+			info->pid);
 		remove_proc_entry(path, NULL);
 		return -ENOENT;
 	}
@@ -339,14 +348,17 @@ int get_ham_pages_freqs(pid_t pid, struct freq_info **freq_info_array,
 	spin_unlock(&ham_lock);
 
 	if (!info) {
-		pr_err("unable to find pid: %d in HAM managed pid list\n", pid);
+		pr_err_ratelimited(
+			"unable to find pid: %d in HAM managed pid list\n",
+			pid);
 		return -ENXIO;
 	}
 
 	change_ap_type(pid);
 	*freq_info_array = get_freq_info(info, freq_info_num);
 	if (!*freq_info_array) {
-		pr_err("unable to get frequency info of pid: %d\n", pid);
+		pr_err_ratelimited("unable to get frequency info of pid: %d\n",
+				   pid);
 		return -ENOMEM;
 	}
 	clear_tracking_info(info);
@@ -1033,7 +1045,7 @@ static int scan_kvm_memslots(struct kvm *kvm, struct access_pid *ap,
 	u64 count;
 
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("invalid kvm passed to scan kvm memslots\n");
+		pr_err_ratelimited("invalid kvm passed to scan kvm memslots\n");
 		return -EINVAL;
 	}
 
@@ -1168,7 +1180,7 @@ static int get_total_page_nr(struct smap_vma_struct *vma_array, int len,
 	int i;
 
 	if (!vma_array) {
-		pr_err("vma array is NULL\n");
+		pr_err_ratelimited("vma array is NULL\n");
 		return -EINVAL;
 	}
 
@@ -1261,14 +1273,16 @@ static int fill_vaddrs_info(struct kvm *kvm, struct hva_info *hva_vec, u64 len,
 			else if (cur_node < nr_local_numa && cur_node >= 0)
 				++l1_page_nr;
 			else {
-				pr_err("invalid NUMA index: %d\n", cur_node);
+				pr_err_ratelimited("invalid NUMA index: %d\n",
+						   cur_node);
 				return -EFAULT;
 			}
 			++idx;
 		}
 	}
 	if (l1_page_nr + l2_page_nr != len) {
-		pr_err("failed to fill page info due to number of pages to fill not equal to that of total pages\n");
+		pr_err_ratelimited(
+			"failed to fill page info due to number of pages to fill not equal to that of total pages\n");
 		return -EFAULT;
 	}
 	*l1_page_num = l1_page_nr;
@@ -1284,7 +1298,7 @@ static int get_hva_info_by_scan_kvm_memslots(struct kvm *kvm, u64 *l1_page_num,
 {
 	u64 l1_page_nr, l2_page_nr, i;
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("invalid kvm passed to scan kvm memslots\n");
+		pr_err_ratelimited("invalid kvm passed to scan kvm memslots\n");
 		return -EINVAL;
 	}
 
@@ -1313,12 +1327,14 @@ static int alloc_vaddr_info(struct hva_info **hva_vec, u64 **vaddrs,
 
 	hva_vec_tmp = vzalloc(total_page_nr * sizeof(struct hva_info));
 	if (!hva_vec_tmp) {
-		pr_err("unable to allocate memory for page info vector\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for page info vector\n");
 		return -ENOMEM;
 	}
 	vaddrs_tmp = vzalloc(total_page_nr * sizeof(u64));
 	if (!vaddrs_tmp) {
-		pr_err("unable to allocate memory for virtual address vector\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for virtual address vector\n");
 		vfree(hva_vec_tmp);
 		return -ENOMEM;
 	}
@@ -1331,7 +1347,8 @@ static int alloc_vaddr_info_vm(struct kvm *kvm, struct hva_info **hva_vec,
 			       u64 **vaddrs, u64 total_huge_page_nr)
 {
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("invalid kvm passed to allocate memory to store page info\n");
+		pr_err_ratelimited(
+			"invalid kvm passed to allocate memory to store page info\n");
 		return -EINVAL;
 	}
 
@@ -1350,12 +1367,13 @@ static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 
 	pid_tmp = find_get_pid(pid_nr);
 	if (!pid_tmp) {
-		pr_err("unable to find pid: %d\n", pid_nr);
+		pr_err_ratelimited("unable to find pid: %d\n", pid_nr);
 		return -ESRCH;
 	}
 	task_tmp = get_pid_task(pid_tmp, PIDTYPE_PID);
 	if (!task_tmp) {
-		pr_err("unable to get task struct of pid: %d\n", pid_nr);
+		pr_err_ratelimited("unable to get task struct of pid: %d\n",
+				   pid_nr);
 		put_pid(pid_tmp);
 		return -ESRCH;
 	}
@@ -1363,7 +1381,8 @@ static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 	if (!filp_tmp) {
 		put_task_struct(task_tmp);
 		put_pid(pid_tmp);
-		pr_err("unable to get kvm file of pid: %d\n", pid_nr);
+		pr_err_ratelimited("unable to get kvm file of pid: %d\n",
+				   pid_nr);
 		return -EBADF;
 	}
 	kvm_tmp = filp_tmp->private_data;
@@ -1371,7 +1390,7 @@ static int get_kvm_by_pid(pid_t pid_nr, struct pid **pid,
 		fput(filp_tmp);
 		put_task_struct(task_tmp);
 		put_pid(pid_tmp);
-		pr_err("unable to get kvm of pid: %d\n", pid_nr);
+		pr_err_ratelimited("unable to get kvm of pid: %d\n", pid_nr);
 		return -EINVAL;
 	}
 	*pid = pid_tmp;
@@ -1394,7 +1413,7 @@ int scan_hva_info(pid_t pid_nr, u64 *l1_page_num, u64 *l2_page_num,
 	struct hva_info *hva_vec;
 	ret = get_kvm_by_pid(pid_nr, &pid, &task, &filp, &kvm);
 	if (ret) {
-		pr_err("unable to get kvm of pid: %d\n", pid_nr);
+		pr_err_ratelimited("unable to get kvm of pid: %d\n", pid_nr);
 		return ret;
 	}
 
@@ -1402,15 +1421,17 @@ int scan_hva_info(pid_t pid_nr, u64 *l1_page_num, u64 *l2_page_num,
 	ret = get_total_huge_page_nr(kvm, &total_huge_page_nr);
 	post_scan_kvm_memslots(kvm, srcu_idx);
 	if (ret) {
-		pr_err("unable to get total hugepage number of pid: %d\n",
-		       pid_nr);
+		pr_err_ratelimited(
+			"unable to get total hugepage number of pid: %d\n",
+			pid_nr);
 		goto out_free_task_file;
 	}
 
 	ret = alloc_vaddr_info_vm(kvm, &hva_vec, &vaddrs, total_huge_page_nr);
 	if (ret) {
-		pr_err("unable to allocate memory to store virtual address info of pid: %d\n",
-		       pid_nr);
+		pr_err_ratelimited(
+			"unable to allocate memory to store virtual address info of pid: %d\n",
+			pid_nr);
 		goto out_free_task_file;
 	}
 
@@ -1422,8 +1443,9 @@ int scan_hva_info(pid_t pid_nr, u64 *l1_page_num, u64 *l2_page_num,
 	post_scan_kvm_memslots(kvm, srcu_idx);
 
 	if (ret) {
-		pr_err("unable to get frequency info of all pages of pid: %d by scan kvm\n",
-		       pid_nr);
+		pr_err_ratelimited(
+			"unable to get frequency info of all pages of pid: %d by scan kvm\n",
+			pid_nr);
 		vfree(hva_vec);
 		vfree(vaddrs);
 		goto out_free_task_file;
@@ -1594,19 +1616,21 @@ int scan_hva_info_4k(pid_t pid, u64 *page_num, u64 **vaddr)
 
 	mm = get_mm_by_pid(pid);
 	if (IS_ERR_OR_NULL(mm)) {
-		pr_err("bad mm of pid: %d\n", pid);
+		pr_err_ratelimited("bad mm of pid: %d\n", pid);
 		return -EINVAL;
 	}
 	ret = take_vma_snapshot(mm, &vma_array, &vma_count);
 	if (ret) {
-		pr_err("failed to take VMA snapshot, ret: %d\n", ret);
+		pr_err_ratelimited("failed to take VMA snapshot, ret: %d\n",
+				   ret);
 		goto out_mm;
 	}
 	ret = scan_hva_info_4k_ranges(mm, vma_array, vma_count, page_num,
 				      vaddr);
 	if (ret)
-		pr_err("failed to scan hva info of pid: %d, ret: %d\n", pid,
-		       ret);
+		pr_err_ratelimited(
+			"failed to scan hva info of pid: %d, ret: %d\n", pid,
+			ret);
 	kfree(vma_array);
 out_mm:
 	mmput(mm);
@@ -1717,7 +1741,7 @@ int scan_hva_info_4k_vm(pid_t pid, u64 *page_num, u64 **vaddr)
 
 	ret = get_kvm_by_pid(pid, &pid_s, &task, &filp, &kvm);
 	if (ret) {
-		pr_err("unable to get kvm of pid: %d\n", pid);
+		pr_err_ratelimited("unable to get kvm of pid: %d\n", pid);
 		return ret;
 	}
 	ret = collect_memslot_ranges(kvm, &segs, &seg_cnt);
@@ -1726,15 +1750,16 @@ int scan_hva_info_4k_vm(pid_t pid, u64 *page_num, u64 **vaddr)
 
 	mm = get_mm_by_pid(pid);
 	if (IS_ERR_OR_NULL(mm)) {
-		pr_err("bad mm of pid: %d\n", pid);
+		pr_err_ratelimited("bad mm of pid: %d\n", pid);
 		ret = -EINVAL;
 		goto out_segs;
 	}
 
 	ret = scan_hva_info_4k_ranges(mm, segs, seg_cnt, page_num, vaddr);
 	if (ret)
-		pr_err("failed to scan hva info of pid: %d, ret: %d\n", pid,
-		       ret);
+		pr_err_ratelimited(
+			"failed to scan hva info of pid: %d, ret: %d\n", pid,
+			ret);
 	mmput(mm);
 out_segs:
 	kfree(segs);
@@ -1783,8 +1808,9 @@ static int scan_forward_vm(struct access_pid *ap, int page_size)
 		ret = alloc_statistic_vaddr(kvm, page_size, &stat_vaddr,
 					    &stat_page_cap);
 		if (ret) {
-			pr_err("failed to alloc vaddr for statistic scan of pid: %d\n",
-			       ap->pid);
+			pr_err_ratelimited(
+				"failed to alloc vaddr for statistic scan of pid: %d\n",
+				ap->pid);
 			release_resources(filp, task, pid_s);
 			return ret;
 		}
@@ -1793,7 +1819,8 @@ static int scan_forward_vm(struct access_pid *ap, int page_size)
 	srcu_idx = pre_scan_kvm_memslots(kvm);
 	ret = scan_kvm_memslots(kvm, ap, page_size, stat_vaddr, stat_page_cap);
 	if (ret)
-		pr_err("failed to scan kvm mem slots for pid: %d\n", ap->pid);
+		pr_err_ratelimited("failed to scan kvm mem slots for pid: %d\n",
+				   ap->pid);
 	post_scan_kvm_memslots(kvm, srcu_idx);
 	vfree(stat_vaddr);
 	release_resources(filp, task, pid_s);
@@ -2023,7 +2050,8 @@ static int small_vma_walk(struct mm_struct *mm, unsigned long start_vaddr,
 
 	ret = mmap_read_lock_killable(mm);
 	if (ret) {
-		pr_err("unable to get mmap read lock, ret: %d\n", ret);
+		pr_err_ratelimited("unable to get mmap read lock, ret: %d\n",
+				   ret);
 		return ret;
 	}
 	pte_walk->scan_result_cnt = 0;
@@ -2069,20 +2097,22 @@ static int take_vma_snapshot(struct mm_struct *mm,
 
 	ret = mmap_read_lock_killable(mm);
 	if (ret) {
-		pr_err("unable to get mmap read lock, ret: %d\n", ret);
+		pr_err_ratelimited("unable to get mmap read lock, ret: %d\n",
+				   ret);
 		return ret;
 	}
 	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		count++;
 	}
 	if (!count) {
-		pr_err("unable to get VMA\n");
+		pr_err_ratelimited("unable to get VMA\n");
 		mmap_read_unlock(mm);
 		return -EINVAL;
 	}
 	arr = kzalloc(sizeof(struct smap_vma_struct) * count, GFP_KERNEL);
 	if (!arr) {
-		pr_err("unable to allocate memory for SMAP VMA descriptor\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for SMAP VMA descriptor\n");
 		mmap_read_unlock(mm);
 		return -ENOMEM;
 	}
@@ -2109,15 +2139,17 @@ static int setup_statistic_scan(struct pte_walk *pte_walk, int pid,
 
 	ret = get_total_page_nr(vma_array, vma_count, &total_page_nr);
 	if (ret) {
-		pr_err("failed to get %d page number, ret: %d\n", pid, ret);
+		pr_err_ratelimited("failed to get %d page number, ret: %d\n",
+				   pid, ret);
 		return -EINVAL;
 	}
 	total_page_nr = smap_present_page_cap(total_page_nr);
 	pte_walk->statistic_vaddr = vzalloc(total_page_nr * sizeof(u64));
 	pte_walk->statistic_cap = total_page_nr;
 	if (!pte_walk->statistic_vaddr) {
-		pr_err("failed to malloc statistic vaddr array, ret: %d\n",
-		       pid);
+		pr_err_ratelimited(
+			"failed to malloc statistic vaddr array, ret: %d\n",
+			pid);
 		return -ENOMEM;
 	}
 	return 0;
@@ -2160,8 +2192,9 @@ static int walk_all_vmas(struct mm_struct *mm,
 					    &pte_range_ops);
 		}
 		if (ret) {
-			pr_err("failed to walk VMA, pid: %d, ret: %d\n", pid,
-			       ret);
+			pr_err_ratelimited(
+				"failed to walk VMA, pid: %d, ret: %d\n", pid,
+				ret);
 			return ret;
 		}
 	}
@@ -2184,21 +2217,22 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 
 	mm = get_mm_by_pid(ap->pid);
 	if (IS_ERR_OR_NULL(mm)) {
-		pr_err("bad mm of pid: %d\n", ap->pid);
+		pr_err_ratelimited("bad mm of pid: %d\n", ap->pid);
 		return -EINVAL;
 	}
 
 	pte_walk.scan_results = vzalloc(SCAN_RESULT_CAPACITY *
 					sizeof(struct scan_result_entry));
 	if (!pte_walk.scan_results) {
-		pr_err("failed to allocate scan results buffer\n");
+		pr_err_ratelimited("failed to allocate scan results buffer\n");
 		mmput(mm);
 		return -ENOMEM;
 	}
 
 	ret = take_vma_snapshot(mm, &vma_array, &vma_count);
 	if (ret) {
-		pr_err("failed to take VMA snapshot, ret: %d\n", ret);
+		pr_err_ratelimited("failed to take VMA snapshot, ret: %d\n",
+				   ret);
 		vfree(pte_walk.scan_results);
 		mmput(mm);
 		return -EINVAL;
@@ -2206,7 +2240,8 @@ static int scan_forward_4k_mm(struct access_pid *ap, int page_size)
 
 	ret = setup_statistic_scan(&pte_walk, ap->pid, vma_array, vma_count);
 	if (ret) {
-		pr_err("failed to setup statistic scan, ret: %d\n", ret);
+		pr_err_ratelimited("failed to setup statistic scan, ret: %d\n",
+				   ret);
 		vfree(pte_walk.scan_results);
 		kfree(vma_array);
 		mmput(mm);

@@ -58,8 +58,9 @@ static int wait_migrate_back_result(unsigned long long task_id)
 		kref_get(&t->ref);
 	spin_unlock(&migrate_back_task_lock);
 	if (!t) {
-		pr_err("migrate back task %llu disappeared before wait\n",
-		       task_id);
+		pr_err_ratelimited(
+			"migrate back task %llu disappeared before wait\n",
+			task_id);
 		return -EAGAIN;
 	}
 
@@ -86,8 +87,8 @@ static int check_duplicate_task(struct migrate_back_task *task)
 	task_ret = dup_task(task->task_id, &migrate_back_task_list);
 	if (task_ret == DUP_ID) {
 		spin_unlock(&migrate_back_task_lock);
-		pr_err("duplicated migrate back task id: %llu\n",
-		       task->task_id);
+		pr_err_ratelimited("duplicated migrate back task id: %llu\n",
+				   task->task_id);
 		return DUP_ID;
 	}
 	if (task_ret == RETRY_ID) {
@@ -108,14 +109,14 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 
 	ret = 0;
 	if (msg->count == 0) {
-		pr_err("null message passed to migrate back\n");
+		pr_err_ratelimited("null message passed to migrate back\n");
 		goto err_param;
 	}
 
 	ret = -ENOMEM;
 	task = init_migrate_back_task(msg->task_id);
 	if (!task) {
-		pr_err("failed to init migrate back task\n");
+		pr_err_ratelimited("failed to init migrate back task\n");
 		goto err_param;
 	}
 
@@ -129,9 +130,10 @@ int smap_ioctl_migrate_back(struct migrate_back_inner_msg *msg)
 		ret = init_migrate_back_subtask(task, &msg->payload[i],
 						&subtask);
 		if (ret < 0) {
-			pr_err("failed to init migrate back subtask, source node: %d, destination node: %d\n",
-			       msg->payload[i].src_nid,
-			       msg->payload[i].dest_nid);
+			pr_err_ratelimited(
+				"failed to init migrate back subtask, source node: %d, destination node: %d\n",
+				msg->payload[i].src_nid,
+				msg->payload[i].dest_nid);
 			goto err_put_task;
 		}
 		list_add(&subtask->task_list, &task->subtask);
@@ -168,21 +170,24 @@ static int check_migrate_back_msg(struct migrate_back_msg *mb_msg)
 {
 	int i;
 	if (mb_msg->count <= 0 || mb_msg->count > MAX_NR_MIGBACK) {
-		pr_err("invalid message count passed to migrate back\n");
+		pr_err_ratelimited(
+			"invalid message count passed to migrate back\n");
 		return -EINVAL;
 	}
 
 	for (i = 0; i < mb_msg->count; i++) {
 		struct migrate_back_payload *p = &(mb_msg->payload[i]);
 		if (is_node_invalid(p->src_nid)) {
-			pr_err("invalid source node: %d of %dth message\n",
-			       p->src_nid, i);
+			pr_err_ratelimited(
+				"invalid source node: %d of %dth message\n",
+				p->src_nid, i);
 			return -EINVAL;
 		}
 		if (p->dest_nid != NUMA_NO_NODE &&
 		    is_node_invalid(p->dest_nid)) {
-			pr_err("invalid destination node: %d of %dth message\n",
-			       p->dest_nid, i);
+			pr_err_ratelimited(
+				"invalid destination node: %d of %dth message\n",
+				p->dest_nid, i);
 			return -EINVAL;
 		}
 	}
@@ -197,7 +202,8 @@ static int __ioctl_migrate_back(void __user *argp)
 	struct migrate_back_inner_msg *mb_imsg;
 
 	if (copy_from_user(&mb_msg, argp, sizeof(mb_msg))) {
-		pr_err("failed to copy migrate back message from user space\n");
+		pr_err_ratelimited(
+			"failed to copy migrate back message from user space\n");
 		return -EFAULT;
 	}
 
@@ -207,7 +213,7 @@ static int __ioctl_migrate_back(void __user *argp)
 
 	mb_imsg = kmalloc(sizeof(*mb_imsg), GFP_KERNEL);
 	if (!mb_imsg) {
-		pr_err("failed to malloc migrate back inner msg\n");
+		pr_err_ratelimited("failed to malloc migrate back inner msg\n");
 		return -ENOMEM;
 	}
 	mb_imsg->task_id = mb_msg.task_id;
@@ -220,15 +226,17 @@ static int __ioctl_migrate_back(void __user *argp)
 		ret = find_range_by_memid(p->memid, &i_p->pa_start,
 					  &i_p->pa_end);
 		if (ret) {
-			pr_err("unable to find range of memid: %llu, ret: %d\n",
-			       p->memid, ret);
+			pr_err_ratelimited(
+				"unable to find range of memid: %llu, ret: %d\n",
+				p->memid, ret);
 			goto free_imsg;
 		}
 
 		if (smap_is_remote_addr_valid(p->src_nid, i_p->pa_start,
 					      i_p->pa_end)) {
-			pr_err("memory range mismatch with node: %d\n",
-			       p->src_nid);
+			pr_err_ratelimited(
+				"memory range mismatch with node: %d\n",
+				p->src_nid);
 			ret = -EINVAL;
 			goto free_imsg;
 		}

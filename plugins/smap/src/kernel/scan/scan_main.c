@@ -118,8 +118,9 @@ int set_remote_scan_mode(u8 mode)
 	if (mode != SMAP_REMOTE_SCAN_SOFT && !hist_inited) {
 		ret = hist_module_init();
 		if (ret) {
-			pr_err("unable to init hist tracking for scan mode %u, ret: %d\n",
-			       mode, ret);
+			pr_err_ratelimited(
+				"unable to init hist tracking for scan mode %u, ret: %d\n",
+				mode, ret);
 			mutex_unlock(&remote_scan_mode_lock);
 			return -ENODEV;
 		}
@@ -272,8 +273,9 @@ static void set_scan_cpus_work_fn(struct work_struct *work)
 
 	for (cpu_index = sw->cpu_start; cpu_index <= sw->cpu_end; cpu_index++) {
 		if (!cpu_online(cpu_index)) {
-			pr_err("cpu %d is not online, cannot be used for scan\n",
-			       cpu_index);
+			pr_err_ratelimited(
+				"cpu %d is not online, cannot be used for scan\n",
+				cpu_index);
 			sw->result = -EINVAL;
 			goto out;
 		}
@@ -291,7 +293,8 @@ static void set_scan_cpus_work_fn(struct work_struct *work)
 
 	filp = filp_open(path, O_WRONLY, 0);
 	if (IS_ERR(filp)) {
-		pr_err("failed to open workqueue cpumask sysfs: %s\n", path);
+		pr_err_ratelimited(
+			"failed to open workqueue cpumask sysfs: %s\n", path);
 		sw->result = PTR_ERR(filp);
 		goto out;
 	}
@@ -300,7 +303,8 @@ static void set_scan_cpus_work_fn(struct work_struct *work)
 	filp_close(filp, NULL);
 
 	if (ret < 0) {
-		pr_err("failed to write workqueue cpumask: %zd\n", ret);
+		pr_err_ratelimited("failed to write workqueue cpumask: %zd\n",
+				   ret);
 		sw->result = ret;
 		goto out;
 	}
@@ -370,7 +374,7 @@ static int create_scan_workqueue(void)
 	scan_state.scanq = alloc_workqueue(
 		scan_state.workq_name, WQ_UNBOUND | WQ_SYSFS, WQ_MAX_THREADS);
 	if (!scan_state.scanq) {
-		pr_err("unable to init access bit workqueue\n");
+		pr_err_ratelimited("unable to init access bit workqueue\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -518,11 +522,12 @@ static void handle_statistic_scan(struct access_pid *ap, ktime_t start_time,
 	}
 
 	if (*scan_delay_ms < ((scan_time / MS_TO_US) + delay_buffer_ms)) {
-		pr_err("pid[%d] scan cost %lums exceeded expected scan time:%lums\n",
-		       ap->pid,
-		       (unsigned long)((scan_time / MS_TO_US) +
-				       delay_buffer_ms),
-		       *scan_delay_ms);
+		pr_err_ratelimited(
+			"pid[%d] scan cost %lums exceeded expected scan time:%lums\n",
+			ap->pid,
+			(unsigned long)((scan_time / MS_TO_US) +
+					delay_buffer_ms),
+			*scan_delay_ms);
 		*scan_delay_ms = 0;
 	} else {
 		*scan_delay_ms -= (scan_time / MS_TO_US + delay_buffer_ms);
@@ -593,8 +598,9 @@ static void access_work_func(struct work_struct *work)
 	end_time = ktime_get();
 	scan_time = ktime_to_us(ktime_sub(end_time, start_time));
 	if (ret < 0) {
-		pr_err("unable to scan access-flag, page size: %d\n",
-		       page_size);
+		pr_err_ratelimited(
+			"unable to scan access-flag, page size: %d\n",
+			page_size);
 		goto scan_failed;
 	}
 	ap->cur_times++;
@@ -639,7 +645,7 @@ static void access_work_func(struct work_struct *work)
 scan_failed:
 	if (ap->type == NORMAL_SCAN)
 		WRITE_ONCE(ap->freq_ready, false);
-	pr_err("pid %d scan stopped, ret: %d\n", ap->pid, ret);
+	pr_err_ratelimited("pid %d scan stopped, ret: %d\n", ap->pid, ret);
 	complete(&ap->work_done);
 	ap_put_slot(slot);
 }

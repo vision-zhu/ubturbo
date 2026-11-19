@@ -353,13 +353,14 @@ static int scan_kvm_gfn(struct kvm *kvm, struct vm_mapping_info *info)
 	u64 gfn_thre = VM_MEMSLOT_PRIOR_THRE;
 
 	if (!kvm || !kvm->arch.mmu.pgt) {
-		pr_err("null kvm or kvm pagetable passed to kvm scan gfn\n");
+		pr_err_ratelimited(
+			"null kvm or kvm pagetable passed to kvm scan gfn\n");
 		return -EINVAL;
 	}
 
 	slots = kvm_memslots(kvm);
 	if (!slots) {
-		pr_err("unable to get kvm memslots\n");
+		pr_err_ratelimited("unable to get kvm memslots\n");
 		return -EINVAL;
 	}
 
@@ -718,7 +719,8 @@ static int create_procfs_freq(struct access_pid *ap)
 	freq_pde = proc_create_data("mem_freq", S_IRUSR | S_IRGRP,
 				    ap->proc_root, &ap_mem_freq_fops, ap);
 	if (!freq_pde) {
-		pr_err("failed to create proc freq dir for %d\n", ap->pid);
+		pr_err_ratelimited("failed to create proc freq dir for %d\n",
+				   ap->pid);
 		return -ENOMEM;
 	}
 	proc_set_user(freq_pde, procfs_kuid, procfs_kgid);
@@ -758,16 +760,16 @@ static int create_procfs(struct access_pid *ap)
 		return -EINVAL;
 
 	if (pid_procfs_exists(pid)) {
-		pr_err("procfs for pid %d already exists\n", pid);
+		pr_err_ratelimited("procfs for pid %d already exists\n", pid);
 		return -EEXIST;
 	}
 	root_pde = proc_mkdir(dirname, smap_procfs_root);
 	if (!root_pde) {
-		pr_err("failed to create proc dir for %d\n", pid);
+		pr_err_ratelimited("failed to create proc dir for %d\n", pid);
 		return -ENOMEM;
 	}
 	proc_set_user(root_pde, procfs_kuid, procfs_kgid);
-	pr_info("procfs root for %d created\n", pid);
+	pr_debug("procfs root for %d created\n", pid);
 	ap->proc_root = root_pde;
 
 	/* create /proc/smap/<pid>/mem_freq */
@@ -997,7 +999,8 @@ int access_add_ham_pid(int len, struct access_add_pid_payload *payload,
 			ret = init_access_ham_pid(p);
 		}
 		if (ret) {
-			pr_err("unable to init HAM access pid: %d\n", p->pid);
+			pr_err_ratelimited(
+				"unable to init HAM access pid: %d\n", p->pid);
 			return ret;
 		}
 	}
@@ -1189,15 +1192,17 @@ int access_add_statistic_pid(int len, struct access_add_pid_payload *payload,
 		if (p->type != STATISTIC_SCAN)
 			continue;
 		if (p->duration > MAX_SCAN_DURATION_SEC) {
-			pr_err("invalid scan duration: %u of pid: %d passed to add statistic access tracking\n",
-			       p->duration, p->pid);
+			pr_err_ratelimited(
+				"invalid scan duration: %u of pid: %d passed to add statistic access tracking\n",
+				p->duration, p->pid);
 			return -EINVAL;
 		}
 		pr_debug("init access statistic pid %d\n", p->pid);
 		ret = init_access_statistic_pid(p, page_size);
 		if (ret) {
-			pr_err("failed to add statistic access pid: %d\n",
-			       p->pid);
+			pr_err_ratelimited(
+				"failed to add statistic access pid: %d\n",
+				p->pid);
 			return ret;
 		}
 	}
@@ -1212,8 +1217,9 @@ static void move_to_ap_data_list(struct list_head *tmp_head)
 	list_for_each_entry_safe(ap, tmp, tmp_head, node) {
 		ap->cur_times = 0;
 		if (ap_slot_add(ap) < 0) {
-			pr_err("ap_slot table full, pid %d rejected\n",
-			       ap->pid);
+			pr_err_ratelimited(
+				"ap_slot table full, pid %d rejected\n",
+				ap->pid);
 			list_move_tail(&ap->node, &dup_head);
 			continue;
 		}
@@ -1333,8 +1339,9 @@ void access_remove_ham_pid(int len, struct access_remove_pid_payload *payload)
 			}
 			ret = scnprintf(path, sizeof(path), "%d_t", ap->pid);
 			if (!ret) {
-				pr_err("write pid to path of pid: %d failed\n",
-				       ap->pid);
+				pr_err_ratelimited(
+					"write pid to path of pid: %d failed\n",
+					ap->pid);
 				break;
 			}
 			remove_proc_entry("tracking_info", ap->pde);
@@ -1397,7 +1404,7 @@ void access_remove_all_pid(void)
 	char path[MAX_PATH_LENGTH];
 	int i, ret;
 
-	pr_info("remove all pid\n");
+	pr_debug("remove all pid\n");
 	/* Iterate the slot table and remove each INUSE pid. ap_slot_remove
 	 * sets REMOVING and drops the initial ref; the slot is skipped by
 	 * subsequent iterations (state != INUSE), so inline iteration is safe.
@@ -1528,13 +1535,15 @@ int access_walk_pagemap_prepare(struct access_pid *ap)
 	ret = init_ap_bm(MAX_NUMNODES, nodes_page_count, ap);
 	if (ret) {
 		kfree(nodes_page_count);
-		pr_err("unable to init access bitmap for pid: %d\n", ap->pid);
+		pr_err_ratelimited("unable to init access bitmap for pid: %d\n",
+				   ap->pid);
 		return ret;
 	}
 	ret = init_vm_mapping(&ap->info);
 	if (ret) {
 		kfree(nodes_page_count);
-		pr_err("unable to init vm mapping for pid: %d\n", ap->pid);
+		pr_err_ratelimited("unable to init vm mapping for pid: %d\n",
+				   ap->pid);
 		free_ap_bm(ap);
 		return ret;
 	}
@@ -1589,12 +1598,14 @@ static int calc_absolute_pos(unsigned long *paddr_bm, size_t bm_len,
 static int check_migrate_params(int nid, u64 len, u64 *addr)
 {
 	if (nid < 0 || nid >= MAX_NUMNODES) {
-		pr_err("invalid node %d passed to convert position to PA\n",
-		       nid);
+		pr_err_ratelimited(
+			"invalid node %d passed to convert position to PA\n",
+			nid);
 		return -EINVAL;
 	}
 	if (len == 0 || !addr) {
-		pr_err("invalid length or address passed to check\n");
+		pr_err_ratelimited(
+			"invalid length or address passed to check\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -1656,8 +1667,9 @@ int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr)
 
 	slot = ap_get_slot(pid);
 	if (!slot) {
-		pr_err("invalid pid: %d passed to convert position to PA\n",
-		       pid);
+		pr_err_ratelimited(
+			"invalid pid: %d passed to convert position to PA\n",
+			pid);
 		return -EINVAL;
 	}
 	ap = slot->ap;

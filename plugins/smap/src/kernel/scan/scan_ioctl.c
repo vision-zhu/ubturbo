@@ -45,18 +45,20 @@ struct proc_dir_entry *smap_procfs_root = NULL;
 static int check_msg_validity(struct access_add_pid_msg *msg)
 {
 	if (!msg) {
-		pr_err("null pid message passed to access tracking\n");
+		pr_err_ratelimited(
+			"null pid message passed to access tracking\n");
 		return -EINVAL;
 	}
 	int max_count = is_access_hugepage() ? MAX_2M_PROCESSES_CNT
 					     : MAX_4K_PROCESSES_CNT;
 	if (msg->count <= 0 || msg->count > max_count) {
-		pr_err("invalid message count: %d passed to access tracking\n",
-		       msg->count);
+		pr_err_ratelimited(
+			"invalid message count: %d passed to access tracking\n",
+			msg->count);
 		return -EINVAL;
 	}
 	if (!msg->payload) {
-		pr_err("null payload passed to access tracking\n");
+		pr_err_ratelimited("null payload passed to access tracking\n");
 		return -EINVAL;
 	}
 	/* stride = 定长头 + 尾部位图字数×8，范围由运行期 cap 折算，越界即非法 */
@@ -64,8 +66,9 @@ static int check_msg_validity(struct access_add_pid_msg *msg)
 	    msg->stride >
 		    sizeof(struct access_add_pid_payload) +
 			    NUMA_NODES_BIT_WORDS * sizeof(unsigned long)) {
-		pr_err("invalid payload stride: %u passed to access tracking\n",
-		       msg->stride);
+		pr_err_ratelimited(
+			"invalid payload stride: %u passed to access tracking\n",
+			msg->stride);
 		return -EINVAL;
 	}
 	return 0;
@@ -105,13 +108,15 @@ static int add_payload(int len, struct access_add_pid_payload *payload,
 	int ret;
 	ret = access_add_ham_pid(len, payload, stride);
 	if (ret) {
-		pr_err("failed to add HAM pid tracking task, ret: %d\n", ret);
+		pr_err_ratelimited(
+			"failed to add HAM pid tracking task, ret: %d\n", ret);
 		return ret;
 	}
 	ret = access_add_statistic_pid(len, payload, stride, page_size);
 	if (ret) {
-		pr_err("failed to add statistic pid tracking task, ret: %d\n",
-		       ret);
+		pr_err_ratelimited(
+			"failed to add statistic pid tracking task, ret: %d\n",
+			ret);
 		return ret;
 	}
 	ret = access_add_pid(len, payload, stride);
@@ -132,8 +137,9 @@ static bool check_payload_validity(struct access_add_pid_payload *payload,
 		if (p->pid == NON_EXIST_PID)
 			continue;
 		if (p->nr_words > NUMA_NODES_BIT_WORDS) {
-			pr_err("invalid numa_nodes words %u of message payload[%d]\n",
-			       p->nr_words, i);
+			pr_err_ratelimited(
+				"invalid numa_nodes words %u of message payload[%d]\n",
+				p->nr_words, i);
 			return false;
 		}
 		pr_debug(
@@ -142,23 +148,27 @@ static bool check_payload_validity(struct access_add_pid_payload *payload,
 			p->numa_nodes, p->scan_time, p->ntimes, p->duration,
 			p->type);
 		if (p->type >= MAX_SCAN_TYPE || p->type < 0) {
-			pr_err("invalid scan type %d of message payload[%d]\n",
-			       p->type, i);
+			pr_err_ratelimited(
+				"invalid scan type %d of message payload[%d]\n",
+				p->type, i);
 			return false;
 		}
 		if (p->ntimes == 0) {
-			pr_err("invalid scan times %d of message payload[%d]\n",
-			       p->ntimes, i);
+			pr_err_ratelimited(
+				"invalid scan times %d of message payload[%d]\n",
+				p->ntimes, i);
 			return false;
 		}
 		if (p->scan_time == 0 || p->scan_time > MAX_SCAN_PERIOD) {
-			pr_err("invalid scan time %d of message payload[%d]\n",
-			       p->scan_time, i);
+			pr_err_ratelimited(
+				"invalid scan time %d of message payload[%d]\n",
+				p->scan_time, i);
 			return false;
 		}
 		if (p->ntimes > (MAX_MIGRATE_PERIOD / p->scan_time)) {
-			pr_err("invalid scan ntimes %d of message payload[%d]\n",
-			       p->ntimes, i);
+			pr_err_ratelimited(
+				"invalid scan ntimes %d of message payload[%d]\n",
+				p->ntimes, i);
 			return false;
 		}
 	}
@@ -180,7 +190,8 @@ static long ioctl_add_pid(void __user *argp)
 
 	payload = vzalloc((size_t)msg.count * msg.stride);
 	if (!payload) {
-		pr_err("unable to allocate memory for access pid payload\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for access pid payload\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(payload, msg.payload,
@@ -189,7 +200,7 @@ static long ioctl_add_pid(void __user *argp)
 		goto out_free_payload;
 	}
 
-	pr_info("adding pid payload:\n");
+	pr_debug("adding pid payload:\n");
 	if (!check_payload_validity(payload, msg.count, msg.stride)) {
 		ret = -EINVAL;
 		goto out_free_payload;
@@ -210,12 +221,14 @@ static long ioctl_remove_pid(void __user *argp)
 	if (msg.count <= 0 || msg.count > MAX_NR_REMOVE)
 		return -EINVAL;
 	if (!msg.payload) {
-		pr_err("null payload passed to access remove pid\n");
+		pr_err_ratelimited(
+			"null payload passed to access remove pid\n");
 		return -EINVAL;
 	}
 	payload = vzalloc(sizeof(struct access_remove_pid_payload) * msg.count);
 	if (!payload) {
-		pr_err("unable to allocate memory for access pid payload\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for access pid payload\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(payload, msg.payload,
@@ -224,9 +237,9 @@ static long ioctl_remove_pid(void __user *argp)
 		vfree(payload);
 		return -EFAULT;
 	}
-	pr_info("remove pid payload\n");
+	pr_debug("remove pid payload\n");
 	for (i = 0; i < msg.count; i++)
-		pr_info("[%d] pid %d\n", i, payload[i].pid);
+		pr_debug("[%d] pid %d\n", i, payload[i].pid);
 
 	access_remove_pid(msg.count, payload);
 	access_remove_ham_pid(msg.count, payload);
@@ -251,7 +264,8 @@ static int create_procfs_root(struct user_info *ui)
 {
 	smap_procfs_root = proc_mkdir(SMAP_PROC_ROOT, NULL);
 	if (!smap_procfs_root) {
-		pr_err("failed to create /proc/%s\n", SMAP_PROC_ROOT);
+		pr_err_ratelimited("failed to create /proc/%s\n",
+				   SMAP_PROC_ROOT);
 		return -ENOMEM;
 	}
 
@@ -411,22 +425,24 @@ static long ioctl_get_tracking(void __user *argp)
 	struct tracking_info_payload msg;
 	u16 *tracking_data;
 	struct statistics_tracking_info *tmp;
-	pr_info("Receive ioctl get tracking\n");
+	pr_debug("Receive ioctl get tracking\n");
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
 
 	if (msg.length == 0) {
-		pr_err("invalid message length passed to get tracking data\n");
+		pr_err_ratelimited(
+			"invalid message length passed to get tracking data\n");
 		return -EINVAL;
 	}
 
 	if (!msg.data) {
-		pr_err("null buffer passed to get tracking data\n");
+		pr_err_ratelimited("null buffer passed to get tracking data\n");
 		return -EINVAL;
 	}
 	tracking_data = vzalloc(sizeof(u16) * msg.length);
 	if (!tracking_data) {
-		pr_err("unable to allocate memory for tracking data payload\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for tracking data payload\n");
 		return -ENOMEM;
 	}
 
@@ -438,16 +454,17 @@ static long ioctl_get_tracking(void __user *argp)
 	up_read(&statistic_lock);
 	/* GET_TRACKING 为 DFX 统计扫描频次，保留原始 u16 真值，不做压缩 */
 	if (copy_to_user(argp, &msg, sizeof(msg))) {
-		pr_err("failed to copy message to user space\n");
+		pr_err_ratelimited("failed to copy message to user space\n");
 		ret = -EFAULT;
 		goto out_free;
 	}
 	if (copy_to_user(msg.data, tracking_data, sizeof(u16) * msg.length)) {
-		pr_err("failed to copy tracking data to user space buffer\n");
+		pr_err_ratelimited(
+			"failed to copy tracking data to user space buffer\n");
 		ret = -EFAULT;
 	}
-	pr_info("Exit ioctl get tracking, ret: %d, outlen: %d\n", ret,
-		msg.length);
+	pr_debug("Exit ioctl get tracking, ret: %d, outlen: %d\n", ret,
+		 msg.length);
 out_free:
 	vfree(tracking_data);
 	return ret;
@@ -456,10 +473,10 @@ out_free:
 static long ioctl_get_nr_local_numa(void __user *argp)
 {
 	if (copy_to_user(argp, &nr_local_numa, sizeof(int))) {
-		pr_err("copy_to_user nr_local_numa failed\n");
+		pr_err_ratelimited("copy_to_user nr_local_numa failed\n");
 		return -EFAULT;
 	}
-	pr_info("passed nr_local_numa %d to user space\n", nr_local_numa);
+	pr_debug("passed nr_local_numa %d to user space\n", nr_local_numa);
 	return 0;
 }
 
@@ -468,20 +485,21 @@ static long ioctl_set_scan_cpu(void __user *argp)
 	struct smap_scan_cpu_range range;
 
 	if (copy_from_user(&range, argp, sizeof(range))) {
-		pr_err("copy_from_user smap_scan_cpu_range failed\n");
+		pr_err_ratelimited(
+			"copy_from_user smap_scan_cpu_range failed\n");
 		return -EFAULT;
 	}
 
 	if (range.cpu_min > range.cpu_max ||
 	    range.cpu_max >= num_possible_cpus()) {
-		pr_err("invalid scan cpu range: %d-%d\n", range.cpu_min,
-		       range.cpu_max);
+		pr_err_ratelimited("invalid scan cpu range: %d-%d\n",
+				   range.cpu_min, range.cpu_max);
 		return -EINVAL;
 	}
 
 	if (set_scan_cpus(range.cpu_min, range.cpu_max)) {
-		pr_err("failed to set scan cpu range: %d-%d\n", range.cpu_min,
-		       range.cpu_max);
+		pr_err_ratelimited("failed to set scan cpu range: %d-%d\n",
+				   range.cpu_min, range.cpu_max);
 		return -EINVAL;
 	}
 	return 0;

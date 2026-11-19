@@ -222,7 +222,8 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 			folios, nr_folios, smap_alloc_new_node_page_mig_back,
 			NULL, to_node, remote_migrate_mode, &nr_succeeded);
 		if (err) {
-			pr_warn("failed to migrate back, ret: %d\n", err);
+			pr_warn_ratelimited("failed to migrate back, ret: %d\n",
+					    err);
 		}
 	} else if (MIGRATE_TYPE_HOTNESS == type) {
 		err = isolate_and_migrate_folios(folios, nr_folios,
@@ -230,17 +231,20 @@ unsigned int smap_migrate(struct folio **folios, unsigned int nr_folios,
 						 to_node, remote_migrate_mode,
 						 &nr_succeeded);
 		if (err) {
-			pr_warn("failed to migrate, ret: %d\n", err);
+			pr_warn_ratelimited("failed to migrate, ret: %d\n",
+					    err);
 		}
 	} else if (MIGRATE_TYPE_REMOTE == type) {
 		err = smap_isolate_and_migrate_folios(
 			folios, nr_folios, smap_alloc_new_node_page, NULL,
 			to_node, remote_migrate_mode, &nr_succeeded);
 		if (err > 0)
-			pr_warn("isolat or migrate remote range err: %d\n",
+			pr_warn_ratelimited(
+				"isolat or migrate remote range err: %d\n",
 				err);
 		else if (err < 0)
-			pr_err("failed to migrate folios, err: %d\n", err);
+			pr_err_ratelimited(
+				"failed to migrate folios, err: %d\n", err);
 	}
 	mig_time = calc_time_us(start_time);
 	pr_debug(
@@ -361,8 +365,9 @@ static int smap_add_page_for_migrate_back(u64 pa,
 		return ret;
 
 	if (nid < 0 || nid >= nr_local_numa) {
-		pr_err("invalid local NUMA node: %d passed to add pages for migrate back\n",
-		       nid);
+		pr_err_ratelimited(
+			"invalid local NUMA node: %d passed to add pages for migrate back\n",
+			nid);
 		return -EINVAL;
 	}
 	folio = smap_try_get_page_folio(page);
@@ -413,7 +418,7 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 #endif
 
 	if (!check_addr_range_valid(task)) {
-		pr_err("MIGRATE_ISOLATE pages in range\n");
+		pr_err_ratelimited("MIGRATE_ISOLATE pages in range\n");
 		task->status = MB_SUBTASK_ERR;
 		task->isolated_flag = true;
 		return;
@@ -464,7 +469,7 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 			continue;
 		}
 		if (is_page_hwpoison(page)) {
-			pr_err("unsupported page type: hwpoison\n");
+			pr_err_ratelimited("unsupported page type: hwpoison\n");
 			continue;
 		}
 		ret = smap_add_page_for_migration(
@@ -517,8 +522,8 @@ void smap_handle_migrate_back_subtask(struct migrate_back_subtask *task)
 	vfree(migrate_folios);
 	if (nr_migrate_fail) {
 		task->status = MB_SUBTASK_ERR;
-		pr_err("migrate to node%d failed %d pages\n", task->src_nid,
-		       nr_migrate_fail);
+		pr_err_ratelimited("migrate to node%d failed %d pages\n",
+				   task->src_nid, nr_migrate_fail);
 	}
 	task->status =
 		(nr_migrate_fail || (!is_smap_pg_huge() && nr_pre_migrate_fail))
@@ -550,7 +555,7 @@ static void process_pages_for_migration(struct migrate_back_subtask *task,
 			continue;
 		}
 		if (is_page_hwpoison(page)) {
-			pr_err("unsupported page type: hwpoison\n");
+			pr_err_ratelimited("unsupported page type: hwpoison\n");
 			continue;
 		}
 		if (__folio_test_movable(page_folio(page)) ||
@@ -599,7 +604,8 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 		kfree(mig_pages_cnt);
 		kfree(migrate_folios);
 		task->status = MB_SUBTASK_ERR;
-		pr_err("unable to allocate memory for migrate back arrays\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for migrate back arrays\n");
 		return;
 	}
 
@@ -614,7 +620,8 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 				vfree(migrate_folios[j]);
 			}
 			task->status = MB_SUBTASK_ERR;
-			pr_err("unable to allocate memory for migrate folio list\n");
+			pr_err_ratelimited(
+				"unable to allocate memory for migrate folio list\n");
 			kfree(mig_pages_cnt);
 			kfree(migrate_folios);
 			return;
@@ -667,8 +674,9 @@ void smap_handle_migrate_back_subtask_4k(struct migrate_back_subtask *task)
 #endif
 		if (nr_fail) {
 			task->status = MB_SUBTASK_ERR;
-			pr_err("migrate to node: %d failed %d pages\n", i,
-			       nr_fail);
+			pr_err_ratelimited(
+				"migrate to node: %d failed %d pages\n", i,
+				nr_fail);
 			nr_migrate_fail += nr_fail;
 		}
 		vfree(migrate_folios[i]);
@@ -827,8 +835,8 @@ static int migrate_one_batch(int idx, struct migrate_msg *msg,
 		collect_one_folio(idx, mig_list, msg, j, &batch, stats);
 
 	if (batch.pre_failed)
-		pr_warn("pre_migrate fail %u pages, ret: %d\n",
-			batch.pre_failed, batch.pre_err);
+		pr_warn_ratelimited("pre_migrate fail %u pages, ret: %d\n",
+				    batch.pre_failed, batch.pre_err);
 
 	mig_list[idx].failed_pre_migrated_nr +=
 		nr_this_migrate - batch.tmp_pre_nr;
@@ -1029,7 +1037,7 @@ static int smap_pre_migrate_range(struct folio **folios,
 			continue;
 		}
 		if (is_page_hwpoison(page)) {
-			pr_err("unsupported page type: hwpoison\n");
+			pr_err_ratelimited("unsupported page type: hwpoison\n");
 			continue;
 		}
 		folio = page_folio(page);
@@ -1088,18 +1096,19 @@ static int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 	struct folio **migrate_folios;
 
 	if (!pfn_valid(start_pfn) || !pfn_valid(end_pfn)) {
-		pr_err("invalid pfn passed to migrate range\n");
+		pr_err_ratelimited("invalid pfn passed to migrate range\n");
 		return -EINVAL;
 	}
 	if (start_pfn >= end_pfn ||
 	    (end_pfn - start_pfn + 1) > MAX_MIG_LIST_NR) {
-		pr_err("invalid pfn passed to migrate range\n");
+		pr_err_ratelimited("invalid pfn passed to migrate range\n");
 		return -EINVAL;
 	}
 	migrate_folios =
 		vzalloc((end_pfn - start_pfn + 1) * sizeof(struct folio *));
 	if (!migrate_folios) {
-		pr_err("unable to allocate memory for migrate folio list\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for migrate folio list\n");
 		return -ENOMEM;
 	}
 	/* end_pfn is inclusive: the array was sized for it, walk it too */
@@ -1113,9 +1122,10 @@ static int smap_migrate_range(int nid, u64 start_pa, u64 end_pa)
 		nr_pre_migrate_cnt -= nr_folios_min;
 		cnt++;
 		if (nr_migrate_fail) {
-			pr_err("migrate pre_migrate cnt: %d, mig failed %d pages in pfn range %#lx-%#lx\n",
-			       nr_folios_min, nr_migrate_fail, start_pfn,
-			       end_pfn);
+			pr_err_ratelimited(
+				"migrate pre_migrate cnt: %d, mig failed %d pages in pfn range %#lx-%#lx\n",
+				nr_folios_min, nr_migrate_fail, start_pfn,
+				end_pfn);
 			/*
 			 * On early exit, drop the references of folios not yet handed
 			 * over (4K mode only: collection holds a reference via

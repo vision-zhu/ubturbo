@@ -73,8 +73,9 @@ static void migrate_back_work_func(struct work_struct *work)
 
 	ret = iterate_obmm_dev();
 	if (ret) {
-		pr_err("failed to iterate obmm_dev in migrate back schedule, ret: %d\n",
-		       ret);
+		pr_err_ratelimited(
+			"failed to iterate obmm_dev in migrate back schedule, ret: %d\n",
+			ret);
 	}
 
 next:

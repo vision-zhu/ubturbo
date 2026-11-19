@@ -169,8 +169,9 @@ static int check_migrate_list_nodes(int len, struct mig_list *mlist)
 	for (i = 0; i < len; i++) {
 		if (is_node_invalid(mlist[i].from) ||
 		    is_node_invalid(mlist[i].to)) {
-			pr_err("invalid node from %d to %d of migrate list %d\n",
-			       mlist[i].from, mlist[i].to, i);
+			pr_err_ratelimited(
+				"invalid node from %d to %d of migrate list %d\n",
+				mlist[i].from, mlist[i].to, i);
 			return -EINVAL;
 		}
 	}
@@ -192,8 +193,9 @@ static int convert_migrate_list(int len, struct mig_list *mlist)
 		ret = convert_pos_to_paddr_sorted(ml->pid, ml->from, ml->nr,
 						  ml->addr);
 		if (ret) {
-			pr_err("failed to convert pid %d migrate list from %d to %d, ret: %d\n",
-			       ml->pid, ml->from, ml->to, ret);
+			pr_err_ratelimited(
+				"failed to convert pid %d migrate list from %d to %d, ret: %d\n",
+				ml->pid, ml->from, ml->to, ret);
 			return ret;
 		}
 	}
@@ -206,14 +208,16 @@ static int build_migrate_list(struct migrate_msg *msg, struct mig_list **mlist,
 	int ret;
 
 	if (!msg) {
-		pr_err("null message passed to build migrate list\n");
+		pr_err_ratelimited(
+			"null message passed to build migrate list\n");
 		return -EINVAL;
 	}
 
 	*user_addrs = NULL;
 	ret = create_migrate_list(msg, mlist);
 	if (ret) {
-		pr_err("failed to create migrate list, ret: %d\n", ret);
+		pr_err_ratelimited("failed to create migrate list, ret: %d\n",
+				   ret);
 		return ret;
 	}
 	ret = check_migrate_list_nodes(msg->cnt, *mlist);
@@ -223,19 +227,22 @@ static int build_migrate_list(struct migrate_msg *msg, struct mig_list **mlist,
 	}
 	*user_addrs = kcalloc(msg->cnt, sizeof(**user_addrs), GFP_KERNEL);
 	if (!*user_addrs) {
-		pr_err("failed to alloc user addrs for migrate list\n");
+		pr_err_ratelimited(
+			"failed to alloc user addrs for migrate list\n");
 		free_migrate_list(mlist);
 		return -ENOMEM;
 	}
 	ret = init_migrate_list_addr(msg->cnt, *mlist, *user_addrs);
 	if (ret) {
-		pr_err("failed to init migrate list address, ret: %d\n", ret);
+		pr_err_ratelimited(
+			"failed to init migrate list address, ret: %d\n", ret);
 		free_migrate_list(mlist);
 		goto out_free_addrs;
 	}
 	ret = convert_migrate_list(msg->cnt, *mlist);
 	if (ret) {
-		pr_err("failed to convert migrate list, ret: %d\n", ret);
+		pr_err_ratelimited("failed to convert migrate list, ret: %d\n",
+				   ret);
 		free_migrate_list_addr(msg->cnt, *mlist);
 		free_migrate_list(mlist);
 		goto out_free_addrs;
@@ -255,13 +262,14 @@ static bool is_migrate_msg_valid(struct migrate_msg *msg)
 	int page_size = smap_pgtype == HUGE_PAGE ? g_pagesize_huge : PAGE_SIZE;
 
 	if (msg->cnt <= 0 || msg->cnt > max_cnt) {
-		pr_err("invalid migrate message cnt: %d passed to check\n",
-		       msg->cnt);
+		pr_err_ratelimited(
+			"invalid migrate message cnt: %d passed to check\n",
+			msg->cnt);
 		return false;
 	}
 	if (msg->page_size != page_size) {
-		pr_err("invalid page size: %d passed to check\n",
-		       msg->page_size);
+		pr_err_ratelimited("invalid page size: %d passed to check\n",
+				   msg->page_size);
 		return false;
 	}
 	return true;
@@ -291,10 +299,12 @@ static int __ioctl_migrate(void __user *argp)
 	free_migrate_list_addr(msg.cnt, mig_list);
 	restore_user_addr(msg.cnt, mig_list, user_addrs);
 	if (copy_to_user(argp, &msg, sizeof(msg)))
-		pr_err("unable to copy migrate message to user space\n");
+		pr_err_ratelimited(
+			"unable to copy migrate message to user space\n");
 	if (copy_to_user(msg.mig_list, mig_list,
 			 msg.cnt * sizeof(struct mig_list)))
-		pr_err("unable to copy migrate list to user space\n");
+		pr_err_ratelimited(
+			"unable to copy migrate list to user space\n");
 
 	kfree(user_addrs);
 	free_migrate_list(&mig_list);
@@ -309,19 +319,21 @@ static int __ioctl_migrate_numa(void __user *argp)
 
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
-	pr_info("received migrate NUMA message: source node id: %d, "
-		"destination node id: %d, page count: %d\n",
-		msg.src_nid, msg.dest_nid, msg.count);
+	pr_debug("received migrate NUMA message: source node id: %d, "
+		 "destination node id: %d, page count: %d\n",
+		 msg.src_nid, msg.dest_nid, msg.count);
 	if (msg.count <= 0 || msg.count > MAX_NR_MIGNUMA)
 		return -EINVAL;
 	if (!is_numa_remote(msg.src_nid)) {
-		pr_err("invalid source node id: %d passed to migrate NUMA\n",
-		       msg.src_nid);
+		pr_err_ratelimited(
+			"invalid source node id: %d passed to migrate NUMA\n",
+			msg.src_nid);
 		return -EINVAL;
 	}
 	if (!is_numa_remote(msg.dest_nid)) {
-		pr_err("invalid destination node id: %d passed to migrate NUMA\n",
-		       msg.dest_nid);
+		pr_err_ratelimited(
+			"invalid destination node id: %d passed to migrate NUMA\n",
+			msg.dest_nid);
 		return -EINVAL;
 	}
 
@@ -335,15 +347,17 @@ static int __ioctl_migrate_numa(void __user *argp)
 		ret = find_range_by_memid(msg.memids[i], &r->pa_start,
 					  &r->pa_end);
 		if (ret) {
-			pr_err("unable to find memory range of memid %llu, ret: %d\n",
-			       msg.memids[i], ret);
+			pr_err_ratelimited(
+				"unable to find memory range of memid %llu, ret: %d\n",
+				msg.memids[i], ret);
 			return ret;
 		}
 
 		if (smap_is_remote_addr_valid(msg.src_nid, r->pa_start,
 					      r->pa_end)) {
-			pr_err("memory range mismatch with node: %d\n",
-			       msg.src_nid);
+			pr_err_ratelimited(
+				"memory range mismatch with node: %d\n",
+				msg.src_nid);
 			return -EINVAL;
 		}
 	}
@@ -359,23 +373,26 @@ static int check_mig_msg(struct mig_payload *payloads, int len)
 {
 	for (int i = 0; i < len; i++) {
 		if (!is_numa_remote(payloads[i].src_nid)) {
-			pr_err("invalid source node id: %d passed to check params\n",
-			       payloads[i].src_nid);
+			pr_err_ratelimited(
+				"invalid source node id: %d passed to check params\n",
+				payloads[i].src_nid);
 			return -EINVAL;
 		}
 		if (!is_numa_remote(payloads[i].dest_nid)) {
-			pr_err("invalid destination node id: %d passed to check params\n",
-			       payloads[i].dest_nid);
+			pr_err_ratelimited(
+				"invalid destination node id: %d passed to check params\n",
+				payloads[i].dest_nid);
 			return -EINVAL;
 		}
 		if (payloads[i].dest_nid == payloads[i].src_nid) {
-			pr_err("source and destination node id should not be the same\n");
+			pr_err_ratelimited(
+				"source and destination node id should not be the same\n");
 			return -EINVAL;
 		}
 		if (payloads[i].keep_ratio < 0 ||
 		    payloads[i].keep_ratio > HUNDRED) {
-			pr_err("migrate ratio: %d invalid\n",
-			       payloads[i].keep_ratio);
+			pr_err_ratelimited("migrate ratio: %d invalid\n",
+					   payloads[i].keep_ratio);
 			return -EINVAL;
 		}
 	}
@@ -430,7 +447,8 @@ static void walkpage_and_migrate(struct mig_payload *payloads, int len,
 			pm.mig_info.folios = vzalloc(sizeof(struct folio *) *
 						     pm.mig_info.folios_len);
 			if (!pm.mig_info.folios) {
-				pr_err("unable to allocate memory for folio list to walk page range\n");
+				pr_err_ratelimited(
+					"unable to allocate memory for folio list to walk page range\n");
 				continue;
 			}
 
@@ -536,19 +554,21 @@ static int copy_to_user_mig_res(struct migrate_pid_remote_numa_msg *msg,
 				int *mig_res)
 {
 	if (copy_to_user(argp, msg, sizeof(*msg))) {
-		pr_err("failed to copy migrate message to user space\n");
+		pr_err_ratelimited(
+			"failed to copy migrate message to user space\n");
 		return -EFAULT;
 	}
 
 	if (copy_to_user(msg->payloads, payload,
 			 sizeof(struct mig_payload) * msg->pid_cnt)) {
-		pr_err("failed to copy pid list to user space\n");
+		pr_err_ratelimited("failed to copy pid list to user space\n");
 		return -EFAULT;
 	}
 
 	if (copy_to_user(msg->mig_res_array, mig_res,
 			 sizeof(int) * msg->pid_cnt)) {
-		pr_err("failed to copy migrate result array to user space\n");
+		pr_err_ratelimited(
+			"failed to copy migrate result array to user space\n");
 		return -EFAULT;
 	}
 
@@ -562,40 +582,46 @@ static int __ioctl_migrate_pid_remote_numa(void __user *argp)
 	struct migrate_pid_remote_numa_msg msg;
 	struct mig_payload *payloads = NULL;
 	if (copy_from_user(&msg, argp, sizeof(msg))) {
-		pr_err("failed to copy migrate pid remote NUMA message from user space\n");
+		pr_err_ratelimited(
+			"failed to copy migrate pid remote NUMA message from user space\n");
 		return -EFAULT;
 	}
 	if (msg.pid_cnt <= 0 || msg.pid_cnt > get_max_pid_cnt()) {
-		pr_err("invalid pid count passed to check params\n");
+		pr_err_ratelimited(
+			"invalid pid count passed to check params\n");
 		return -EINVAL;
 	}
 	if (!msg.payloads || !msg.mig_res_array) {
-		pr_err("null pid payloads or null migrate result array passed to check params\n");
+		pr_err_ratelimited(
+			"null pid payloads or null migrate result array passed to check params\n");
 		return -EINVAL;
 	}
 
 	payloads =
 		kzalloc(sizeof(struct mig_payload) * msg.pid_cnt, GFP_KERNEL);
 	if (!payloads) {
-		pr_err("unable to allocate memory for pid array\n");
+		pr_err_ratelimited("unable to allocate memory for pid array\n");
 		return -ENOMEM;
 	}
 	if (copy_from_user(payloads, msg.payloads,
 			   sizeof(struct mig_payload) * msg.pid_cnt)) {
-		pr_err("failed to copy pid array from user space\n");
+		pr_err_ratelimited(
+			"failed to copy pid array from user space\n");
 		kfree(payloads);
 		return -EFAULT;
 	}
 
 	if (check_mig_msg(payloads, msg.pid_cnt)) {
-		pr_err("invalid params passed to migrate pid remote NUMA\n");
+		pr_err_ratelimited(
+			"invalid params passed to migrate pid remote NUMA\n");
 		kfree(payloads);
 		return -EINVAL;
 	}
 
 	mig_res = kzalloc(msg.pid_cnt * sizeof(int), GFP_KERNEL);
 	if (!mig_res) {
-		pr_err("unable to allocate memory for migrate result\n");
+		pr_err_ratelimited(
+			"unable to allocate memory for migrate result\n");
 		kfree(payloads);
 		return -ENOMEM;
 	}
@@ -604,7 +630,8 @@ static int __ioctl_migrate_pid_remote_numa(void __user *argp)
 
 	ret = copy_to_user_mig_res(&msg, argp, payloads, mig_res);
 	if (ret)
-		pr_err("failed to copy migrate result to user space\n");
+		pr_err_ratelimited(
+			"failed to copy migrate result to user space\n");
 
 	kfree(mig_res);
 	kfree(payloads);
@@ -618,7 +645,8 @@ static int __ioctl_set_pagetype(void __user *argp)
 		return -EFAULT;
 	}
 	if (pageType != HUGE_PAGE && pageType != NORMAL_PAGE) {
-		pr_err("invalid page type: %u passed to set\n", pageType);
+		pr_err_ratelimited("invalid page type: %u passed to set\n",
+				   pageType);
 		return -EINVAL;
 	}
 	smap_pgtype = pageType;

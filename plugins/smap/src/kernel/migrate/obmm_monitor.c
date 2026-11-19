@@ -88,7 +88,7 @@ static void update_obmm_dev(u64 memid)
 	u64 std_seq;
 
 	if (unlikely(list_empty(&obmm_dev.list))) {
-		pr_err("obmm_dev list should not be empty\n");
+		pr_err_ratelimited("obmm_dev list should not be empty\n");
 		return;
 	}
 
@@ -106,7 +106,8 @@ static void update_obmm_dev(u64 memid)
 
 	tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
 	if (!tmp) {
-		pr_err("unable to allocate mem for obmm_shmdev%llu\n", memid);
+		pr_err_ratelimited(
+			"unable to allocate mem for obmm_shmdev%llu\n", memid);
 		return;
 	}
 
@@ -132,14 +133,15 @@ static int extract_hex_content(const char *file_path, u64 *content)
 
 	filp = filp_open(file_path, O_RDONLY, 0);
 	if (IS_ERR(filp)) {
-		pr_err("failed to open file %s: %ld\n", file_path,
-		       PTR_ERR(filp));
+		pr_err_ratelimited("failed to open file %s: %ld\n", file_path,
+				   PTR_ERR(filp));
 		return PTR_ERR(filp);
 	}
 
 	ret = kernel_read(filp, buf, OBMM_FILE_SIZE - 1, &pos);
 	if (ret <= 0) {
-		pr_err("failed to read file %s: %d\n", file_path, ret);
+		pr_err_ratelimited("failed to read file %s: %d\n", file_path,
+				   ret);
 		goto error;
 	}
 
@@ -289,14 +291,16 @@ int iterate_obmm_dev_dir(void)
 
 	dir_file = filp_open(OBMM_SYS_DIR, O_RDONLY | O_DIRECTORY, 0);
 	if (IS_ERR(dir_file)) {
-		pr_err("failed to open obmm directory: %s\n", OBMM_SYS_DIR);
+		pr_err_ratelimited("failed to open obmm directory: %s\n",
+				   OBMM_SYS_DIR);
 		return PTR_ERR(dir_file);
 	}
 
 	ret = iterate_dir(dir_file, &callback.ctx);
 	if (ret == 0 && callback.ret != 0) {
-		pr_err("iterate obmm_dev directory callback ret: %d\n",
-		       callback.ret);
+		pr_err_ratelimited(
+			"iterate obmm_dev directory callback ret: %d\n",
+			callback.ret);
 		ret = callback.ret;
 	}
 	filp_close(dir_file, NULL);
@@ -312,7 +316,8 @@ int iterate_obmm_dev(void)
 	if (unlikely(list_empty(&obmm_dev.list))) {
 		ret = init_obmm_dev();
 		if (ret) {
-			pr_err("failed to init obmm_dev, ret: %d\n", ret);
+			pr_err_ratelimited("failed to init obmm_dev, ret: %d\n",
+					   ret);
 			goto out;
 		}
 	} else {
@@ -321,7 +326,8 @@ int iterate_obmm_dev(void)
 
 	ret = iterate_obmm_dev_dir();
 	if (ret) {
-		pr_err("failed to iterate obmm_dev directory, ret: %d\n", ret);
+		pr_err_ratelimited(
+			"failed to iterate obmm_dev directory, ret: %d\n", ret);
 		free_obmm_dev_locked();
 		goto out;
 	}
