@@ -1840,18 +1840,32 @@ save_res:
 static int check_pte_young(pte_t *pte, unsigned long addr, unsigned long next,
 			   struct mm_walk *walk)
 {
+	struct pte_walk *pte_walk = walk->private;
 	pte_t ptent = ptep_get(pte);
 
-	if (is_swap_pte(ptent) || !pte_present(ptent))
+	if (is_swap_pte(ptent) || !pte_present(ptent)) {
+		/* a non-present group head must not inherit the previous
+		 * group's hotness, or the whole group is skipped */
+		if (pte_walk->type == NORMAL_SCAN &&
+		    (addr & (scan_group_size - 1)) == 0)
+			pte_walk->group_hot = false;
 		return 0;
+	}
 
-	if (record_scan_result(walk->private, addr,
+	if (record_scan_result(pte_walk, addr,
 			       (phys_addr_t)__pte_to_phys(ptent),
 			       pte_young(ptent))) {
 #ifdef OS_VENDOR_V1
 		__ptep_test_and_clear_young(pte);
 #else
-		__ptep_test_and_clear_young(NULL, 0, pte);
+		/*
+		 * With CONFIG_ARM64_CONTPTE ptep_get() folds the young bits of
+		 * the whole contiguous block, while __ptep_test_and_clear_young()
+		 * clears only this entry: the bit actually set by hardware on
+		 * another entry survived and the block stayed "hot" forever.
+		 * ptep_test_and_clear_young() clears the whole contpte block.
+		 */
+		ptep_test_and_clear_young(walk->vma, addr, pte);
 #endif
 	}
 	return 0;
