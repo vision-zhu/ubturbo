@@ -9,9 +9,6 @@
 
 #include "smap_migrate_wrapper.h"
 
-DEFINE_STATIC_KEY_FALSE(cpusets_pre_enable_key);
-DEFINE_STATIC_KEY_FALSE(cpusets_enabled_key);
-
 unsigned long (*fp_kallsyms_lookup_name)(const char *) = NULL;
 int (*fp_migrate_pages)(struct list_head *from, new_folio_t get_new_folio,
 			free_folio_t put_new_folio, unsigned long priv,
