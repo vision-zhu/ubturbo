@@ -63,6 +63,9 @@ static int hist_4k_scan_mode_set(const char *val, const struct kernel_param *kp)
 		return -EINVAL;
 	}
 
+	/* store the value itself: hist_init() and the sysfs read use it */
+	*(unsigned int *)kp->arg = new_mode;
+
 	/* If mode unchanged, return directly */
 	if (new_mode == dev->scan_mode)
 		return 0;
@@ -70,8 +73,8 @@ static int hist_4k_scan_mode_set(const char *val, const struct kernel_param *kp)
 	pr_info("hist 4k scan mode changed: %u -> %u\n", dev->scan_mode,
 		new_mode);
 
-	/* Update scan mode */
-	dev->scan_mode = new_mode;
+	/* Update scan mode; a running scan keeps the mode it sampled */
+	WRITE_ONCE(dev->scan_mode, new_mode);
 
 	/* Reset sequential loop scan offsets: start from beginning when switching mode */
 	for (i = 0; dev->seq_loop_ba_offset && i < dev->ba_cnt; ++i) {
@@ -908,13 +911,13 @@ static int get_hist_results(uint64_t ba_tag,
 static int smap_hist_read_paral(struct segs_info *win_info,
 				struct segs_info *rmem_info,
 				enum ub_hist_sts_size sts_size, u16 *buf,
-				u32 scan_time, u32 buf_len, bool direct_update)
+				u32 scan_time, u32 buf_len, bool direct_update,
+				bool seq_loop)
 {
 	int ret = 0, i, ba_cnt;
 	u64 ba_tag;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	bool do_4k_seq_loop = (sts_size == STS_SIZE_4K &&
-			       dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
+	bool do_4k_seq_loop = (sts_size == STS_SIZE_4K && seq_loop);
 	bool picked, prev_complete = false;
 	struct ub_hist_ba_result *ba_result =
 		kmalloc(sizeof(*ba_result), GFP_KERNEL);
@@ -1051,14 +1054,13 @@ static u32 get_2m_scan_wins_per_ba(struct segs_info *win_info)
 static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
 				u16 *buf, u32 buf_len,
 				enum ub_hist_sts_size sts_size,
-				bool direct_update)
+				bool direct_update, bool seq_loop)
 {
 	int ret;
 	struct segs_info win_info;
 	u32 scan_time;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	bool do_4k_seq_loop = (sts_size == STS_SIZE_4K &&
-			       dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
+	bool do_4k_seq_loop = (sts_size == STS_SIZE_4K && seq_loop);
 
 	/*
 	 * Sequential loop scan mode: generate all windows directly, without hot window filtering
@@ -1091,7 +1093,7 @@ static int do_hist_scan_sliding(struct segs_info *info, bool do_multi_gran,
 
 	/* Finally, launch scan job for every windows */
 	ret = smap_hist_read_paral(&win_info, info, sts_size, buf, scan_time,
-				   buf_len, direct_update);
+				   buf_len, direct_update, seq_loop);
 	vfree(win_info.segs);
 	return ret;
 }
@@ -1101,10 +1103,16 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 {
 	int ret = 0;
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	bool do_multi_gran = (pgsize == SIZE_4K &&
-			      dev->scan_mode == HIST_4K_SCAN_MULTI_GRAN);
+	/*
+	 * Sample the mode once per scan: it used to be re-read in three
+	 * functions, and a switch from SEQ_LOOP to MULTI_GRAN in between sent
+	 * the 4K window generator a NULL hot-window buffer.
+	 */
+	enum hist_4k_scan_mode mode = READ_ONCE(dev->scan_mode);
+	bool do_multi_gran =
+		(pgsize == SIZE_4K && mode == HIST_4K_SCAN_MULTI_GRAN);
 	bool do_4k_seq_loop =
-		(pgsize == SIZE_4K && dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
+		(pgsize == SIZE_4K && mode == HIST_4K_SCAN_SEQ_LOOP);
 	u16 *tmpbuffer = NULL;
 
 	if (!addr_seg_is_valid(info)) {
@@ -1127,7 +1135,8 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	if (do_multi_gran) {
 		/* 4K mode: write to tmpbuffer for hot window calculation */
 		ret = do_hist_scan_sliding(info, do_multi_gran, tmpbuffer,
-					   dev->pgcount, STS_SIZE_2M, false);
+					   dev->pgcount, STS_SIZE_2M, false,
+					   do_4k_seq_loop);
 		if (ret) {
 			pr_debug("sliding scan on 2M pages failed, ret: %d\n",
 				 ret);
@@ -1137,7 +1146,7 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	} else if (pgsize == SIZE_2M) {
 		/* Pure 2M mode: directly write to hdev */
 		ret = do_hist_scan_sliding(info, do_multi_gran, NULL, 0,
-					   STS_SIZE_2M, true);
+					   STS_SIZE_2M, true, do_4k_seq_loop);
 		if (ret)
 			pr_debug("sliding scan on 2M pages failed, ret: %d\n",
 				 ret);
@@ -1151,7 +1160,7 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	 */
 	if (do_4k_seq_loop) {
 		ret = do_hist_scan_sliding(info, false, NULL, 0, STS_SIZE_4K,
-					   true);
+					   true, true);
 		if (ret) {
 			pr_debug("seq loop scan on 4K pages failed, ret: %d\n",
 				 ret);
@@ -1159,7 +1168,7 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 		}
 	} else {
 		ret = do_hist_scan_sliding(info, true, tmpbuffer, dev->pgcount,
-					   STS_SIZE_4K, true);
+					   STS_SIZE_4K, true, false);
 		vfree(tmpbuffer);
 		if (ret) {
 			pr_debug("sliding scan on 4K pages failed, ret: %d\n",
