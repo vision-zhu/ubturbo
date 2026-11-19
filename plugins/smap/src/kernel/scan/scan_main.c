@@ -569,6 +569,13 @@ static void access_work_func(struct work_struct *work)
 		return;
 	}
 
+	/* the tracked process exited and its pid now names another one */
+	if (ap->task_start_time &&
+	    smap_pid_start_time(ap->pid) != ap->task_start_time) {
+		ret = -ESRCH;
+		goto scan_failed;
+	}
+
 	/*
 	 * When this is the last scan round, the bitmap must be reallocated for
 	 * the next round. The reallocation must run under the slot->ap_lock

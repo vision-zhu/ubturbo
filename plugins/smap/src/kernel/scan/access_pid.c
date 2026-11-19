@@ -782,6 +782,24 @@ static int create_procfs(struct access_pid *ap)
 	return 0;
 }
 
+/*
+ * Identity of the process currently owning @pid (0 if none). Tracking is
+ * keyed by pid number only, so after the tracked process exits and the
+ * number is reused, scans would silently continue on an unrelated process.
+ */
+u64 smap_pid_start_time(pid_t pid)
+{
+	struct task_struct *task;
+	u64 start = 0;
+
+	rcu_read_lock();
+	task = pid_task(find_vpid(pid), PIDTYPE_PID);
+	if (task)
+		start = task->start_boottime;
+	rcu_read_unlock();
+	return start;
+}
+
 int init_access_pid(struct access_add_pid_payload *payload,
 		    struct access_pid **elem)
 {
@@ -790,6 +808,7 @@ int init_access_pid(struct access_add_pid_payload *payload,
 	if (!ap)
 		return -ENOMEM;
 	ap->pid = payload->pid;
+	ap->task_start_time = smap_pid_start_time(payload->pid);
 	ap->pid_type = payload->pid_type;
 	ap->scan_time = payload->scan_time;
 	ap->ntimes = payload->ntimes;

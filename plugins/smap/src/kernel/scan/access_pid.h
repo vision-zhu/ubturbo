@@ -85,6 +85,8 @@ struct remote_ram_snapshot;
 
 struct access_pid {
 	pid_t pid;
+	/* start_boottime of the task when tracking began: detects pid reuse */
+	u64 task_start_time;
 	smap_pid_type pid_type;
 	scan_type type;
 	u32 scan_time;
@@ -134,6 +136,7 @@ void access_remove_ham_pid(int len, struct access_remove_pid_payload *payload);
 void access_remove_statistic_pid(int len,
 				 struct access_remove_pid_payload *payload);
 void destroy_access_pid(struct access_pid *elem);
+u64 smap_pid_start_time(pid_t pid);
 int init_access_pid(struct access_add_pid_payload *payload,
 		    struct access_pid **elem);
 int access_add_ham_pid(int len, struct access_add_pid_payload *payload,
