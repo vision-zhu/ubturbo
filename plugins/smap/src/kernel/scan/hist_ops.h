@@ -85,8 +85,9 @@ struct smap_hist_dev {
 	union smap_hist_status status;
 	ub_hist_smap_type hw_type;
 	enum hist_4k_scan_mode scan_mode; /* 4K scan mode */
-	int seq_loop_ba_offset
-		[HIST_STS_DEV_CNT]; /* Sequential loop scan offset for each BA */
+	/* Sequential loop scan offset for each BA, ba_cnt entries: the number
+	 * of probed BAs is not bounded by HIST_STS_DEV_CNT */
+	int *seq_loop_ba_offset;
 	/* ub_watch config-driven measurement */
 	uint32_t ub_watch_duration_ms;
 	uint32_t ub_watch_perf_prd_ms;

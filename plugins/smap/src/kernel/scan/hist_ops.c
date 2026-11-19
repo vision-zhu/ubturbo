@@ -74,7 +74,7 @@ static int hist_4k_scan_mode_set(const char *val, const struct kernel_param *kp)
 	dev->scan_mode = new_mode;
 
 	/* Reset sequential loop scan offsets: start from beginning when switching mode */
-	for (i = 0; i < dev->ba_cnt; ++i) {
+	for (i = 0; dev->seq_loop_ba_offset && i < dev->ba_cnt; ++i) {
 		dev->seq_loop_ba_offset[i] = -1;
 	}
 
@@ -1530,7 +1530,7 @@ static int query_hist_ba_info(void)
 		return -EINVAL;
 	}
 	pr_info("%d smap-histogram devices found\n", dev->ba_cnt);
-	ba_tags = kmalloc(sizeof(u64) * dev->ba_cnt, GFP_KERNEL);
+	ba_tags = kmalloc_array(dev->ba_cnt, sizeof(u64), GFP_KERNEL);
 	if (!ba_tags) {
 		pr_err("malloc memory failed for ba_tags\n");
 		return -ENOMEM;
@@ -1541,10 +1541,16 @@ static int query_hist_ba_info(void)
 		return ret;
 	}
 
-	dev->ba_info = kmalloc(sizeof(struct ub_hist_ba_info) * dev->ba_cnt,
-			       GFP_KERNEL);
-	if (!dev->ba_info) {
+	dev->ba_info = kmalloc_array(
+		dev->ba_cnt, sizeof(struct ub_hist_ba_info), GFP_KERNEL);
+	dev->seq_loop_ba_offset = kmalloc_array(
+		dev->ba_cnt, sizeof(*dev->seq_loop_ba_offset), GFP_KERNEL);
+	if (!dev->ba_info || !dev->seq_loop_ba_offset) {
 		kfree(ba_tags);
+		kfree(dev->ba_info);
+		dev->ba_info = NULL;
+		kfree(dev->seq_loop_ba_offset);
+		dev->seq_loop_ba_offset = NULL;
 		pr_err("malloc memory failed for ba_info\n");
 		return -ENOMEM;
 	}
@@ -1563,6 +1569,9 @@ void hist_deinit(void)
 	scan_thread_deinit(dev);
 	addr_segs_deinit(dev);
 	kfree(dev->ba_info);
+	dev->ba_info = NULL;
+	kfree(dev->seq_loop_ba_offset);
+	dev->seq_loop_ba_offset = NULL;
 	ub_hist_exit();
 }
 
@@ -1591,7 +1600,7 @@ int hist_init(u32 pgsize)
 	dev->scan_mode = hist_4k_scan_mode_param;
 
 	/* Initialize sequential loop scan offset for each BA to -1 (start from beginning) */
-	for (i = 0; i < HIST_STS_DEV_CNT; ++i) {
+	for (i = 0; dev->seq_loop_ba_offset && i < dev->ba_cnt; ++i) {
 		dev->seq_loop_ba_offset[i] = -1;
 	}
 
@@ -1620,6 +1629,9 @@ free_segs:
 	addr_segs_deinit(dev);
 free_hist:
 	kfree(dev->ba_info);
+	dev->ba_info = NULL;
+	kfree(dev->seq_loop_ba_offset);
+	dev->seq_loop_ba_offset = NULL;
 exit_hist:
 	ub_hist_exit();
 	return ret;
