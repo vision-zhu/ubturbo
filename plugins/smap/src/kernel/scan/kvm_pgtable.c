@@ -385,14 +385,37 @@ static int smap_stage2_range_walker(const struct kvm_pgtable_visit_ctx *ctx,
 #else
 	if (ctx->level < KVM_PGTABLE_MAX_LEVELS - level_offset - 1) {
 #endif
-		u64 hole_end = ctx->addr + kvm_granule_size(ctx->level);
-		data->on_hole(ctx->addr, hole_end, data);
-		return 0;
-	}
+		/*
+		 * Clamp to the walked range: a leaf above the scan granule
+		 * starts before / ends after the range when the walk begins or
+		 * stops inside it (the KVM scan walks memslots in chunks), and
+		 * gfn_to_hva_memslot() does not bound-check, so unclamped holes
+		 * produced HVAs of other mappings.
+		 */
+		u64 start = max_t(u64, ctx->addr, ctx->start);
+		u64 end = min_t(u64, ctx->addr + kvm_granule_size(ctx->level),
+				ctx->end);
+		u64 gpa;
 
-	pte_valid = kvm_pte_valid(ctx->old);
-	is_young = (new != ctx->old);
-	data->on_pte_young(ctx->addr, is_young, pte_valid, data);
+		if (!kvm_pte_valid(ctx->old)) {
+			data->on_hole(start, end, data);
+			return 0;
+		}
+		/*
+		 * A valid block mapping (THP/hugetlb backed guest memory in a
+		 * 4K scan) is not a hole: it used to be reported as never
+		 * accessed and its AF was never cleared. Report its young
+		 * state for every scan-sized page of it and age it below.
+		 */
+		is_young = (new != ctx->old);
+		for (gpa = start; gpa < end; gpa += PAGE_SIZE * data->stride)
+			data->on_pte_young(gpa, is_young, true, data);
+		pte_valid = true;
+	} else {
+		pte_valid = kvm_pte_valid(ctx->old);
+		is_young = (new != ctx->old);
+		data->on_pte_young(ctx->addr, is_young, pte_valid, data);
+	}
 
 	if (!is_young || !pte_valid)
 		return 0;
