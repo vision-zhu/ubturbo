@@ -71,6 +71,12 @@ int acpi_parse_entries_array(char *id, unsigned long table_size,
 	while (((unsigned long)entry.hdr) + subtable_len < total_len) {
 		if (max_entries && count >= max_entries)
 			break;
+		/* an entry must lie fully inside the table before any handler
+		 * looks at it (firmware tables are not trusted) */
+		entry_len = acpi_get_entry_length(&entry);
+		if (entry_len < subtable_len ||
+		    (unsigned long)entry.hdr + entry_len > total_len)
+			return -EINVAL;
 
 		for (i = 0; i < num; i++) {
 			if (acpi_get_entry_type(&entry) !=
@@ -89,7 +95,8 @@ int acpi_parse_entries_array(char *id, unsigned long table_size,
 			count++;
 
 		entry_len = acpi_get_entry_length(&entry);
-		if (entry_len == 0)
+		if (entry_len < subtable_len ||
+		    (unsigned long)entry.hdr + entry_len > total_len)
 			return -EINVAL;
 
 		entry.hdr = (union acpi_subtable_headers *)((unsigned long)

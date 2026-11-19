@@ -99,9 +99,14 @@ static int acpi_table_build_mem(struct acpi_subtable_header *header)
 static int acpi_parse_memory_affinity(union acpi_subtable_headers *header,
 				      const unsigned long end)
 {
-	struct acpi_srat_mem_affinity *memory_affinity;
-
-	memory_affinity = (struct acpi_srat_mem_affinity *)header;
+	/* firmware tables are untrusted: the entry must hold the structure
+	 * and must not run past the end of the table */
+	if (header->common.length < sizeof(struct acpi_srat_mem_affinity) ||
+	    (unsigned long)header + header->common.length > end) {
+		pr_err("SRAT memory affinity entry has bad length %u\n",
+		       header->common.length);
+		return -EINVAL;
+	}
 	return acpi_table_build_mem(&header->common);
 }
 
@@ -112,6 +117,12 @@ static int acpi_parse_gicc_affinity(union acpi_subtable_headers *header,
 		(struct acpi_srat_gicc_affinity *)header;
 	int node;
 
+	if (header->common.length < sizeof(*gicc) ||
+	    (unsigned long)header + header->common.length > end) {
+		pr_err("SRAT GICC affinity entry has bad length %u\n",
+		       header->common.length);
+		return -EINVAL;
+	}
 	if (!(gicc->flags & ACPI_SRAT_GICC_ENABLED))
 		return 0;
 
