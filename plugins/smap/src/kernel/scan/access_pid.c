@@ -1033,7 +1033,24 @@ static int init_statistic_window(u8 ***sliding_windows, u32 duration,
 	u64 win_nr;
 	u8 **wins;
 	u64 i, j;
-	win_nr = (duration * SEC_TO_MS + scan_time - 1) / scan_time;
+	u64 budget;
+
+	win_nr = ((u64)duration * SEC_TO_MS + scan_time - 1) / scan_time;
+	/*
+	 * One byte per page per window: duration and scan_time come from user
+	 * space (up to 300000 windows), so a large process could make the
+	 * kernel allocate many GB here, pushing the system into OOM before
+	 * failing. Refuse requests above 1/16 of system memory up front.
+	 */
+	budget = ((u64)totalram_pages() << PAGE_SHIFT) / 16;
+	if (!total_page_num)
+		return -ENOMEM; /* as before: nothing to track */
+	if (!win_nr || win_nr > div64_u64(budget, total_page_num)) {
+		pr_err_ratelimited(
+			"statistic windows %llu x %llu pages exceed the memory budget\n",
+			win_nr, total_page_num);
+		return -E2BIG;
+	}
 	*windows_num = win_nr;
 	wins = vzalloc(win_nr * sizeof(u8 *));
 	if (!wins) {
@@ -1041,6 +1058,7 @@ static int init_statistic_window(u8 ***sliding_windows, u32 duration,
 		return -ENOMEM;
 	}
 	for (i = 0; i < win_nr; ++i) {
+		cond_resched();
 		wins[i] = vzalloc(total_page_num * sizeof(u8));
 		if (!wins[i]) {
 			pr_err("unable to allocate memory for window of statistic access\n");
