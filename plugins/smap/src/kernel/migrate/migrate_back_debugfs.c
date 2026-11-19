@@ -71,6 +71,16 @@ struct file_operations smap_migrate_back_debugfs_ops = {
 	.llseek = default_llseek,
 };
 
+/*
+ * The file is tied to its task by dentry, not by name: a task cleared from
+ * the list while a reader still holds its file open is released later, and
+ * removing "mb_<id>" by name at that point deleted the file of a newer task
+ * with the same id. Files are removed when their task is unlisted; open
+ * readers are handled by debugfs' file removal protection and by the task
+ * reference they hold.
+ */
+static DEFINE_MUTEX(mb_debugfs_lock);
+
 void create_migrate_back_debugfs(struct migrate_back_task *task)
 {
 	char file_name[NAME_MAX_LEN];
@@ -80,27 +90,30 @@ void create_migrate_back_debugfs(struct migrate_back_task *task)
 			   task->task_id);
 	if (!rc)
 		return;
+	mutex_lock(&mb_debugfs_lock);
+	if (task->dbg || task->dbg_dead)
+		goto out;
+	/* a previous task with this id is gone from the list, drop its file */
 	dentry = debugfs_lookup(file_name, dbg_root);
 	if (dentry) {
 		debugfs_remove(dentry);
 		dput(dentry);
 	}
-	debugfs_create_file(file_name, DEBUGFS_RO_MODE, dbg_root, task,
-			    &smap_migrate_back_debugfs_ops);
+	dentry = debugfs_create_file(file_name, DEBUGFS_RO_MODE, dbg_root, task,
+				     &smap_migrate_back_debugfs_ops);
+	if (!IS_ERR_OR_NULL(dentry))
+		task->dbg = dentry;
+out:
+	mutex_unlock(&mb_debugfs_lock);
 }
 
 void remove_migrate_back_debugfs(struct migrate_back_task *task)
 {
-	char file_name[NAME_MAX_LEN];
-	struct dentry *dentry;
-
-	int rc = scnprintf(file_name, NAME_MAX_LEN, "%s_%llu", PREFIX,
-			   task->task_id);
-	if (!rc)
-		return;
-	dentry = debugfs_lookup(file_name, dbg_root);
-	if (dentry) {
-		debugfs_remove(dentry);
-		dput(dentry);
+	mutex_lock(&mb_debugfs_lock);
+	task->dbg_dead = true;
+	if (task->dbg) {
+		debugfs_remove(task->dbg);
+		task->dbg = NULL;
 	}
+	mutex_unlock(&mb_debugfs_lock);
 }

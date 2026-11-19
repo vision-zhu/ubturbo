@@ -30,12 +30,17 @@ int start_migrate_back_work(void)
 				break;
 			}
 			t->status = MB_TASK_WAITING;
+			/* keep the task alive while its file is created
+			 * outside the lock (a concurrent clear may unlist it) */
+			kref_get(&t->ref);
 			task_list[cnt++] = t;
 		}
 		spin_unlock(&migrate_back_task_lock);
 
 		while (cnt) {
-			create_migrate_back_debugfs(task_list[--cnt]);
+			t = task_list[--cnt];
+			create_migrate_back_debugfs(t);
+			kref_put(&t->ref, migrate_back_task_release);
 		}
 	} while (flag);
 	return 0;

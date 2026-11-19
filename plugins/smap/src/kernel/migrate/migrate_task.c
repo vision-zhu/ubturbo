@@ -58,8 +58,10 @@ void free_all_migrate_back_task(void)
 	}
 	spin_unlock(&migrate_back_task_lock);
 
-	list_for_each_entry_safe(t, ttmp, &dead, task_node)
+	list_for_each_entry_safe(t, ttmp, &dead, task_node) {
+		remove_migrate_back_debugfs(t);
 		kref_put(&t->ref, migrate_back_task_release);
+	}
 }
 
 int init_migrate_back_subtask(struct migrate_back_task *task,
@@ -103,6 +105,8 @@ void clear_migrate_back_task(void)
 	}
 	spin_unlock(&migrate_back_task_lock);
 
-	list_for_each_entry_safe(t, ttmp, &dead, task_node)
+	list_for_each_entry_safe(t, ttmp, &dead, task_node) {
+		remove_migrate_back_debugfs(t);
 		kref_put(&t->ref, migrate_back_task_release);
+	}
 }

@@ -40,6 +40,9 @@ struct migrate_back_task {
 	/* 任务列表持有 1 份引用，每个打开的 debugfs fd 持有 1 份引用，
 	 * 归零时由 migrate_back_task_release 完成真正的清理与释放 */
 	struct kref ref;
+	/* debugfs file of this task; removed when the task leaves the list */
+	struct dentry *dbg;
+	bool dbg_dead;
 };
 extern struct list_head migrate_back_task_list;
 extern spinlock_t migrate_back_task_lock;
