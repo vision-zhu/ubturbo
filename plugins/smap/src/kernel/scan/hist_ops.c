@@ -1170,20 +1170,56 @@ static int hist_scan_sliding(struct segs_info *info, u32 scan_time_total,
 	return ret;
 }
 
+/*
+ * dev->status is written from ioctl context and consumed by the hist
+ * thread. Plain bitfield read-modify-writes raced with the thread's
+ * "status_all = 0", silently dropping a page-size switch or a remote RAM
+ * refresh that arrived during a reinit. Update and take it under a lock.
+ */
+static DEFINE_SPINLOCK(hist_status_lock);
+
+static void hist_status_set_pgsize(union smap_hist_status *st, u32 pgsize)
+{
+	st->flag.new_pgsize = pgsize;
+}
+
+static void hist_status_set_iomem(union smap_hist_status *st, u32 unused)
+{
+	st->flag.should_update_iomem = true;
+}
+
+static void hist_status_update(void (*set)(union smap_hist_status *, u32),
+			       u32 arg)
+{
+	struct smap_hist_dev *dev = &g_smap_hist_dev;
+
+	spin_lock(&hist_status_lock);
+	set(&dev->status, arg);
+	spin_unlock(&hist_status_lock);
+}
+
+static u32 hist_status_take(void)
+{
+	struct smap_hist_dev *dev = &g_smap_hist_dev;
+	u32 st;
+
+	spin_lock(&hist_status_lock);
+	st = dev->status.status_all;
+	dev->status.status_all = 0;
+	spin_unlock(&hist_status_lock);
+	return st;
+}
+
 void hist_update_pgsize(u32 pgsize)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	if (pgsize != dev->pgsize) {
-		dev->status.flag.new_pgsize = pgsize;
-	}
+	if (pgsize != dev->pgsize)
+		hist_status_update(hist_status_set_pgsize, pgsize);
 }
 
 void hist_set_iomem(void)
 {
-	struct smap_hist_dev *dev = &g_smap_hist_dev;
-	if (!dev->status.flag.should_update_iomem) {
-		dev->status.flag.should_update_iomem = true;
-	}
+	hist_status_update(hist_status_set_iomem, 0);
 }
 
 void hist_thread_resume(void)
@@ -1364,6 +1400,7 @@ static int scan_thread_run(void *data)
 {
 	int ret;
 	struct smap_hist_dev *dev = (struct smap_hist_dev *)data;
+	union smap_hist_status st;
 	int flag = 0;
 	while (!kthread_should_stop()) {
 		if (flag == 1) {
@@ -1373,23 +1410,28 @@ static int scan_thread_run(void *data)
 			msleep(1);
 			continue;
 		}
-		if (dev->status.status_all) {
-			u32 pgsize = dev->status.flag.new_pgsize ?: dev->pgsize;
+		st.status_all = hist_status_take();
+		if (st.status_all) {
+			u32 pgsize = st.flag.new_pgsize ?: dev->pgsize;
 
 			pr_debug(
 				"histogram tracking page info has been reinited, status: %#x\n",
-				dev->status.status_all);
+				st.status_all);
 
 			/* 由于周期性重建remote_ram_list，不需要重置seq_loop_ba_offset，会导致扫描不到靠后的地址段 */
 			ret = addr_segs_reinit(dev, pgsize);
 			if (ret) {
 				pr_err("failed to reinit histogram tracking page info, ret: %d\n",
 				       ret);
+				/* keep the request for the next attempt */
+				if (st.flag.new_pgsize)
+					hist_update_pgsize(st.flag.new_pgsize);
+				if (st.flag.should_update_iomem)
+					hist_set_iomem();
 				msleep(THREAD_SLEEP);
 				continue;
 			}
 		}
-		dev->status.status_all = 0;
 
 		if (!dev->thread_enable || !dev->pgcount) {
 			msleep(1);
