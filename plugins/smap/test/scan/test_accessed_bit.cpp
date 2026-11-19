@@ -509,7 +509,13 @@ TEST_F(AccessedBitTest, getHvaInfoByScanKvmMemslots)
     u64 l1_page_num;
     u64 l2_page_num;
     struct kvm kvm;
-    MOCKER(fill_vaddrs_info).stubs().will(returnValue(0));
+    /* fill_vaddrs_info() reports how many entries it filled (all local here) */
+    u64 filled_l1 = len, filled_l2 = 0;
+    MOCKER(fill_vaddrs_info)
+        .stubs()
+        .with(any(), any(), any(), outBoundP(&filled_l1, sizeof(filled_l1)),
+              outBoundP(&filled_l2, sizeof(filled_l2)))
+        .will(returnValue(0));
 
     // generate random address and nid with fixed seed
     mt19937_64 gen(1234);

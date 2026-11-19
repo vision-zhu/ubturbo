@@ -427,6 +427,7 @@ TEST_F(DriversAccessPidTest, AccessAddStatisticPid)
 
 extern "C" int get_total_huge_page_nr(struct kvm *kvm, u64 *total_huge_page_nr);
 extern "C" struct vm_area_struct *get_vma_if_huge_page(struct kvm *kvm, unsigned long host_va);
+extern "C" bool memslot_is_mem(struct kvm_memory_slot *memslot);
 TEST_F(DriversAccessPidTest, GetTotalHugePageNrTest)
 {
     struct kvm_memory_slot memslots[] = {
@@ -446,6 +447,8 @@ TEST_F(DriversAccessPidTest, GetTotalHugePageNrTest)
      * loop forever, so set the 2M stride before invoking it.
      */
     g_pagesize_huge = PMD_SIZE;
+    /* only guest RAM memslots are counted, like fill_vaddrs_info() fills */
+    MOCKER(memslot_is_mem).stubs().will(returnValue(true));
     int ret = get_total_huge_page_nr(&kvm, &total_huge_page_nr);
     ASSERT_EQ(0, ret);
     ASSERT_EQ(7, total_huge_page_nr);

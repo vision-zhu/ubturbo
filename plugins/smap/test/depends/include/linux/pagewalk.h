@@ -30,6 +30,11 @@ static int pud_present(pud_t pud)
     return 0;
 }
 
+static inline int pud_leaf(pud_t pud)
+{
+    return 0;
+}
+
 static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 {
     return 0;
