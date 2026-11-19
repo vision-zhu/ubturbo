@@ -612,6 +612,14 @@ static struct platform_driver ub_hist_platform_driver = {
         {
             .name = "ub_hist_platform_driver",
             .owner = THIS_MODULE,
+            /*
+             * The hist thread and ioctls use ba_dev->base_addr without a
+             * reference after ub_hist_find_dev_by_tag() drops the list
+             * lock; a manual sysfs unbind would iounmap()/free it under
+             * them. Devices only go away with the module, whose exit
+             * stops every user first.
+             */
+            .suppress_bind_attrs = true,
             .acpi_match_table = ACPI_PTR(ub_hist_acpi_ids),
         },
 };
