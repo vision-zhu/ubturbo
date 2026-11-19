@@ -259,19 +259,21 @@ static bool fill_obmmdev(struct dir_context *ctx, const char *name, int namelen,
 		return true;
 	}
 
+	/*
+	 * A single entry whose suffix is not a number used to abort the whole
+	 * iteration with -ENOMEM, and the caller then dropped the complete
+	 * memid table, failing every migrate-back. Skip such entries instead.
+	 */
 	ret = sscanf(name, "obmm_shmdev%llu", &memid);
 	if (ret != 1) {
-		ret = -ENOMEM;
-		goto err;
+		pr_warn_ratelimited("skip unexpected obmm entry: %.*s\n",
+				    namelen, name);
+		return true;
 	}
 
 	update_obmm_dev(memid);
 	callback->ret = 0;
 	return true;
-
-err:
-	callback->ret = ret;
-	return false;
 }
 
 int iterate_obmm_dev_dir(void)
