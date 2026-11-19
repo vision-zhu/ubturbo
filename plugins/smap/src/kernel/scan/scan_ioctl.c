@@ -390,32 +390,32 @@ static int smap_scan_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/*
+ * Sum the sliding windows of one statistic record into @tracking_data
+ * (clamped by the caller to the record's page count). Windows are walked
+ * one at a time with a scheduling point per chunk: the previous order did
+ * up to window_num (300000) additions per page between cond_resched()
+ * calls, i.e. ~1e10 operations without yielding. Saturate instead of
+ * wrapping the u16 counters.
+ */
 static void update_tracking_data(u16 *tracking_data,
 				 struct statistics_tracking_info *stat_info,
-				 struct tracking_info_payload *payload_info)
+				 u32 length)
 {
 	u64 j;
-	u32 i, idx;
-	payload_info->length =
-		payload_info->length > (stat_info->page_num[L1] +
-					stat_info->page_num[L2])
-			? (stat_info->page_num[L1] + stat_info->page_num[L2])
-			: payload_info->length;
+	u32 idx;
 
-	for (idx = 0; idx + SCHEDULE_INTERVAL <= payload_info->length;
-	     idx += SCHEDULE_INTERVAL) {
-		for (i = 0; i < SCHEDULE_INTERVAL; i++) {
-			for (j = 0; j < stat_info->window_num; j++)
-				tracking_data[idx + i] +=
-					stat_info->sliding_windows[j][idx + i];
+	for (j = 0; j < stat_info->window_num; j++) {
+		const u8 *win = stat_info->sliding_windows[j];
+
+		for (idx = 0; idx < length; idx++) {
+			u32 sum = (u32)tracking_data[idx] + win[idx];
+
+			tracking_data[idx] = sum > U16_MAX ? U16_MAX : sum;
+			if (!((idx + 1) % SCHEDULE_INTERVAL))
+				cond_resched();
 		}
 		cond_resched();
-	}
-
-	for (; idx < payload_info->length; idx++) {
-		for (j = 0; j < stat_info->window_num; j++)
-			tracking_data[idx] +=
-				stat_info->sliding_windows[j][idx];
 	}
 }
 
@@ -424,7 +424,7 @@ static long ioctl_get_tracking(void __user *argp)
 	int ret = 0;
 	struct tracking_info_payload msg;
 	u16 *tracking_data;
-	struct statistics_tracking_info *tmp;
+	struct statistics_tracking_info *tmp, *found;
 	pr_debug("Receive ioctl get tracking\n");
 	if (copy_from_user(&msg, argp, sizeof(msg)))
 		return -EFAULT;
@@ -439,18 +439,38 @@ static long ioctl_get_tracking(void __user *argp)
 		pr_err_ratelimited("null buffer passed to get tracking data\n");
 		return -EINVAL;
 	}
-	tracking_data = vzalloc(sizeof(u16) * msg.length);
-	if (!tracking_data) {
+
+	/*
+	 * msg.length is an arbitrary u32 from user space: allocating it as is
+	 * let one call vzalloc() up to 8GB. Look the record up first and size
+	 * the buffer by its page count (the result was clamped to it anyway).
+	 * statistic_lock is a rwsem, so allocating under it is fine.
+	 */
+	down_read(&statistic_lock);
+	found = NULL;
+	list_for_each_entry(tmp, &statistic_pid_list, node) {
+		if (tmp->pid == msg.pid) {
+			found = tmp;
+			break;
+		}
+	}
+	if (!found) {
+		up_read(&statistic_lock);
+		/* unknown pid: report an all-zero buffer as before */
+		if (clear_user(msg.data, sizeof(u16) * (size_t)msg.length))
+			return -EFAULT;
+		return copy_to_user(argp, &msg, sizeof(msg)) ? -EFAULT : 0;
+	}
+	msg.length = min_t(u64, msg.length,
+			   found->page_num[L1] + found->page_num[L2]);
+	tracking_data = msg.length ? vzalloc(sizeof(u16) * msg.length) : NULL;
+	if (msg.length && !tracking_data) {
+		up_read(&statistic_lock);
 		pr_err_ratelimited(
 			"unable to allocate memory for tracking data payload\n");
 		return -ENOMEM;
 	}
-
-	down_read(&statistic_lock);
-	list_for_each_entry(tmp, &statistic_pid_list, node) {
-		if (tmp->pid == msg.pid)
-			update_tracking_data(tracking_data, tmp, &msg);
-	}
+	update_tracking_data(tracking_data, found, msg.length);
 	up_read(&statistic_lock);
 	/* GET_TRACKING 为 DFX 统计扫描频次，保留原始 u16 真值，不做压缩 */
 	if (copy_to_user(argp, &msg, sizeof(msg))) {
