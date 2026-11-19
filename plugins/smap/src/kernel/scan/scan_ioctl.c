@@ -71,6 +71,34 @@ static int check_msg_validity(struct access_add_pid_msg *msg)
 	return 0;
 }
 
+/*
+ * access_add_pid() failing after the statistic records of the same request
+ * were created left them behind, so the kernel kept statistic tracking for
+ * pids the caller was told were not added. Drop them again. (Adding a
+ * statistic pid already replaces any previous record of it.)
+ */
+static void rollback_statistic_payload(int len,
+				       struct access_add_pid_payload *payload,
+				       u32 stride)
+{
+	struct access_remove_pid_payload *rm;
+	int i, n = 0;
+
+	rm = kcalloc(len, sizeof(*rm), GFP_KERNEL);
+	if (!rm)
+		return;
+	for (i = 0; i < len; i++) {
+		struct access_add_pid_payload *p =
+			access_add_pid_payload_at(payload, i, stride);
+
+		if (p->pid >= 0 && p->type == STATISTIC_SCAN)
+			rm[n++].pid = p->pid;
+	}
+	if (n)
+		access_remove_statistic_pid(n, rm);
+	kfree(rm);
+}
+
 static int add_payload(int len, struct access_add_pid_payload *payload,
 		       u32 stride, int page_size)
 {
@@ -87,6 +115,8 @@ static int add_payload(int len, struct access_add_pid_payload *payload,
 		return ret;
 	}
 	ret = access_add_pid(len, payload, stride);
+	if (ret)
+		rollback_statistic_payload(len, payload, stride);
 	return ret;
 }
 
