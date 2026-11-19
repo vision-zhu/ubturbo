@@ -1196,14 +1196,29 @@ static inline uint32_t flux_to_mb_per_sec(uint32_t flux, uint32_t perf_prd_ms)
 			  ((uint64_t)MAR_FLUX_BYTES_PER_MB * perf_prd_ms));
 }
 
+/*
+ * One measurement runs in the ub_watch work for duration_ms, sleeping one
+ * sample interval per window, and only exits early at a window boundary.
+ * Bound it so a request cannot keep the work (and rmmod, which waits for
+ * it) busy for days.
+ */
+#define UB_WATCH_MAX_DURATION_MS (10 * 60 * 1000)
+static DEFINE_MUTEX(ub_watch_cfg_lock);
+
 int ub_watch_config(uint32_t duration_ms)
 {
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 
-	if (duration_ms == 0) {
-		pr_err("ub_watch_config: duration_ms must be greater than 0\n");
+	if (duration_ms == 0 || duration_ms > UB_WATCH_MAX_DURATION_MS) {
+		pr_err("ub_watch_config: duration_ms must be in (0, %u]\n",
+		       UB_WATCH_MAX_DURATION_MS);
 		return -EINVAL;
 	}
+	if (!dev->ub_watch_wq)
+		return -ENODEV;
+
+	/* serialize reconfiguration: cancel + reprogram + requeue */
+	mutex_lock(&ub_watch_cfg_lock);
 
 	/* Notify the in-flight measurement loop to exit at the next window checkpoint */
 	dev->measure_state = MEASURE_NOT_STARTED;
@@ -1222,6 +1237,7 @@ int ub_watch_config(uint32_t duration_ms)
 		dev->ub_watch_duration_ms, dev->ub_watch_perf_prd_ms);
 
 	queue_delayed_work(dev->ub_watch_wq, &dev->ub_watch_dwork, 0);
+	mutex_unlock(&ub_watch_cfg_lock);
 	return 0;
 }
 
@@ -1425,7 +1441,8 @@ static void ub_watch_dwork_func(struct work_struct *work)
 	for (i = 0; i < window_cnt; i++) {
 		ub_hist_mar_perf_en(dev->ub_watch_perf_prd_ms);
 		msleep(dev->ub_watch_sample_interval_ms);
-		if (dev->measure_state != MEASURE_IN_PROGRESS) {
+		if (READ_ONCE(dev->measure_state) != MEASURE_IN_PROGRESS ||
+		    READ_ONCE(dev->ub_watch_stopping)) {
 			pr_info("ub_watch: measurement interrupted at window %d/%d, stopping\n",
 				i, window_cnt);
 			return;
@@ -1501,6 +1518,7 @@ static int ub_watch_work_init(struct smap_hist_dev *dev)
 
 	INIT_DELAYED_WORK(&dev->ub_watch_dwork, ub_watch_dwork_func);
 	dev->measure_state = MEASURE_NOT_STARTED;
+	dev->ub_watch_stopping = false;
 
 	return 0;
 }
@@ -1508,6 +1526,10 @@ static int ub_watch_work_init(struct smap_hist_dev *dev)
 static void ub_watch_work_deinit(struct smap_hist_dev *dev)
 {
 	if (dev->ub_watch_wq) {
+		/* make a running measurement stop at its next window instead
+		 * of waiting for its whole duration */
+		WRITE_ONCE(dev->ub_watch_stopping, true);
+		WRITE_ONCE(dev->measure_state, MEASURE_NOT_STARTED);
 		cancel_delayed_work_sync(&dev->ub_watch_dwork);
 		destroy_workqueue(dev->ub_watch_wq);
 		dev->ub_watch_wq = NULL;

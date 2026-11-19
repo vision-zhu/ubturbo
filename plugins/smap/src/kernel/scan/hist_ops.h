@@ -93,6 +93,7 @@ struct smap_hist_dev {
 	uint32_t ub_watch_perf_prd_ms;
 	uint32_t ub_watch_sample_interval_ms;
 	enum ub_watch_measure_state measure_state;
+	bool ub_watch_stopping; /* set on teardown, aborts any measurement */
 	uint64_t ub_watch_acc_flux_rd[MAR_CFG_REG_CNT];
 	uint64_t ub_watch_acc_flux_wr[MAR_CFG_REG_CNT];
 	uint32_t ub_watch_avg_flux_rd[MAR_CFG_REG_CNT];
