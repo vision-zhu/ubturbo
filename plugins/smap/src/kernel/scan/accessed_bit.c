@@ -539,7 +539,7 @@ static pte_t *smap_pte_offset(struct mm_struct *mm, unsigned long addr)
 {
 	pgd_t *pgd;
 	p4d_t *p4d;
-	pud_t *pud;
+	pud_t *pud, pudval;
 	pmd_t *pmd;
 	pte_t *pte;
 
@@ -552,7 +552,13 @@ static pte_t *smap_pte_offset(struct mm_struct *mm, unsigned long addr)
 		return NULL;
 
 	pud = pud_offset(p4d, addr);
-	if (!pud_present(READ_ONCE(*pud)))
+	pudval = READ_ONCE(*pud);
+	/*
+	 * A present PUD may be a 1G leaf (e.g. a devdax-backed guest) rather
+	 * than a table: walking into it would parse guest data as PMDs/PTEs
+	 * and phys_to_virt() arbitrary values.
+	 */
+	if (!pud_present(pudval) || pud_leaf(pudval) || pud_bad(pudval))
 		return NULL;
 
 	pmd = pmd_offset(pud, addr);
