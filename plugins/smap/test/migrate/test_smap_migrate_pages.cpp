@@ -841,11 +841,23 @@ TEST_F(SmapMigratePagesTest, TestSmapIsolateRange)
     MOCKER(pfn_valid).stubs().will(returnValue(true));
     MOCKER(pfn_to_online_page).stubs().will(returnValue(tmp_page));
     MOCKER(is_smap_pg_huge).stubs().will(returnValue(true));
-    MOCKER(PageHuge).stubs().will(returnValue(0));
+    MOCKER(PageHuge).stubs().will(returnValue(1));
     MOCKER(PageHead).stubs().will(returnValue(1));
     cout << "tmp_page addr: " << tmp_page << " refcount: " << tmp_page->_refcount << endl;
+    /* huge mode collects hugetlb heads (end_pfn exclusive at this level) */
     int ret = smap_pre_migrate_range(migrate_folios, &nr_folios, start, end);
     EXPECT_EQ(end - start, ret);
+
+    /* ... and must skip every non-hugetlb page: it holds no reference on them */
+    GlobalMockObject::verify();
+    nr_folios = 0;
+    MOCKER(pfn_valid).stubs().will(returnValue(true));
+    MOCKER(pfn_to_online_page).stubs().will(returnValue(tmp_page));
+    MOCKER(is_smap_pg_huge).stubs().will(returnValue(true));
+    MOCKER(PageHuge).stubs().will(returnValue(0));
+    MOCKER(PageHead).stubs().will(returnValue(1));
+    ret = smap_pre_migrate_range(migrate_folios, &nr_folios, start, end);
+    EXPECT_EQ(0, ret);
     vfree(migrate_folios);
     free(tmp_page);
 }
@@ -874,7 +886,7 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrateRange)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-extern "C" unsigned int smap_migrate_numa(struct migrate_numa_inner_msg *msg);
+extern "C" int smap_migrate_numa(struct migrate_numa_inner_msg *msg);
 TEST_F(SmapMigratePagesTest, TestSmapMigrateNuma)
 {
     struct migrate_numa_inner_msg msg = {.src_nid = 4, .dest_nid = 5, .count = 1, .range = {{0x0, 0x400000}}};
@@ -883,12 +895,12 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrateNuma)
     unsigned int ret = smap_migrate_numa(&msg);
     EXPECT_EQ(1, ret);
 
-    // retry case, last retry success
+    // retry case (pages failed), last retry success
     GlobalMockObject::verify();
     int migRetryTime = 10;
     MOCKER(smap_migrate_range)
         .expects(exactly(migRetryTime + 1))
-        .will(repeat(-EINVAL, migRetryTime))
+        .will(repeat(1, migRetryTime))
         .then(returnValue(0));
     ret = smap_migrate_numa(&msg);
     EXPECT_EQ(0, ret);
@@ -1302,10 +1314,11 @@ TEST_F(SmapMigratePagesTest, TestSmapMigrateNumaRetryUntilSuccess)
 {
     struct migrate_numa_inner_msg msg = {.src_nid = 4, .dest_nid = 5, .count = 1, .range = {{0x0, 0x400000}}};
 
-    // First 10 retries fail, the 11th (retry=0) attempt succeeds
+    // First 10 attempts leave pages behind, the 11th (retry=0) succeeds;
+    // invalid requests (negative errno) are not retried at all
     MOCKER(smap_migrate_range)
         .expects(exactly(MAX_MIGRATE_NUMA_RETRY_TIME + 1))
-        .will(repeat(-EINVAL, MAX_MIGRATE_NUMA_RETRY_TIME))
+        .will(repeat(1, MAX_MIGRATE_NUMA_RETRY_TIME))
         .then(returnValue(0));
     unsigned int ret = smap_migrate_numa(&msg);
     EXPECT_EQ(0, ret);

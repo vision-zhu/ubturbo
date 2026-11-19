@@ -23,23 +23,33 @@ extern "C" {
 #include "ub_hist.h"
 
 using namespace std;
+extern "C" struct smap_hist_dev g_smap_hist_dev;
 class HistOpsTest : public ::testing::Test {
 protected:
     void SetUp() override
     {
         cout << "[Phase SetUp Begin]" << endl;
+        /* per-BA offsets are allocated with ba_cnt entries at hist init */
+        g_smap_hist_dev.seq_loop_ba_offset = seq_offsets;
+        for (int i = 0; i < HIST_STS_DEV_CNT; ++i)
+            seq_offsets[i] = -1;
+        /* hist_deinit() now clears ba_info: do not walk a stale count */
+        if (!g_smap_hist_dev.ba_info)
+            g_smap_hist_dev.ba_cnt = 0;
         cout << "[Phase SetUp End]" << endl;
     }
     void TearDown() override
     {
         cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
+        if (g_smap_hist_dev.seq_loop_ba_offset == seq_offsets)
+            g_smap_hist_dev.seq_loop_ba_offset = nullptr;
         cout << "[Phase TearDown End]" << endl;
     }
+    int seq_offsets[HIST_STS_DEV_CNT];
 };
 
 extern list_head remote_ram_list;
-extern "C" struct smap_hist_dev g_smap_hist_dev;
 extern "C" int ub_hist_init(void);
 
 extern "C" u64 align_addr(u64 addr, u32 low_bit_len);
@@ -604,7 +614,8 @@ TEST_F(HistOpsTest, scan_thread_init)
     int ret;
     struct smap_hist_dev dev;
     ret = scan_thread_init(&dev);
-    EXPECT_EQ(-ECHILD, ret);
+    /* kthread_run() failure is an ERR_PTR: propagated, kthread left NULL */
+    EXPECT_EQ(-ENOMEM, ret);
     EXPECT_EQ(nullptr, dev.kthread);
 }
 
@@ -704,6 +715,10 @@ TEST_F(HistOpsTest, seq_loop_scan_interrupt_resume)
     /* Setup initial state: seq_loop_ba_offset initialized to -1 */
     dev->ba_cnt = HIST_STS_DEV_CNT;
     dev->scan_mode = HIST_4K_SCAN_SEQ_LOOP;
+    /* per-BA offsets are allocated with ba_cnt entries by query_hist_ba_info() */
+    int *saved_offsets = dev->seq_loop_ba_offset;
+    dev->seq_loop_ba_offset = (int *)malloc(sizeof(int) * dev->ba_cnt);
+    ASSERT_NE(nullptr, dev->seq_loop_ba_offset);
     for (i = 0; i < dev->ba_cnt; ++i) {
         dev->seq_loop_ba_offset[i] = -1;
     }
@@ -731,6 +746,8 @@ TEST_F(HistOpsTest, seq_loop_scan_interrupt_resume)
     /* After reset, should start from beginning */
     EXPECT_EQ(-1, dev->seq_loop_ba_offset[0]);
     EXPECT_EQ(-1, dev->seq_loop_ba_offset[1]);
+    free(dev->seq_loop_ba_offset);
+    dev->seq_loop_ba_offset = saved_offsets;
 }
 
 /*
@@ -865,10 +882,13 @@ TEST_F(HistOpsTest, hist_4k_scan_mode_set_invalid_mode)
 
 TEST_F(HistOpsTest, hist_4k_scan_mode_set_same_mode)
 {
-    struct kernel_param kp = {};
+    unsigned int param = HIST_4K_SCAN_MULTI_GRAN;
+    struct kernel_param kp = { .arg = &param };
     g_smap_hist_dev.scan_mode = HIST_4K_SCAN_SEQ_LOOP;
     int ret = hist_4k_scan_mode_set("1", &kp);
     EXPECT_EQ(0, ret);
+    /* the parameter value itself is stored (insmod/sysfs read-back) */
+    EXPECT_EQ((unsigned int)HIST_4K_SCAN_SEQ_LOOP, param);
 }
 
 extern "C" bool addr_is_cc_mem(u64 addr);
@@ -1068,11 +1088,14 @@ TEST_F(HistOpsTest, ub_watch_config_normal)
 
     MOCKER(cancel_delayed_work_sync).stubs().will(returnValue(false));
     MOCKER(queue_delayed_work).stubs().will(returnValue(true));
+    static char fake_wq;
+    dev->ub_watch_wq = (struct workqueue_struct *)&fake_wq; /* config needs the work queue */
     int ret = ub_watch_config(2000);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(2000, dev->ub_watch_duration_ms);
     EXPECT_EQ(200, dev->ub_watch_perf_prd_ms);
     EXPECT_EQ(1000, dev->ub_watch_sample_interval_ms);
+    dev->ub_watch_wq = nullptr;
 }
 
 TEST_F(HistOpsTest, ub_watch_config_interrupt_in_progress)
@@ -1084,10 +1107,25 @@ TEST_F(HistOpsTest, ub_watch_config_interrupt_in_progress)
 
     MOCKER(cancel_delayed_work_sync).stubs().will(returnValue(false));
     MOCKER(queue_delayed_work).stubs().will(returnValue(true));
+    static char fake_wq;
+    dev->ub_watch_wq = (struct workqueue_struct *)&fake_wq; /* config needs the work queue */
     int ret = ub_watch_config(3000);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(MEASURE_NOT_STARTED, dev->measure_state);
     EXPECT_EQ(3000, dev->ub_watch_duration_ms);
+    dev->ub_watch_wq = nullptr;
+}
+
+TEST_F(HistOpsTest, ub_watch_config_duration_limit)
+{
+    struct smap_hist_dev *dev = &g_smap_hist_dev;
+    static char fake_wq;
+    dev->ub_watch_wq = (struct workqueue_struct *)&fake_wq;
+    EXPECT_EQ(-EINVAL, ub_watch_config(10 * 60 * 1000 + 1));
+    EXPECT_EQ(-EINVAL, ub_watch_config(0xffffffff));
+    dev->ub_watch_wq = nullptr;
+    /* no work queue yet (hist not initialized) */
+    EXPECT_EQ(-ENODEV, ub_watch_config(1000));
 }
 
 TEST_F(HistOpsTest, ub_watch_config_clamp_to_duration)
@@ -1099,10 +1137,13 @@ TEST_F(HistOpsTest, ub_watch_config_clamp_to_duration)
 
     MOCKER(cancel_delayed_work_sync).stubs().will(returnValue(false));
     MOCKER(queue_delayed_work).stubs().will(returnValue(true));
+    static char fake_wq;
+    dev->ub_watch_wq = (struct workqueue_struct *)&fake_wq; /* config needs the work queue */
     int ret = ub_watch_config(1000);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(1000, dev->ub_watch_perf_prd_ms);
     EXPECT_EQ(1000, dev->ub_watch_sample_interval_ms);
+    dev->ub_watch_wq = nullptr;
 }
 
 TEST_F(HistOpsTest, ub_watch_query_not_started)

@@ -520,8 +520,7 @@ TEST_F(ScanIoctlTestKernel, IoctlWalkPagemap)
     EXPECT_EQ(7UL, param.page_num[0]);
 }
 
-extern "C" void update_tracking_data(u16 *tracking_data, struct statistics_tracking_info *stat_info,
-                                     struct tracking_info_payload *payload_info);
+extern "C" void update_tracking_data(u16 *tracking_data, struct statistics_tracking_info *stat_info, u32 length);
 extern "C" long ioctl_get_tracking(void __user *argp);
 TEST_F(ScanIoctlTestKernel, IoctlGetTrackingError)
 {
@@ -589,7 +588,7 @@ TEST_F(ScanIoctlTestKernel, IoctlGetTracking)
     EXPECT_EQ(5, msg.length);
 
     // 验证update_tracking_data
-    update_tracking_data(tracking_data, tmp, &msg);
+    update_tracking_data(tracking_data, tmp, msg.length);
     for (int i = 0; i < msg.length; ++i) {
         u16 expect = tmp->window_num * (i + 1); // sliding_windows数值叠加
         EXPECT_EQ(expect, tracking_data[i]);

@@ -120,8 +120,18 @@ TEST_F(DriversAcpiMemTest, AcpiParseMemoryAffinity)
     p = (struct acpi_srat_mem_affinity *)kzalloc(sizeof(struct acpi_srat_mem_affinity), GFP_KERNEL);
     ASSERT_NE(nullptr, p);
     MOCKER(acpi_table_build_mem).stubs().will(returnValue(1));
-    int ret = acpi_parse_memory_affinity(header, 0);
+    header = (union acpi_subtable_headers *)p;
+    p->header.length = sizeof(*p);
+    int ret = acpi_parse_memory_affinity(header, (unsigned long)p + sizeof(*p));
     EXPECT_EQ(1, ret);
+
+    /* entries shorter than the structure or past the table end are rejected */
+    p->header.length = sizeof(*p) - 1;
+    ret = acpi_parse_memory_affinity(header, (unsigned long)p + sizeof(*p));
+    EXPECT_EQ(-EINVAL, ret);
+    p->header.length = sizeof(*p);
+    ret = acpi_parse_memory_affinity(header, (unsigned long)p + sizeof(*p) - 1);
+    EXPECT_EQ(-EINVAL, ret);
     kfree(p);
 }
 

@@ -849,7 +849,8 @@ TEST_F(ObmmDevTest, FillObmmdevSscanfFail)
     struct read_obmm_callback call;
     call.ret = 1;
 
+    /* a malformed entry is skipped: iteration continues, result untouched */
     bool ret = fill_obmmdev(&call.ctx, "obmm_shmdevABC", 13, 0, 0, 0);
-    EXPECT_EQ(false, ret);
-    EXPECT_NE(0, call.ret);
+    EXPECT_EQ(true, ret);
+    EXPECT_EQ(1, call.ret);
 }

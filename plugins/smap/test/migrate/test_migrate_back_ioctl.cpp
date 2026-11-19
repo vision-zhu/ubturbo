@@ -113,6 +113,9 @@ TEST_F(PidIoctlTest, SmapIoctlMigrateBack)
     /* RETRY_ID 分支在新实现里同步等待实际结果；mock 环境残留任务不在链表
      * （dup_task 被打桩），同步等待查无任务返回 -EAGAIN */
     EXPECT_EQ(-EAGAIN, ret);
+    /* subtasks are now built before the duplicate check; the stub task is not
+     * refcounted, so drop what the DUP/RETRY branches attached to it */
+    INIT_LIST_HEAD(&task.subtask);
 
     GlobalMockObject::verify();
     MOCKER(init_migrate_back_task).stubs().will(returnValue(&task));
