@@ -915,6 +915,7 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 	struct smap_hist_dev *dev = &g_smap_hist_dev;
 	bool do_4k_seq_loop = (sts_size == STS_SIZE_4K &&
 			       dev->scan_mode == HIST_4K_SCAN_SEQ_LOOP);
+	bool picked, prev_complete = false;
 	struct ub_hist_ba_result *ba_result =
 		kmalloc(sizeof(*ba_result), GFP_KERNEL);
 	int *offset = kzalloc(sizeof(*offset) * dev->ba_cnt, GFP_KERNEL);
@@ -940,6 +941,7 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 	}
 
 	while (1) {
+		picked = false;
 		ba_cnt = dev->ba_cnt;
 		while (ba_cnt--) {
 			ba_tag = dev->ba_info[ba_cnt].ba_tag;
@@ -949,13 +951,27 @@ static int smap_hist_read_paral(struct segs_info *win_info,
 					ba_tag,
 					win_info->segs[offset[ba_cnt]].start,
 					sts_size);
+				picked = true;
 			}
 		}
 		if (pick_complete(offset, dev->ba_cnt, win_info->cnt)) {
-			if (do_4k_seq_loop)
+			/*
+			 * The sequential loop wraps around and keeps going until
+			 * aborted. If a full pass right after a wrap matched no
+			 * window for any BA, wrapping again can never make
+			 * progress: the loop used to spin here forever without
+			 * sleeping or checking for abort/kthread_stop.
+			 */
+			if (do_4k_seq_loop && !(prev_complete && !picked) &&
+			    !READ_ONCE(dev->abort_flag) &&
+			    !kthread_should_stop()) {
+				prev_complete = true;
+				cond_resched();
 				continue;
+			}
 			break;
 		}
+		prev_complete = false;
 
 		wait_ba_task(scan_time);
 		disable_all_ba_tasks(offset, win_info->cnt);
