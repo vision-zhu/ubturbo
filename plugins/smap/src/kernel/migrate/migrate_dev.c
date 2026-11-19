@@ -80,6 +80,7 @@ static int init_migrate_list_addr(int len, struct mig_list *mlist,
 	int ret;
 	int i, j;
 	struct mig_list *ml;
+	u64 total_nr = 0;
 
 	if (len <= 0 || !mlist || !user_addrs) {
 		return -EINVAL;
@@ -89,6 +90,18 @@ static int init_migrate_list_addr(int len, struct mig_list *mlist,
 		if (ml->nr == 0 || ml->nr > MAX_MIG_LIST_NR || !ml->addr) {
 			return -EINVAL;
 		}
+		total_nr += ml->nr;
+	}
+	/*
+	 * Each entry may carry up to 2^28 addresses and a message up to 2400
+	 * entries: without a global budget one ioctl could request terabytes
+	 * of vmalloc memory. A migration can never name more pages than the
+	 * system has.
+	 */
+	if (total_nr > totalram_pages()) {
+		pr_err("migrate list names %llu pages, more than system memory\n",
+		       total_nr);
+		return -EINVAL;
 	}
 
 	for (i = 0; i < len; i++) {
@@ -96,6 +109,7 @@ static int init_migrate_list_addr(int len, struct mig_list *mlist,
 		ml = &mlist[i];
 
 		addr = vzalloc(ml->nr * sizeof(u64));
+		cond_resched();
 		if (!addr) {
 			ret = -ENOMEM;
 			goto out;
