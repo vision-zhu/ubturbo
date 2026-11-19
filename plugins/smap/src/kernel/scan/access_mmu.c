@@ -301,9 +301,8 @@ static bool is_page_ready_for_migrate(struct page *page, bool huge)
 		return false;
 	}
 	if (!PageHuge(page)) {
-		if (!folio_try_get(page_folio(page))) {
+		if (!smap_try_get_page_folio(page))
 			return false;
-		}
 	}
 	return true;
 }
