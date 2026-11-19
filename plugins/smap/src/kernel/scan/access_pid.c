@@ -482,7 +482,7 @@ static int mem_freq_release(struct inode *inode, struct file *file)
  */
 static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 				     struct actc_data *actc, u32 *actc_len,
-				     u32 mapping_offset)
+				     u32 mapping_offset, bool clear)
 {
 	u32 len_cnt = 0;
 	size_t acidx, bm_len;
@@ -553,7 +553,9 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 		if (is_shared_file_page(page) && nid >= nr_local_numa) {
 			actc[len_cnt].freq = U8_MAX;
 		} else {
-			actc[len_cnt].freq = smap_page_freq_read_clear(page);
+			actc[len_cnt].freq =
+				clear ? smap_page_freq_read_clear(page)
+				      : smap_page_freq_get(page);
 		}
 
 		/* Fill prior from priors array */
@@ -571,6 +573,9 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
 
 		len_cnt++;
 		acidx++;
+		/* may walk millions of pages; ap_lock is a sleepable rwsem */
+		if (!(len_cnt % 4096))
+			cond_resched();
 	}
 	*actc_len = len_cnt;
 }
@@ -585,7 +590,8 @@ static void fill_actc_data_by_bitmap(struct access_pid *ap, int nid,
  * actc_len is dimensioned by the node count (~4KB), which exceeds the kernel
  * stack limit, so it is allocated on the heap.
  */
-static int fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc)
+static int fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc,
+			      bool clear)
 {
 	int nid;
 	u32 mapping_offset = 0;
@@ -598,7 +604,7 @@ static int fill_pid_actc_data(struct access_pid *ap, struct actc_data *actc)
 
 	for (nid = 0; nid < MAX_NUMNODES; nid++) {
 		fill_actc_data_by_bitmap(ap, nid, actc + actc_offset,
-					 &actc_len[nid], mapping_offset);
+					 &actc_len[nid], mapping_offset, clear);
 		mapping_offset += actc_len[nid];
 		actc_offset += ap->page_num[nid];
 	}
@@ -625,6 +631,7 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	struct ap_slot *slot;
 	ssize_t len;
 	size_t total_len;
+	bool consume;
 
 	pr_debug("enter mem_freq_read\n");
 	slot = ap_get_slot(ap->pid);
@@ -658,7 +665,15 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 	else
 		len = cnt;
 
-	if (fill_pid_actc_data(ap, actc)) {
+	/*
+	 * Frequencies are read-and-cleared from page flags, and every read
+	 * rebuilds the whole array. Only a read that consumes the whole
+	 * window in one go (what the daemon does) may clear; a partial read
+	 * (e.g. cat in chunks) must not destroy the data of the parts it
+	 * does not return.
+	 */
+	consume = *ppos == 0 && cnt >= total_len;
+	if (fill_pid_actc_data(ap, actc, consume)) {
 		len = -ENOMEM;
 		goto out_free;
 	}
@@ -666,11 +681,12 @@ static ssize_t mem_freq_read(struct file *file, char __user *buf, size_t cnt,
 		len = -EFAULT;
 		goto out_free;
 	}
-	if (*ppos + cnt <= total_len)
-		*ppos += len;
+	/* always advance by what was returned so readers reach EOF */
+	*ppos += len;
 	/* Full window consumed: stop signaling readability until the next
-	 * completed window (per-pid restart) re-arms freq_ready. */
-	if (*ppos >= total_len)
+	 * completed window (per-pid restart) re-arms freq_ready. Partial,
+	 * non-clearing reads leave the window to its consumer. */
+	if (consume)
 		WRITE_ONCE(ap->freq_ready, false);
 out_free:
 	kvfree(actc);
