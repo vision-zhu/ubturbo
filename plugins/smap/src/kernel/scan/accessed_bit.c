@@ -1146,6 +1146,21 @@ static int get_total_stat_page_nr(struct kvm *kvm, int page_size,
 	return 0;
 }
 
+/*
+ * Number of entries to allocate for per-present-page arrays of a walk over
+ * ranges spanning @va_pages pages. Sizing by the virtual size made a
+ * process that merely reserves address space (JVM/Go heaps, sanitizers:
+ * TBs of PROT_NONE) trigger multi-GB vmalloc()s far beyond physical memory.
+ * Only present pages are recorded and a process cannot have more resident
+ * pages than the system has RAM, so cap at totalram_pages() (the RSS
+ * counters are not usable portably from a module). Writers bound-check
+ * against the capacity and stop recording when full.
+ */
+static u64 smap_present_page_cap(u64 va_pages)
+{
+	return min_t(u64, va_pages, totalram_pages());
+}
+
 static int get_total_page_nr(struct smap_vma_struct *vma_array, int len,
 			     u64 *total_page_nr)
 {
@@ -1443,7 +1458,7 @@ static void fill_va_one(struct pte_walk *pte_walk, unsigned long addr,
 	int ret;
 	u64 pa_index;
 
-	if (paddr == 0)
+	if (paddr == 0 || pte_walk->index >= pte_walk->hva_cap)
 		return;
 
 	ret = calc_paddr_acidx_acpi(paddr, &nid, &pa_index, page_size);
@@ -1530,12 +1545,14 @@ static int scan_hva_info_4k_ranges(struct mm_struct *mm,
 	ret = get_total_page_nr(ranges, range_cnt, &total_page_nr);
 	if (ret)
 		return ret;
+	total_page_nr = smap_present_page_cap(total_page_nr);
 
 	ret = alloc_vaddr_info(&hva_vec, &vaddrs, total_page_nr);
 	if (ret)
 		return ret;
 
 	pte_walk.hva_info = hva_vec;
+	pte_walk.hva_cap = total_page_nr;
 	pte_walk.page_size = PAGE_SIZE;
 	for (i = 0; i < range_cnt; i++) {
 		if (ranges[i].end_vaddr - ranges[i].start_vaddr <
@@ -1822,7 +1839,8 @@ static bool record_scan_result(struct pte_walk *pte_walk, unsigned long addr,
 	}
 
 	if (is_young) {
-		if (pte_walk->type == STATISTIC_SCAN)
+		if (pte_walk->type == STATISTIC_SCAN &&
+		    pte_walk->statistic_cnt < pte_walk->statistic_cap)
 			pte_walk->statistic_vaddr[pte_walk->statistic_cnt++] =
 				addr;
 		clear = true;
@@ -2094,7 +2112,9 @@ static int setup_statistic_scan(struct pte_walk *pte_walk, int pid,
 		pr_err("failed to get %d page number, ret: %d\n", pid, ret);
 		return -EINVAL;
 	}
+	total_page_nr = smap_present_page_cap(total_page_nr);
 	pte_walk->statistic_vaddr = vzalloc(total_page_nr * sizeof(u64));
+	pte_walk->statistic_cap = total_page_nr;
 	if (!pte_walk->statistic_vaddr) {
 		pr_err("failed to malloc statistic vaddr array, ret: %d\n",
 		       pid);

@@ -62,10 +62,12 @@ struct pte_walk {
 	int buf_len;
 	bool flag;
 	struct hva_info *hva_info;
+	u64 hva_cap; /* entries allocated in hva_info */
 	u64 index;
 	int page_size;
 	u64 nr_page[NR_LEVEL];
 	u64 statistic_cnt;
+	u64 statistic_cap; /* entries allocated in statistic_vaddr */
 	u64 *statistic_vaddr;
 	struct access_pid *ap;
 	bool group_hot;
