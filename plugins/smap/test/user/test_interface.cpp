@@ -5223,6 +5223,8 @@ TEST_F(InterfaceTest, TestUpdateManagedGroupedPolicyStagesWhenMigrating)
     EXPECT_TRUE(attr.pendingGroupPolicy.valid);
     EXPECT_EQ(2, attr.pendingGroupPolicy.policy.groupCount);
     EXPECT_EQ(1, attr.groupPolicy.groupCount);
+    /* 暂存必须递增 pendingSeq，worker apply 收尾时才不会把这次新 pending 当作已应用清除 */
+    EXPECT_EQ((uint32_t)1, attr.pendingSeq);
 }
 
 TEST_F(InterfaceTest, TestUpdateManagedGroupedPolicyAppliesWhenIdle)

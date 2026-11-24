@@ -722,7 +722,8 @@ int UpdateManagedProcessTrackingMode(ProcessAttr *attr, ScanType scanType, uint3
 int ConfigureMigrationTargets(ProcessAttr *attr, const ProcessTargetConfig *config);
 int ApplyPendingMigrationTargets(ProcessAttr *attr);
 int ProcessAddGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy);
-int ProcessSetPendingGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy);
+int StagePendingGroupedPolicyLocked(ProcessAttr *attr, const NumaBitmap *nodeBitmap,
+                                    const GroupMigrationPolicy *policy);
 int ApplyPendingGroupedPolicy(ProcessAttr *attr);
 
 void CheckAndRemoveInvalidProcess(void);

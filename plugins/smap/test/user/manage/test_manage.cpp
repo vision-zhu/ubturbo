@@ -1886,39 +1886,38 @@ TEST_F(ManageTest, TestProcessAddGroupedManageRejectsInvalidInputs)
     NumaBitmapFree(&bm);
 }
 
-extern "C" int ProcessSetPendingGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy);
-TEST_F(ManageTest, TestProcessSetPendingGroupedManage)
+extern "C" int StagePendingGroupedPolicyLocked(ProcessAttr *attr, const NumaBitmap *nodeBitmap,
+                                               const GroupMigrationPolicy *policy);
+TEST_F(ManageTest, TestStagePendingGroupedPolicyLocked)
 {
     ProcessAttr current = {};
     GroupMigrationPolicy policy = {};
     FillPolicyForManageTest(&policy);
-
     current.pid = 1234;
-    current.state = PROC_MIGRATE;
     current.groupPolicy.enabled = true;
-    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
-    PidSlotAdd(&g_processManager, &current);
 
     NumaBitmap bm = BmFromWord(0x31);
-    int ret = ProcessSetPendingGroupedManage(1234, &bm, &policy);
-    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, StagePendingGroupedPolicyLocked(&current, &bm, &policy));
     EXPECT_TRUE(current.pendingGroupPolicy.valid);
+    EXPECT_EQ((uint32_t)1, current.pendingSeq);
     EXPECT_EQ((uint32_t)0x31, current.pendingGroupPolicy.nodeBitmap.bits[0]);
     EXPECT_EQ((uint64_t)3, current.pendingGroupPolicy.policy.groups[0].targets[0].usedPages);
 
+    /* 重新暂存：覆盖位图与策略并递增序号，使 apply 期间的新 pending 不被旧快照清除 */
     policy.groups[0].targets[0].usedPages = 6;
     NumaBitmapFree(&bm);
     bm = BmFromWord(0x41);
-    ret = ProcessSetPendingGroupedManage(1234, &bm, &policy);
-    EXPECT_EQ(0, ret);
+    EXPECT_EQ(0, StagePendingGroupedPolicyLocked(&current, &bm, &policy));
+    EXPECT_EQ((uint32_t)2, current.pendingSeq);
     EXPECT_EQ((uint32_t)0x41, current.pendingGroupPolicy.nodeBitmap.bits[0]);
     EXPECT_EQ((uint64_t)6, current.pendingGroupPolicy.policy.groups[0].targets[0].usedPages);
 
-    current.state = PROC_IDLE;
-    ret = ProcessSetPendingGroupedManage(1234, &bm, &policy);
-    EXPECT_EQ(-EINVAL, ret);
+    /* 非法策略：不改动 pending 与序号 */
+    policy.enabled = false;
+    EXPECT_EQ(-EINVAL, StagePendingGroupedPolicyLocked(&current, &bm, &policy));
+    EXPECT_EQ((uint32_t)2, current.pendingSeq);
     NumaBitmapFree(&bm);
-    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    NumaBitmapFree(&current.pendingGroupPolicy.nodeBitmap);
 }
 
 static int FillPendingGroupedNumaPages(pid_t pid, uint64_t numaPages[SMAP_MAX_NUMNODES], bool onlyHuge)
