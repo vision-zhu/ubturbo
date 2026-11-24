@@ -339,3 +339,58 @@ TEST_F(OomMigrateTest, TestReadNumaMapsLine_DropsOverlongLine)
     EXPECT_STREQ(normal, buf);
     EXPECT_FALSE(ReadNumaMapsLine(&fakeFile, buf, sizeof(buf)));
 }
+
+extern "C" bool PidHasPagesOnNode(pid_t pid, int nid);
+
+/* numa_maps 中任一段在目标节点有页即判为已驻留；只在本地节点有页时为假 */
+TEST_F(OomMigrateTest, TestPidHasPagesOnNode)
+{
+    static FILE fakeFile;
+    static char localOnly[] = "1000 default anon=4 dirty=4 N0=4 kernelpagesize_kB=4\n";
+    static char remote[] = "8000 default anon=8 dirty=8 N0=5 N2=3 kernelpagesize_kB=4\n";
+    MOCKER(OpenNumaMaps).stubs().will(returnValue(&fakeFile));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    MOCKER(fgets)
+        .stubs()
+        .will(returnValue(static_cast<char *>(localOnly)))
+        .then(returnValue(static_cast<char *>(nullptr)))
+        .then(returnValue(static_cast<char *>(localOnly)))
+        .then(returnValue(static_cast<char *>(remote)))
+        .then(returnValue(static_cast<char *>(nullptr)));
+    EXPECT_FALSE(PidHasPagesOnNode(123, 2));
+    EXPECT_TRUE(PidHasPagesOnNode(123, 2));
+}
+
+TEST_F(OomMigrateTest, TestPidHasPagesOnNode_OpenFail)
+{
+    MOCKER(OpenNumaMaps).stubs().will(returnValue(static_cast<FILE *>(nullptr)));
+    EXPECT_FALSE(PidHasPagesOnNode(123, 2));
+}
+
+/* walkPage 快照尚未反映 L2 驻留（为 0），但 numa_maps 显示已有页在 L2：不得再紧急迁出 */
+TEST_F(OomMigrateTest, TestFindPidMigrateSize_SkipResidentOnL2)
+{
+    static FILE fakeFile;
+    static char remote[] = "8000 default anon=8 dirty=8 N0=5 N2=3 kernelpagesize_kB=4\n";
+    struct ProcessManager manager;
+    memset(&manager, 0, sizeof(manager));
+    manager.tracking.pageSize = PAGESIZE_4K;
+    manager.nrLocalNuma = 2;
+    EnvMutexInit(&manager.threadLock);
+    ProcessAttr attr = {};
+    attr.pid = 123;
+    attr.state = PROC_IDLE;
+    SetAttrL2(&attr, 2);
+    attr.next = nullptr;
+    memset(&manager.slots, 0, sizeof(manager.slots));
+    PidSlotAdd(&manager, &attr);
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(OpenNumaMaps).stubs().will(returnValue(&fakeFile));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    MOCKER(fgets)
+        .stubs()
+        .will(returnValue(static_cast<char *>(remote)))
+        .then(returnValue(static_cast<char *>(nullptr)));
+    MOCKER(SmapMovePages).expects(never());
+    FindPidMigrateSize(8192);
+}
