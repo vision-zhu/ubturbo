@@ -988,6 +988,12 @@ static int CollectAllPairRequests(const struct ProcessManager *manager, const ui
         BuildPairRequestContext(manager, privatePages, sharedPages, attr, &context);
         size_t processTargetCount = 0;
         ret = BuildPairRequestedTargets(attr, &context, processTargets, pairCap, &processTargetCount, summary);
+        if (ret == -EINVAL || ret == -ERANGE) {
+            /* 单个 pid 的配置/快照不自洽只影响它自己：跳过该 pid，不让本轮全部 pid 的规划失败 */
+            SMAP_LOGGER_WARNING("Skip pid %d in Pair arbitration, build requests failed: %d.", attr->pid, ret);
+            ret = 0;
+            continue;
+        }
         if (ret) {
             SMAP_LOGGER_ERROR("Build pid %d Pair requests failed: %d.", attr->pid, ret);
             goto out;

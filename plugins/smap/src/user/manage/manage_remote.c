@@ -119,19 +119,29 @@ int MoveProcessRemoteTarget(ProcessTargetConfig *config, int srcNid, int destNid
         src->remoteNid = destNid;
         return 0;
     }
+    /* 先校验再修改：失败时 config 保持原样（不残留新增的空 dest 项） */
+    uint64_t destValue = 0;
+    if (destIndex >= 0) {
+        destValue = config->migrateMode == MIG_RATIO_MODE ? config->targets[destIndex].ratio :
+                                                            config->targets[destIndex].memSizeKB;
+    }
+    if (config->migrateMode == MIG_RATIO_MODE && (moved > HUNDRED || destValue > HUNDRED - moved)) {
+        return -ERANGE;
+    }
+    if (config->migrateMode == MIG_MEMSIZE_MODE && destValue > UINT64_MAX - moved) {
+        return -EOVERFLOW;
+    }
     if (destIndex < 0) {
         if (config->count == SMAP_MAX_NUMNODES) {
             return -ENOSPC;
         }
-        destIndex = (int)config->count++;
+        destIndex = (int)config->count;
         config->targets[destIndex] = (ProcessRemoteTarget){ .remoteNid = destNid };
+        config->count++;
     }
 
     ProcessRemoteTarget *dest = &config->targets[destIndex];
     if (config->migrateMode == MIG_RATIO_MODE) {
-        if (moved > HUNDRED || dest->ratio > HUNDRED - moved) {
-            return -ERANGE;
-        }
         src->ratio -= (uint32_t)moved;
         dest->ratio += (uint32_t)moved;
         if (src->ratio == 0) {
@@ -140,9 +150,6 @@ int MoveProcessRemoteTarget(ProcessTargetConfig *config, int srcNid, int destNid
         return 0;
     }
 
-    if (dest->memSizeKB > UINT64_MAX - moved) {
-        return -EOVERFLOW;
-    }
     src->memSizeKB -= moved;
     dest->memSizeKB += moved;
     if (src->memSizeKB == 0) {
@@ -1284,28 +1291,39 @@ static void FreeRemotePayloadBitmaps(struct AccessAddPidPayload *payload, int co
     }
 }
 
-static void SetChangePidRemoteMsgPayload(int srcNid, int destNid, int *i, int maxProcessCnt,
-                                         struct AccessAddPidPayload *payload)
+static int SetChangePidRemoteMsgPayload(int srcNid, int destNid, int *i, int maxProcessCnt,
+                                        struct AccessAddPidPayload *payload)
 {
+    int ret = 0;
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t n = PidSlotCollectRefs(GetProcessManager(), all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n && *i < maxProcessCnt; k++) {
         ProcessAttr *attr = all[k]->attr;
+        EnvMutexLock(&all[k]->attrLock);
         if (NotEqualToAttrL2(attr, srcNid)) {
+            EnvMutexUnlock(&all[k]->attrLock);
             continue;
         }
         SMAP_LOGGER_INFO("ready to change pid %d L2 from %d to %d.", attr->pid, srcNid, destNid);
         payload[*i].pid = attr->pid;
         /* 需在副本上改位图，必须深拷贝，避免污染 attr 自身位图 */
-        (void)NumaBitmapCopy(&payload[*i].numaNodes, &attr->numaAttr.numaNodes);
-        SetL2ByNid(&payload[*i].numaNodes, destNid);
+        bool copied = NumaBitmapCopy(&payload[*i].numaNodes, &attr->numaAttr.numaNodes);
         payload[*i].scanTime = attr->scanTime;
         payload[*i].duration = attr->duration;
         payload[*i].type = attr->scanType;
         payload[*i].pidType = attr->type;
+        EnvMutexUnlock(&all[k]->attrLock);
+        if (!copied) {
+            /* 位图缺失会让内核收到被缩小的节点集合，不得下发 */
+            SMAP_LOGGER_ERROR("Copy numa bitmap of pid %d failed.", attr->pid);
+            ret = -ENOMEM;
+            break;
+        }
+        SetL2ByNid(&payload[*i].numaNodes, destNid);
         (*i)++;
     }
     PidSlotReleaseRefs(all, n);
+    return ret;
 }
 
 static void ChangePidRemoteMemory(ProcessAttr *attr, int srcNid, int destNid, uint64_t memSize, int ratio)
@@ -1366,7 +1384,8 @@ static void ChangePidRemoteMemory(ProcessAttr *attr, int srcNid, int destNid, ui
         if (memSize >= srcMemSize) {
             NumaBitmapClear(&attr->numaAttr.numaNodes, srcNid);
             if (remoteNidIndex >= 0) {
-                attr->migrateParam[remoteNidIndex].nid = 0;
+                /* 空槽统一用 DEFAULT_L2_NODE（与 ClearCompatibleProcessTargets 一致），0 是本地节点号 */
+                attr->migrateParam[remoteNidIndex].nid = DEFAULT_L2_NODE;
                 attr->migrateParam[remoteNidIndex].memSize = 0;
             }
         } else if (remoteNidIndex >= 0) {
@@ -1402,7 +1421,7 @@ static void ChangePidRemoteMemory(ProcessAttr *attr, int srcNid, int destNid, ui
             targetIdx = i;
             break;
         }
-        if (zeroIdx == -1 && attr->migrateParam[i].nid == 0) {
+        if (zeroIdx == -1 && attr->migrateParam[i].nid == DEFAULT_L2_NODE) {
             zeroIdx = i;
         }
     }
@@ -1413,6 +1432,68 @@ static void ChangePidRemoteMemory(ProcessAttr *attr, int srcNid, int destNid, ui
         attr->migrateParam[zeroIdx].nid = destNid;
         attr->migrateParam[zeroIdx].memSize = memSize;
     }
+}
+
+static void AddLedgerPages(uint32_t *ledger, uint64_t pages)
+{
+    uint64_t sum = (uint64_t)*ledger + pages;
+    *ledger = sum > UINT32_MAX ? UINT32_MAX : (uint32_t)sum;
+}
+
+/*
+ * 内核把 movedPages 页从 srcNid 搬到了 destNid：按各本地行在 src 上的账本比例
+ * 转移至多 min(movedPages, src 账本总量) 页（饱和，不下溢）；账本滞后于内核
+ * 实际页数时，超出部分记到 L1 行的 dest 上。调用方持 attrLock 与 remoteNumaInfo.lock。
+ */
+static void TransferRemoteAccount(ProcessAttr *attr, int srcNid, int destNid, uint64_t movedPages)
+{
+    int nrLocalNuma = GetNrLocalNuma();
+    uint32_t *ledger = attr->strategyAttr.remoteNrPagesAfterMigrate;
+    uint64_t total = 0;
+    for (int l = 0; l < nrLocalNuma; l++) {
+        total += NM_AT(ledger, l, srcNid);
+    }
+    uint64_t fromAccount = MIN(movedPages, total);
+    uint64_t moved = 0;
+    if (fromAccount > 0) {
+        for (int l = 0; l < nrLocalNuma; l++) {
+            uint64_t part = (uint64_t)(((unsigned __int128)NM_AT(ledger, l, srcNid) * fromAccount) / total);
+            NM_AT(ledger, l, srcNid) -= (uint32_t)part;
+            AddLedgerPages(&NM_AT(ledger, l, destNid), part);
+            moved += part;
+        }
+        /* 取整余量：逐行再各转 1 页，必能在 src 剩余账本内转完 */
+        for (int l = 0; l < nrLocalNuma && moved < fromAccount; l++) {
+            if (NM_AT(ledger, l, srcNid) == 0) {
+                continue;
+            }
+            NM_AT(ledger, l, srcNid)--;
+            AddLedgerPages(&NM_AT(ledger, l, destNid), 1);
+            moved++;
+        }
+    }
+    uint64_t extra = movedPages - fromAccount;
+    int l1node = GetAttrL1(attr);
+    if (extra > 0 && l1node >= 0 && l1node < nrLocalNuma) {
+        AddLedgerPages(&NM_AT(ledger, l1node, destNid), extra);
+    }
+}
+
+/* migrateParam/remoteNumaCnt 以 targetConfig 为准重建，空槽为 DEFAULT_L2_NODE */
+static void SyncMigrateParamFromTargetConfig(ProcessAttr *attr)
+{
+    int cap = (int)GetNumaCap();
+    uint32_t count = MIN(attr->targetConfig.count, (uint32_t)cap);
+    for (int j = 0; j < cap; j++) {
+        if ((uint32_t)j < count) {
+            attr->migrateParam[j].nid = attr->targetConfig.targets[j].remoteNid;
+            attr->migrateParam[j].memSize = attr->targetConfig.targets[j].memSizeKB;
+        } else {
+            attr->migrateParam[j].nid = DEFAULT_L2_NODE;
+            attr->migrateParam[j].memSize = 0;
+        }
+    }
+    attr->remoteNumaCnt = (int)count;
 }
 
 static void ChangePidRemoteMemoryByNuma(ProcessAttr *attr, int srcNid, int destNid)
@@ -1459,44 +1540,56 @@ int ChangePidRemoteByNuma(int srcNid, int destNid)
 {
     int i = 0;
     int maxProcessCnt = GetCurrentMaxNrPid();
-    ProcessAttr *attr;
+    struct ProcessManager *manager = GetProcessManager();
     struct AccessAddPidPayload *payload = calloc(maxProcessCnt, sizeof(struct AccessAddPidPayload));
     if (!payload) {
         SMAP_LOGGER_ERROR("ChangePidRemoteByNuma malloc payload failed.");
         return -ENOMEM;
     }
 
-    SetChangePidRemoteMsgPayload(srcNid, destNid, &i, maxProcessCnt, payload);
-    if (i == 0) {
+    int ret = SetChangePidRemoteMsgPayload(srcNid, destNid, &i, maxProcessCnt, payload);
+    if (ret == 0 && i == 0) {
         SMAP_LOGGER_INFO("ChangePidRemoteByNuma len: %d, no need to change.", i);
         FreeRemotePayloadBitmaps(payload, maxProcessCnt);
         free(payload);
         return 0;
     }
-    SMAP_LOGGER_INFO("ChangePidRemoteByNuma ioctl begin, len: %d.", i);
-    int ret = AccessIoctlAddPid(i, payload);
+    if (ret == 0) {
+        SMAP_LOGGER_INFO("ChangePidRemoteByNuma ioctl begin, len: %d.", i);
+        ret = AccessIoctlAddPid(i, payload);
+    }
     FreeRemotePayloadBitmaps(payload, maxProcessCnt);
     free(payload);
     if (ret) {
-        SMAP_LOGGER_ERROR("ChangePidRemoteByNuma ioctl failed: %d.", ret);
-        return ret;
+        /*
+         * 调用方在内核整节点搬移（MigrateRemoteNuma）成功后才进入这里：页已在 destNid。
+         * tracking 刷新失败（内核按节点跟踪页，不依赖该位图）不能跳过用户态目标/账本
+         * 的切换，否则后续 Pair 规划会把 destNid 上的页当成非目标页迁回并重新迁往 srcNid。
+         */
+        SMAP_LOGGER_ERROR("ChangePidRemoteByNuma tracking refresh failed: %d, still switch user state.", ret);
     }
     struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(GetProcessManager(), all, MAX_PID_SLOTS);
+    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n; k++) {
-        attr = all[k]->attr;
+        ProcessAttr *attr = all[k]->attr;
+        /* 锁顺序：attrLock → remoteNumaInfo.lock；全局仲裁/用量统计在后者内读取账本与目标 */
+        EnvMutexLock(&all[k]->attrLock);
         if (NotEqualToAttrL2(attr, srcNid)) {
+            EnvMutexUnlock(&all[k]->attrLock);
             continue;
         }
         SMAP_LOGGER_INFO("change pid %d L2 from %d to %d.", attr->pid, srcNid, destNid);
-        for (int j = 0; j < GetProcessManager()->nrLocalNuma; j++) {
-            NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, destNid) +=
-                NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, srcNid);
+        EnvMutexLock(&manager->remoteNumaInfo.lock);
+        for (int j = 0; j < manager->nrLocalNuma; j++) {
+            AddLedgerPages(&NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, destNid),
+                           NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, srcNid));
             NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, srcNid) = 0;
         }
         ChangePidRemoteMemoryByNuma(attr, srcNid, destNid);
         MoveProcessTargetConfig(attr, srcNid, destNid);
         SetAttrL2(attr, destNid);
+        EnvMutexUnlock(&manager->remoteNumaInfo.lock);
+        EnvMutexUnlock(&all[k]->attrLock);
     }
     PidSlotReleaseRefs(all, n);
     ret = SyncAllProcessConfig();
@@ -1701,12 +1794,13 @@ static int SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRem
     int outCnt = 0;
 
     for (int i = 0; i < len; i++) {
-        ProcessAttr *attr = GetProcessAttr(msg->payloads[i].pid);
-        if (!attr) {
+        struct PidSlot *slot = PidSlotGetRef(msg->payloads[i].pid);
+        if (!slot) {
             SMAP_LOGGER_ERROR("GetProcessAttr pid %d null.", msg->payloads[i].pid);
-            PutProcessAttr(attr);
             continue;
         }
+        ProcessAttr *attr = slot->attr;
+        EnvMutexLock(&slot->attrLock);
         int found = -1;
         for (int j = 0; j < outCnt; j++) {
             if (payload[j].pid == attr->pid) {
@@ -1715,10 +1809,16 @@ static int SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRem
             }
         }
         if (found < 0) {
+            /* 需在副本上改位图，必须深拷贝，避免污染 attr 自身位图；
+             * 拷贝失败时不得以缺失的节点集合下发内核 */
+            if (!NumaBitmapCopy(&payload[outCnt].numaNodes, &attr->numaAttr.numaNodes)) {
+                EnvMutexUnlock(&slot->attrLock);
+                PidSlotReleaseRefs(&slot, 1);
+                SMAP_LOGGER_ERROR("Copy numa bitmap of pid %d failed.", msg->payloads[i].pid);
+                return -ENOMEM;
+            }
             found = outCnt++;
             payload[found].pid = attr->pid;
-            /* 需在副本上改位图，必须深拷贝，避免污染 attr 自身位图 */
-            (void)NumaBitmapCopy(&payload[found].numaNodes, &attr->numaAttr.numaNodes);
             payload[found].scanTime = attr->scanTime;
             payload[found].duration = attr->duration;
             payload[found].type = attr->scanType;
@@ -1730,7 +1830,8 @@ static int SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRem
          * 均须校验后才能作为 initRemoteMemRatio/memSize 的下标 */
         if (l1node < 0 || l1node >= nrLocalNuma || !IsRemoteNidValid(l2node)) {
             SMAP_LOGGER_ERROR("Pid %d invalid l1node %d or srcNid %d.", attr->pid, l1node, l2node);
-            PutProcessAttr(attr);
+            EnvMutexUnlock(&slot->attrLock);
+            PidSlotReleaseRefs(&slot, 1);
             continue;
         }
         // 远端单numa->远端多numa，使用AddL2ByNid
@@ -1751,7 +1852,8 @@ static int SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRem
             }
         }
         AddL2ByNid(&payload[found].numaNodes, msg->payloads[i].destNid);
-        PutProcessAttr(attr);
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
     }
     return outCnt;
 }
@@ -1771,6 +1873,7 @@ int ChangePidRemoteByPid(struct MigPidRemoteNumaIoctlMsg *msg)
         return -ENOMEM;
     }
 
+    int ret = 0;
     int payloadCnt = SetPayloadValue(payload, msg, msg->pidCnt);
     if (payloadCnt == 0) {
         FreeRemotePayloadBitmaps(payload, maxProcessCnt);
@@ -1778,58 +1881,57 @@ int ChangePidRemoteByPid(struct MigPidRemoteNumaIoctlMsg *msg)
         SMAP_LOGGER_INFO("ChangePidRemoteByPid no valid payload.");
         return 0;
     }
-    SMAP_LOGGER_INFO("ChangePidRemoteByPid ioctl begin, len: %d.", payloadCnt);
-    int ret = AccessIoctlAddPid(payloadCnt, payload);
+    if (payloadCnt > 0) {
+        SMAP_LOGGER_INFO("ChangePidRemoteByPid ioctl begin, len: %d.", payloadCnt);
+        ret = AccessIoctlAddPid(payloadCnt, payload);
+    } else {
+        ret = payloadCnt;
+    }
     FreeRemotePayloadBitmaps(payload, maxProcessCnt);
     free(payload);
     if (ret) {
-        SMAP_LOGGER_ERROR("ChangePidRemoteByNuma ioctl failed: %d.", ret);
-        return ret;
+        /*
+         * 调用方在内核 SMAP_MIG_PID_REMOTE_NUMA 搬移成功后才进入这里：页已在 destNid。
+         * tracking 刷新失败（内核按节点跟踪页，不依赖该位图）不能跳过用户态账本/目标
+         * 的切换，否则目标仍指向 srcNid，Pair 规划会把集群的迁移意图反向执行。
+         */
+        SMAP_LOGGER_ERROR("ChangePidRemoteByPid tracking refresh failed: %d, still switch user state.", ret);
+    } else {
+        SMAP_LOGGER_INFO("ChangePidRemoteByPid ioctl done.");
     }
-    SMAP_LOGGER_INFO("ChangePidRemoteByNuma ioctl done.");
+    struct ProcessManager *manager = GetProcessManager();
     for (int i = 0; i < msg->pidCnt; i++) {
-        ProcessAttr *attr = GetProcessAttr(msg->payloads[i].pid);
-        if (!attr) {
-            PutProcessAttr(attr);
+        struct PidSlot *slot = PidSlotGetRef(msg->payloads[i].pid);
+        if (!slot) {
             continue;
         }
+        ProcessAttr *attr = slot->attr;
         int srcNid = msg->payloads[i].srcNid;
         int destNid = msg->payloads[i].destNid;
-        SMAP_LOGGER_INFO("change pid %d L2 from %d to %d.", attr->pid, srcNid, destNid);
-        if (NumaGetL1Count(&attr->numaAttr.numaNodes, GetNrLocalNuma()) > 1) { // 容器本地多numa
-            for (int j = 0; j < GetProcessManager()->nrLocalNuma; j++) {
-                NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, destNid) +=
-                    NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, srcNid);
-                NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, j, srcNid) = 0;
-            }
-        } else {
-            int l1node = GetAttrL1(attr);
-            /* l1node 未命中 L1 时返回 NUMA_NO_NODE，不可作 remoteNrPagesAfterMigrate 行下标 */
-            if (l1node >= 0 && l1node < GetNrLocalNuma()) {
-                NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, l1node, destNid) += msg->payloads[i].successCnt;
-                NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, l1node, srcNid) -= msg->payloads[i].successCnt;
-            }
+        if (!IsRemoteNidValid(srcNid) || !IsRemoteNidValid(destNid)) {
+            SMAP_LOGGER_ERROR("Pid %d invalid srcNid %d or destNid %d.", attr->pid, srcNid, destNid);
+            PidSlotReleaseRefs(&slot, 1);
+            continue;
         }
-
+        SMAP_LOGGER_INFO("change pid %d L2 from %d to %d.", attr->pid, srcNid, destNid);
+        /* 锁顺序：attrLock → remoteNumaInfo.lock；全局仲裁/用量统计在后者内读取账本与目标，
+         * 账本 src→dest 的转移与目标切换须对其原子可见 */
+        EnvMutexLock(&slot->attrLock);
+        EnvMutexLock(&manager->remoteNumaInfo.lock);
+        TransferRemoteAccount(attr, srcNid, destNid, msg->payloads[i].successCnt);
         ChangePidRemoteMemory(attr, srcNid, destNid, msg->payloads[i].memSize, msg->payloads[i].ratio);
         /* Pair planning and V1 persistence both use targetConfig as their source of truth. */
-        ret = MoveProcessRemoteTarget(&attr->targetConfig, srcNid, destNid, msg->payloads[i].memSize,
-                                      msg->payloads[i].ratio);
-        if (ret) {
-            SMAP_LOGGER_WARNING("Pid %d move Pair target %d to %d failed: %d.", attr->pid, srcNid, destNid, ret);
-        } else {
-            attr->remoteNumaCnt = attr->targetConfig.count;
-            /* Sync migrateParam from targetConfig so the strategy layer reads
-             * the correct memSize after MoveProcessRemoteTarget split/move.
-             * Without this, migrateParam[0].memSize stays at the stale original
-             * value and the strategy layer overwrites strategyAttr.memSize with
-             * the wrong number, causing accumulation in ChangePidRemoteMemory. */
-            for (int j = 0; j < attr->targetConfig.count; j++) {
-                attr->migrateParam[j].nid = attr->targetConfig.targets[j].remoteNid;
-                attr->migrateParam[j].memSize = attr->targetConfig.targets[j].memSizeKB;
-            }
+        int moveRet = MoveProcessRemoteTarget(&attr->targetConfig, srcNid, destNid, msg->payloads[i].memSize,
+                                              msg->payloads[i].ratio);
+        if (moveRet) {
+            SMAP_LOGGER_WARNING("Pid %d move Pair target %d to %d failed: %d.", attr->pid, srcNid, destNid, moveRet);
         }
-        PutProcessAttr(attr);
+        /* migrateParam 始终按 targetConfig 重建：策略层读取 memSize，且失败路径不得残留
+         * ChangePidRemoteMemory 手工维护的中间态（空槽/缺失 destNid） */
+        SyncMigrateParamFromTargetConfig(attr);
+        EnvMutexUnlock(&manager->remoteNumaInfo.lock);
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
     }
     ret = SyncAllProcessConfig();
     if (ret) {

@@ -3377,12 +3377,17 @@ TEST_F(ManageTest, TestChangePidRemoteByNuma)
 
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(GetCurrentMaxNrPid).stubs().will(returnValue(2));
+    /* 内核已完成整节点搬移：tracking 刷新失败仍须切换用户态 L2/账本，不向上返回失败 */
     MOCKER(AccessIoctlAddPid).stubs().will(returnValue(EINVAL));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     int ret = ChangePidRemoteByNuma(srcNid, destNid);
-    EXPECT_EQ(EINVAL, ret);
+    EXPECT_EQ(0, ret);
+    EXPECT_TRUE(EqualToAttrL2(&pid1, destNid));
+    EXPECT_TRUE(EqualToAttrL2(&pid2, 5));
 
     GlobalMockObject::verify();
-    MOCKER(AccessIoctlAddPid).expects(once()).will(returnValue(0));
+    /* pid1 已切到 destNid，再从 srcNid 切换时没有匹配的 pid，不下发 ioctl */
+    MOCKER(AccessIoctlAddPid).expects(never());
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     ret = ChangePidRemoteByNuma(srcNid, destNid);
     EXPECT_EQ(0, ret);
@@ -3436,7 +3441,7 @@ TEST_F(ManageTest, TestChangePidRemoteByPid)
         .pidCnt = 1,
     };
     msg.migResArray = (int *)calloc(1, sizeof(int));
-    msg.payloads = (struct MigPayload *)malloc(sizeof(struct MigPayload));
+    msg.payloads = (struct MigPayload *)calloc(1, sizeof(struct MigPayload));
     ProcessAttr pid1 = {};
     pid1.pid = 100;
 
@@ -3455,9 +3460,11 @@ TEST_F(ManageTest, TestChangePidRemoteByPid)
     EXPECT_EQ(0, ret);
 
     GlobalMockObject::verify();
+    /* 内核已搬移：tracking 刷新失败只记录错误，用户态状态照常切换并返回成功 */
     MOCKER(AccessIoctlAddPid).stubs().will(returnValue(EBADF));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     ret = ChangePidRemoteByPid(&msg);
-    EXPECT_EQ(EBADF, ret);
+    EXPECT_EQ(0, ret);
     FreeProcessAttrArrays(&pid1);
     free(msg.migResArray);
     free(msg.payloads);
@@ -3506,6 +3513,106 @@ TEST_F(ManageTest, TestChangePidRemoteByPidDedupSamePid)
 
 extern "C" void ChangePidRemoteMemory(ProcessAttr *attr, int srcNid, int destNid, uint64_t memSize, int ratio);
 extern "C" int SetPayloadValue(struct AccessAddPidPayload *payload, struct MigPidRemoteNumaIoctlMsg *msg, int len);
+extern "C" void TransferRemoteAccount(ProcessAttr *attr, int srcNid, int destNid, uint64_t movedPages);
+
+/* tracking 刷新失败时仍按内核已完成的搬移切换账本与目标；账本饱和扣减，内核多迁的页记到 dest */
+TEST_F(ManageTest, TestChangePidRemoteByPidSwitchesStateWhenTrackingFails)
+{
+    const int srcNid = 4;
+    const int destNid = 6;
+    g_runMode = WATERLINE_MODE;
+    g_processManager.nrLocalNuma = 4;
+    ProcessAttr attr = {};
+    attr.pid = 100;
+    attr.scanType = NORMAL_SCAN;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    attr.targetConfig.migrateMode = MIG_MEMSIZE_MODE;
+    attr.targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    attr.targetConfig.count = 1;
+    attr.targetConfig.targets[0] = {srcNid, 0, 8192};
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+    NumaBitmapSet(&attr.numaAttr.numaNodes, 0);
+    AddAttrL2(&attr, srcNid);
+    NM_AT(attr.strategyAttr.memSize, 0, srcNid) = 8192;
+    NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, srcNid) = 1000;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    PidSlotAdd(&g_processManager, &attr);
+    EnvMutexInit(&g_processManager.remoteNumaInfo.lock);
+
+    struct MigPidRemoteNumaIoctlMsg msg = {.pidCnt = 1};
+    msg.migResArray = (int *)calloc(1, sizeof(int));
+    msg.payloads = (struct MigPayload *)calloc(1, sizeof(struct MigPayload));
+    msg.payloads[0].pid = attr.pid;
+    msg.payloads[0].srcNid = srcNid;
+    msg.payloads[0].destNid = destNid;
+    msg.payloads[0].memSize = 8192;
+    msg.payloads[0].successCnt = 1200; /* 账本（1000）滞后于内核实际迁移页数 */
+    MOCKER(AccessIoctlAddPid).stubs().will(returnValue(-EBADF));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
+
+    EXPECT_EQ(0, ChangePidRemoteByPid(&msg));
+    EXPECT_EQ(0U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, srcNid));
+    EXPECT_EQ(1200U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, destNid));
+    ASSERT_EQ(1U, attr.targetConfig.count);
+    EXPECT_EQ(destNid, attr.targetConfig.targets[0].remoteNid);
+    EXPECT_EQ(1, attr.remoteNumaCnt);
+    EXPECT_EQ(destNid, attr.migrateParam[0].nid);
+    EXPECT_EQ(8192U, attr.migrateParam[0].memSize);
+    EXPECT_EQ(DEFAULT_L2_NODE, attr.migrateParam[1].nid);
+    EXPECT_TRUE(InAttrL2(&attr, destNid));
+
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    FreeProcessAttrArrays(&attr);
+    free(msg.migResArray);
+    free(msg.payloads);
+}
+
+/* 多本地：按 successCnt 与各本地账本比例转移，不再整体搬走 src 账本 */
+TEST_F(ManageTest, TestTransferRemoteAccountProportional)
+{
+    g_processManager.nrLocalNuma = 4;
+    ProcessAttr attr = {};
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+    NumaBitmapSet(&attr.numaAttr.numaNodes, 0);
+    NumaBitmapSet(&attr.numaAttr.numaNodes, 1);
+    NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, 4) = 300;
+    NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 1, 4) = 101;
+
+    /* 按比例 150/50，取整余量 1 页从第一个仍有账本的本地行转出 */
+    TransferRemoteAccount(&attr, 4, 6, 201);
+    EXPECT_EQ(149U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, 4));
+    EXPECT_EQ(51U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 1, 4));
+    EXPECT_EQ(151U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, 6));
+    EXPECT_EQ(50U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 1, 6));
+    FreeProcessAttrArrays(&attr);
+}
+
+/* MEM_POOL 全量迁出：空槽为 DEFAULT_L2_NODE，destNid 写入空出的槽位，不残留 nid=0 */
+TEST_F(ManageTest, TestChangePidRemoteMemoryMemPoolUsesDefaultEmptySlot)
+{
+    g_runMode = MEM_POOL_MODE;
+    g_processManager.nrLocalNuma = 4;
+    ProcessAttr attr = {};
+    attr.pid = 100;
+    attr.migrateMode = MIG_MEMSIZE_MODE;
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+    for (int i = 0; i < (int)GetNumaCap(); i++) {
+        attr.migrateParam[i].nid = DEFAULT_L2_NODE;
+    }
+    NumaBitmapSet(&attr.numaAttr.numaNodes, 0);
+    AddAttrL2(&attr, 8);
+    attr.remoteNumaCnt = 1;
+    attr.migrateParam[0].nid = 8;
+    attr.migrateParam[0].memSize = 4096;
+
+    ChangePidRemoteMemory(&attr, 8, 9, 4096, 0);
+    EXPECT_EQ(1, attr.remoteNumaCnt);
+    EXPECT_EQ(9, attr.migrateParam[0].nid);
+    EXPECT_EQ(4096U, attr.migrateParam[0].memSize);
+    EXPECT_FALSE(InAttrL2(&attr, 8));
+    g_runMode = WATERLINE_MODE;
+    FreeProcessAttrArrays(&attr);
+}
 
 /* WATERLINE + MIG_MEMSIZE_MODE：部分量迁移后源节点 L2 位必须保留，否则同源节点
  * 二次迁移会在 IsPidArrRemoteNumaMatch 处因 NotInAttrL2 返回 -ENXIO。
@@ -6181,6 +6288,35 @@ TEST_F(ManageTest, TestBuildPidArbitratedTargetsMatchesGlobalArbitration)
     for (auto &pid : pids) {
         FreeProcessAttrArrays(&pid);
     }
+    DestroyPairTargetManager(&manager);
+}
+
+/* 单个 pid 的目标配置不自洽时只跳过该 pid，其余 pid 照常仲裁 */
+TEST_F(ManageTest, TestBuildAllPairTargetsSkipsInvalidPid)
+{
+    ProcessManager manager;
+    InitPairTargetManager(&manager, 1);
+    manager.remoteNumaInfo.sharedSize[1] = 1;
+
+    ProcessAttr validPid;
+    ProcessAttr invalidPid;
+    InitRatioPairProcess(&validPid, 100, 1, 800, 0, 50);
+    InitRatioPairProcess(&invalidPid, 200, 1, 800, 0, 50);
+    invalidPid.targetConfig.targets[0].remoteNid = 0; /* 本地节点不能作为远端目标 */
+    memset(&manager.slots, 0, sizeof(manager.slots));
+    PidSlotAdd(&manager, &validPid);
+    PidSlotAdd(&manager, &invalidPid);
+
+    AllPairTargetResult result = RunBuildAllPairTargets(&manager);
+    ASSERT_EQ(0, result.ret);
+    EXPECT_EQ(400U, result.Requested(100, 0, 1));
+    for (size_t i = 0; i < result.targetCnt; i++) {
+        EXPECT_NE(200, result.targets[i].pid);
+    }
+
+    memset(&manager.slots, 0, sizeof(manager.slots));
+    FreeProcessAttrArrays(&validPid);
+    FreeProcessAttrArrays(&invalidPid);
     DestroyPairTargetManager(&manager);
 }
 
