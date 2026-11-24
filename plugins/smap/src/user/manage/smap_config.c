@@ -697,6 +697,12 @@ static int WriteProcessConfig(char *processBase, const struct ProcessPayload *p,
     char *cur = JumpToProcessPayload(processBase);
     for (int i = 0; i < nrPayload; i++) {
         struct ProcessPayloadHeader *h = (struct ProcessPayloadHeader *)cur;
+        size_t stride = CalcProcessPayloadStride(nrWords, p[i].count);
+        /* 整条记录先清零：位图字数不足或 bits 为空时，不得残留目标区中的旧内容（含 reserved） */
+        if (memset_s(cur, stride, 0, stride) != EOK) {
+            SMAP_LOGGER_ERROR("Clear record for pid %d failed.", p[i].pid);
+            return -EINVAL;
+        }
         h->pid = p[i].pid;
         h->scanType = p[i].scanType;
         h->type = p[i].type;
@@ -726,7 +732,7 @@ static int WriteProcessConfig(char *processBase, const struct ProcessPayload *p,
                 return -EINVAL;
             }
         }
-        cur += CalcProcessPayloadStride(nrWords, p[i].count);
+        cur += stride;
     }
     SMAP_LOGGER_DEBUG("Exit WriteProcessConfig.");
     return 0;
