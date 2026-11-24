@@ -19,6 +19,7 @@
 
 #define SMAP_CONFIG_PATH "/dev/shm/smap_config"
 #define SMAP_CONFIG_MODE (0600)
+#define SMAP_CONFIG_PATH_MAX 256
 
 /*
  * Layout of config is as follows:
@@ -110,6 +111,15 @@ struct ProcessPayload {
     int count;
     struct PersistRemoteTarget migrateParam[SMAP_MAX_NUMNODES];
     uint8_t ignoreRemoteCapacity; /* 新增：sync 旁路容量标记 */
+};
+
+/*
+ * 内存中的完整配置映像。所有读改写都先在映像上完成，再整体原子替换文件：
+ * 不再 mmap 配置文件（短文件/并发截断/tmpfs 空间不足都会在访存时 SIGBUS）。
+ */
+struct SmapConfigImage {
+    char *data;
+    size_t len; /* == header.totalLen */
 };
 
 int RecoverFromConfig(void);

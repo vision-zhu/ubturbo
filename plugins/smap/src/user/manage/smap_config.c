@@ -9,14 +9,15 @@
  */
 
 #include <unistd.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <errno.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
 
 #include "securec.h"
 #include "smap_user_log.h"
@@ -125,79 +126,6 @@ static inline char *JumpToProcessPayload(char *processBase)
     return processBase + PAYLOAD_HEADER_LEN;
 }
 
-static inline bool DoesConfigExist(void)
-{
-    return access(SMAP_CONFIG_PATH, R_OK | W_OK) == 0;
-}
-
-static inline int RemoveConfig(void)
-{
-    int ret = unlink(SMAP_CONFIG_PATH);
-    if (ret && errno != ENOENT) {
-        return -errno;
-    }
-    return 0;
-}
-
-static inline int OpenConfig(void)
-{
-    int fd = open(SMAP_CONFIG_PATH, O_CREAT | O_RDWR, SMAP_CONFIG_MODE);
-    if (fd == NORMAL_ERR) {
-        return -errno;
-    }
-    return fd;
-}
-
-/*
- * RemoveAndOpenConfig - remove (if needed) and open smap config
- *
- * @remove: remove old config before open
- *
- * Returns smap config file's fd, it's caller's responsibility to close it.
- */
-static int RemoveAndOpenConfig(bool remove)
-{
-    int fd;
-
-    if (remove) {
-        fd = RemoveConfig();
-        if (fd) {
-            SMAP_LOGGER_ERROR("Remove old smap config failed: %d.", fd);
-            return fd;
-        }
-    }
-    fd = OpenConfig();
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-    }
-    return fd;
-}
-
-static inline int TruncateConfig(int fd, size_t len)
-{
-    if (ftruncate(fd, len) == NORMAL_ERR) {
-        return -errno;
-    }
-    return 0;
-}
-
-static inline char *MapConfig(int fd, size_t len, int prot, int flags)
-{
-    char *addr = mmap(NULL, len, prot, flags, fd, 0);
-    if (addr == MAP_FAILED) {
-        SMAP_LOGGER_ERROR("Mapping smap config failed: %d.", -errno);
-        return NULL;
-    }
-    return addr;
-}
-
-static inline void UnmapConfig(char *addr, size_t len)
-{
-    if (munmap(addr, len) == NORMAL_ERR) {
-        SMAP_LOGGER_ERROR("Unmapping smap config failed: %d.", -errno);
-    }
-}
-
 static inline void WriteRunMode(char *addr, RunMode mode)
 {
     struct SmapConfigHeader *header = (struct SmapConfigHeader *)addr;
@@ -226,13 +154,14 @@ static void WriteNumaConfig(char *base)
     payload = (struct NumaPayload *)JumpToNumaPayload(base);
 
     for (int i = 0; i < nrLocalNuma; i++) {
-        /* 行首指针提到内层循环外：避免每个元素经 NM_AT/NM_STRIDE 重复调用 GetNumaCap() */
-        const uint64_t *row = NM_ROW(numaInfo->privateSize, i);
+        /* 行首指针提到内层循环外：避免每个元素经 NM_AT/NM_STRIDE 重复调用 GetNumaCap()；
+         * 私有区数组尚未分配时（NUMA 探测前重建配置）按 0 写出 */
+        const uint64_t *row = numaInfo->privateSize != NULL ? NM_ROW(numaInfo->privateSize, i) : NULL;
         for (int j = 0; j < SMAP_MAX_NUMNODES; j++) {
             payload->local = i;
             payload->remote = j;
             /* ABI 流固定 SMAP_MAX_NUMNODES 宽；j >= cap 的槽位非真实节点，补 0 对齐 */
-            payload->size = j < cap ? row[j] : 0;
+            payload->size = (row != NULL && j < cap) ? row[j] : 0;
             payload++;
         }
     }
@@ -251,40 +180,23 @@ static void WriteEmptyProcessConfigs(char *base)
 }
 
 /*
- * InitSmapConfig - initialize smap config, including header and numa config
- *
- * @fd: smap config file descriptor
+ * BuildInitConfigImage - build an initial config image (header, numa config from memory, no process record)
  */
-static int InitSmapConfig(int fd)
+static int BuildInitConfigImage(struct SmapConfigImage *img)
 {
-    int ret;
-    char *addr;
-    size_t mapLen = CalcConfigLen(0);
-    RunMode runMode = GetRunMode();
-
-    // Set config file length
-    SMAP_LOGGER_INFO("Truncate smap config to %zu.", mapLen);
-    ret = TruncateConfig(fd, mapLen);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Truncate smap config to %zu failed: %d.", mapLen, ret);
-        return ret;
+    size_t len = CalcConfigLen(0);
+    char *buf = calloc(1, len);
+    if (buf == NULL) {
+        SMAP_LOGGER_ERROR("Alloc smap config image %zu failed.", len);
+        return -ENOMEM;
     }
 
-    addr = MapConfig(fd, mapLen, PROT_WRITE, MAP_SHARED);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
-    }
-    SMAP_LOGGER_INFO("Mmap smap config %zu done.", mapLen);
+    WriteHeader(buf, GetRunMode(), len);
+    WriteNumaConfig(JumpToNumaConfig(buf));
+    WriteEmptyProcessConfigs(buf);
 
-    // Initialize header
-    WriteHeader(addr, runMode, mapLen);
-
-    // Initialize NumaConfig
-    WriteNumaConfig(JumpToNumaConfig(addr));
-    WriteEmptyProcessConfigs(addr);
-
-    UnmapConfig(addr, mapLen);
+    img->data = buf;
+    img->len = len;
     return 0;
 }
 
@@ -324,30 +236,158 @@ static inline void ReadHeader(char *addr, struct SmapConfigHeader *header)
     header->totalLen = h->totalLen;
 }
 
-/*
- * ParseHeader - read smap config and fill in config header
- */
-static int ParseHeader(int fd, struct SmapConfigHeader *header)
+static void FreeConfigImage(struct SmapConfigImage *img)
 {
-    char *addr;
+    free(img->data);
+    img->data = NULL;
+    img->len = 0;
+}
 
-    SMAP_LOGGER_DEBUG("Enter ParseHeader.");
-    addr = MapConfig(fd, CONFIG_HEADER_LEN, PROT_READ, MAP_PRIVATE);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
+/* SmapConfigPath - 配置文件路径 */
+static const char *SmapConfigPath(void)
+{
+    return SMAP_CONFIG_PATH;
+}
+
+/* ConfigMaxLen - 合法配置文件大小上界：头部 + NUMA 配置 + 槽位上限条最大宽度的进程记录 */
+static size_t ConfigMaxLen(void)
+{
+    size_t maxWords = (size_t)SMAP_MAX_NUMNODES / (size_t)NUMA_BITS_PER_WORD;
+    return CalcConfigLen((size_t)MAX_PID_SLOTS * CalcProcessPayloadStride((uint32_t)maxWords, SMAP_MAX_NUMNODES));
+}
+
+static int ConfigReadFull(int fd, char *buf, size_t len)
+{
+    size_t done = 0;
+    while (done < len) {
+        ssize_t n = read(fd, buf + done, len - done);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0) {
+            return -errno;
+        }
+        if (n == 0) {
+            /* 读取期间文件被截短 */
+            return -EIO;
+        }
+        done += (size_t)n;
     }
+    return 0;
+}
 
-    ReadHeader(addr, header);
-    if (!IsConfigHeaderValid(header)) {
-        SMAP_LOGGER_ERROR("Wrong smap config header.");
-        UnmapConfig(addr, CONFIG_HEADER_LEN);
+static int ConfigWriteFull(int fd, const char *buf, size_t len)
+{
+    size_t done = 0;
+    while (done < len) {
+        ssize_t n = write(fd, buf + done, len - done);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n < 0) {
+            /* tmpfs 空间不足等错误以 -ENOSPC 等错误码返回，而不是 SIGBUS */
+            return -errno;
+        }
+        if (n == 0) {
+            return -EIO;
+        }
+        done += (size_t)n;
+    }
+    return 0;
+}
+
+/*
+ * LoadConfigImage - read the whole smap config into memory and validate its header
+ *
+ * Returns 0 on success, -ENOENT if the file does not exist, -EINVAL if it is too short, too large or its header is
+ * invalid (including totalLen beyond the file size), or another negative errno on I/O failure.
+ */
+static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
+{
+    struct stat st;
+    struct SmapConfigHeader header;
+    int ret;
+
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd == NORMAL_ERR) {
+        return -errno;
+    }
+    if (fstat(fd, &st) == NORMAL_ERR) {
+        ret = -errno;
+        (void)close(fd);
+        return ret;
+    }
+    if (!S_ISREG(st.st_mode) || st.st_size < (off_t)CONFIG_HEADER_LEN || (size_t)st.st_size > ConfigMaxLen()) {
+        SMAP_LOGGER_ERROR("Invalid smap config file, mode 0%o, size %lld.", (unsigned int)st.st_mode,
+                          (long long)st.st_size);
+        (void)close(fd);
         return -EINVAL;
     }
 
-    UnmapConfig(addr, CONFIG_HEADER_LEN);
-    SMAP_LOGGER_DEBUG("Exit ParseHeader.");
+    size_t size = (size_t)st.st_size;
+    char *buf = malloc(size);
+    if (buf == NULL) {
+        (void)close(fd);
+        return -ENOMEM;
+    }
+    ret = ConfigReadFull(fd, buf, size);
+    (void)close(fd);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Read smap config failed: %d.", ret);
+        free(buf);
+        return ret;
+    }
+
+    ReadHeader(buf, &header);
+    if (!IsConfigHeaderValid(&header) || header.totalLen > size) {
+        SMAP_LOGGER_ERROR("Wrong smap config header, total len %u, file size %zu.", header.totalLen, size);
+        free(buf);
+        return -EINVAL;
+    }
+    SMAP_LOGGER_INFO("ver: %hu, header len: %hu, total len: %u.", header.ver, header.headerLen, header.totalLen);
+    img->data = buf;
+    img->len = header.totalLen;
     return 0;
+}
+
+/*
+ * StoreConfigImage - atomically replace the smap config with @img
+ *
+ * The image is written to a temporary file in the same directory, fsync'ed and renamed over the config, so readers
+ * and a crash at any point see either the old or the new complete file. Any failure (e.g. -ENOSPC on a full tmpfs)
+ * leaves the old file untouched and is returned to the caller.
+ */
+static int StoreConfigImage(const char *path, const struct SmapConfigImage *img)
+{
+    char tmpPath[SMAP_CONFIG_PATH_MAX];
+    int ret;
+
+    if (snprintf_s(tmpPath, sizeof(tmpPath), sizeof(tmpPath) - 1, "%s.XXXXXX", path) < 0) {
+        return -EINVAL;
+    }
+    int fd = mkstemp(tmpPath);
+    if (fd == NORMAL_ERR) {
+        ret = -errno;
+        SMAP_LOGGER_ERROR("Create temporary smap config failed: %d.", ret);
+        return ret;
+    }
+    (void)fcntl(fd, F_SETFD, FD_CLOEXEC);
+
+    ret = ConfigWriteFull(fd, img->data, img->len);
+    if (ret == 0 && fsync(fd) == NORMAL_ERR) {
+        ret = -errno;
+    }
+    if (close(fd) == NORMAL_ERR && ret == 0) {
+        ret = -errno;
+    }
+    if (ret == 0 && rename(tmpPath, path) == NORMAL_ERR) {
+        ret = -errno;
+    }
+    if (ret) {
+        SMAP_LOGGER_ERROR("Store smap config (%zu bytes) failed: %d.", img->len, ret);
+        (void)unlink(tmpPath);
+    }
+    return ret;
 }
 
 static void RecoverRunMode(RunMode runMode)
@@ -910,312 +950,205 @@ static int BuildAllProcessPayload(struct ProcessPayload **payload, int *len)
     return 0;
 }
 
-static int MapAndWriteProcessConfig(int fd, size_t mapLen, struct ProcessPayload *payload, int nrPayload)
-{
-    int ret;
-    char *addr;
-    char *processBase;
-    RunMode runMode = GetRunMode();
-
-    addr = MapConfig(fd, mapLen, PROT_WRITE, MAP_SHARED);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
-    }
-
-    processBase = JumpToProcessConfig(addr);
-    ret = WriteProcessConfig(processBase, payload, nrPayload);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Write process config failed: %d.", ret);
-        UnmapConfig(addr, mapLen);
-        return ret;
-    }
-    SMAP_LOGGER_INFO("All process config written.");
-
-    WriteHeader(addr, runMode, mapLen);
-    UnmapConfig(addr, mapLen);
-    return 0;
-}
-
 /*
- * ChangeProcessConfig - rewrite process config with a payload snapshot built by the caller
+ * ChangeProcessConfig - replace the process config of @img with a payload snapshot built by the caller
  *
  * @payload/@nrPayload: snapshot from BuildAllProcessPayload, owned by the caller
  */
-static int ChangeProcessConfig(int fd, struct ProcessPayload *payload, int nrPayload)
+static int ChangeProcessConfig(struct SmapConfigImage *img, struct ProcessPayload *payload, int nrPayload)
 {
-    int ret, err;
-    size_t oldConfigLen, newConfigLen;
-    struct SmapConfigHeader header;
-
-    SMAP_LOGGER_DEBUG("Enter ReadConfig.");
-    ret = ParseHeader(fd, &header);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Parse smap config header failed: %d.", ret);
-        return ret;
-    }
-    oldConfigLen = header.totalLen;
-
-    newConfigLen = CalcConfigLen(CalcProcessPayloadBytes(payload, nrPayload));
-    SMAP_LOGGER_DEBUG("New config length with %d processes: %zu.", nrPayload, newConfigLen);
-
-    // Extend config before writing process config
-    if (newConfigLen > oldConfigLen) {
-        SMAP_LOGGER_INFO("New len > old len, %zu > %zu, extend file.", newConfigLen, oldConfigLen);
-        ret = TruncateConfig(fd, newConfigLen);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Extend smap config to %zu failed: %d.", newConfigLen, ret);
-            return ret;
-        }
-    }
-
-    ret = MapAndWriteProcessConfig(fd, newConfigLen, payload, nrPayload);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Map and write process config failed: %d.", ret);
-        return ret;
-    }
-
-    // Shrink config file after process config has been written successfully
-    if (newConfigLen < oldConfigLen) {
-        SMAP_LOGGER_INFO("New len < old len, %zu < %zu, shrink file.", newConfigLen, oldConfigLen);
-        err = TruncateConfig(fd, newConfigLen);
-        if (err) {
-            SMAP_LOGGER_WARNING("Shrink smap config to %zu failed: %d.", newConfigLen, err);
-        }
-    }
-    return ret;
-}
-
-static int ParseConfig(int fd, struct SmapConfigHeader *header)
-{
+    size_t prefixLen = CONFIG_HEADER_LEN + CalcNumaConfigLen();
+    size_t newConfigLen = CalcConfigLen(CalcProcessPayloadBytes(payload, nrPayload));
+    char *buf;
     int ret;
-    char *addr;
-    char *numaBase;
-    char *processBase;
-    size_t mapLen = header->totalLen;
 
-    SMAP_LOGGER_DEBUG("Enter ParseConfig.");
-    addr = MapConfig(fd, mapLen, PROT_READ, MAP_PRIVATE);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
-    }
-
-    if (!IsRunModeValid(header->runMode)) {
-        SMAP_LOGGER_ERROR("Detected invalid run mode: %d.", header->runMode);
-        UnmapConfig(addr, mapLen);
+    SMAP_LOGGER_DEBUG("New config length with %d processes: %zu.", nrPayload, newConfigLen);
+    if (img->len < prefixLen || newConfigLen > UINT32_MAX) {
+        SMAP_LOGGER_ERROR("Invalid smap config length, old %zu, new %zu.", img->len, newConfigLen);
         return -EINVAL;
     }
-    SMAP_LOGGER_INFO("Detected run mode: %d.", header->runMode);
-    RecoverRunMode(header->runMode);
+    buf = calloc(1, newConfigLen);
+    if (buf == NULL) {
+        SMAP_LOGGER_ERROR("Alloc smap config image %zu failed.", newConfigLen);
+        return -ENOMEM;
+    }
+    /* 头部与 NUMA 配置沿用原映像，进程配置整体重建 */
+    if (memcpy_s(buf, newConfigLen, img->data, prefixLen) != EOK) {
+        free(buf);
+        return -EINVAL;
+    }
+    ret = WriteProcessConfig(JumpToProcessConfig(buf), payload, nrPayload);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Write process config failed: %d.", ret);
+        free(buf);
+        return ret;
+    }
+    WriteHeader(buf, GetRunMode(), newConfigLen);
+
+    FreeConfigImage(img);
+    img->data = buf;
+    img->len = newConfigLen;
+    return 0;
+}
+
+static int ParseConfig(const struct SmapConfigImage *img)
+{
+    int ret;
+    char *numaBase;
+    char *processBase;
+    struct SmapConfigHeader header;
+    size_t totalLen = img->len;
+
+    SMAP_LOGGER_DEBUG("Enter ParseConfig.");
+    ReadHeader(img->data, &header);
+    if (!IsRunModeValid(header.runMode)) {
+        SMAP_LOGGER_ERROR("Detected invalid run mode: %d.", header.runMode);
+        return -EINVAL;
+    }
+    SMAP_LOGGER_INFO("Detected run mode: %d.", header.runMode);
+    RecoverRunMode(header.runMode);
 
     // Parse NumaPayload
-    numaBase = JumpToNumaConfig(addr);
-    if (!IsNumaConfigValid(numaBase, mapLen)) {
+    numaBase = JumpToNumaConfig(img->data);
+    if (!IsNumaConfigValid(numaBase, totalLen)) {
         SMAP_LOGGER_ERROR("Detected invalid numa config.");
-        UnmapConfig(addr, mapLen);
         return -EINVAL;
     }
     ret = RecoverNumaConfig(numaBase);
     if (ret) {
         SMAP_LOGGER_ERROR("Parse numa config failed: %d.", ret);
-        UnmapConfig(addr, mapLen);
         return ret;
     }
 
     // Parse ProcessConfig
-    if (!HasProcessConfig(mapLen)) {
-        UnmapConfig(addr, mapLen);
+    if (!HasProcessConfig(totalLen)) {
         SMAP_LOGGER_DEBUG("Exit ParseConfig.");
         return 0;
     }
-    processBase = JumpToProcessConfig(addr);
-    if (!IsProcessConfigValid(processBase, mapLen)) {
+    processBase = JumpToProcessConfig(img->data);
+    if (!IsProcessConfigValid(processBase, totalLen)) {
         SMAP_LOGGER_ERROR("Detected invalid process config.");
-        UnmapConfig(addr, mapLen);
         return -EINVAL;
     }
     ret = RecoverProcessConfig(processBase);
     if (ret) {
         SMAP_LOGGER_ERROR("Parse process config failed: %d.", ret);
-        UnmapConfig(addr, mapLen);
         return ret;
     }
 
-    UnmapConfig(addr, mapLen);
     SMAP_LOGGER_DEBUG("Exit ParseConfig.");
     return 0;
 }
 
-static int ReadConfig(int fd)
+static void ChangeRunMode(struct SmapConfigImage *img, RunMode runMode)
 {
-    int ret;
-    struct SmapConfigHeader header;
-
-    SMAP_LOGGER_DEBUG("Enter ReadConfig.");
-    ret = ParseHeader(fd, &header);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Parse smap config header failed: %d.", ret);
-        return ret;
-    }
-    SMAP_LOGGER_INFO("ver: %hu, header len: %hu, total len: %u.", header.ver, header.headerLen, header.totalLen);
-
-    ret = ParseConfig(fd, &header);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Parse smap config payload failed: %d.", ret);
-        return ret;
-    }
-    SMAP_LOGGER_DEBUG("Exit ReadConfig.");
-    return 0;
-}
-
-static int ChangeRunMode(int fd, RunMode runMode)
-{
-    int ret;
-    char *addr;
-    char *numaBase;
-    size_t mapLen = CONFIG_HEADER_LEN;
-    struct SmapConfigHeader header;
-
     SMAP_LOGGER_DEBUG("Enter ChangeRunMode.");
-    addr = MapConfig(fd, mapLen, PROT_WRITE, MAP_SHARED);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
-    }
-
-    WriteRunMode(addr, runMode);
-
-    UnmapConfig(addr, mapLen);
+    WriteRunMode(img->data, runMode);
     SMAP_LOGGER_DEBUG("Exit ChangeRunMode.");
-    return 0;
 }
 
-static int ChangeOneNumaConfig(int fd, struct NumaPayload *payload)
+static int ChangeOneNumaConfig(struct SmapConfigImage *img, struct NumaPayload *payload)
 {
-    int ret;
-    char *addr;
     char *numaBase;
-    size_t mapLen;
-    struct SmapConfigHeader header;
 
     SMAP_LOGGER_DEBUG("Enter ChangeOneNumaConfig.");
-    ret = ParseHeader(fd, &header);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Parse smap config header failed: %d.", ret);
-        return ret;
-    }
-
-    mapLen = header.totalLen;
-    addr = MapConfig(fd, mapLen, PROT_WRITE, MAP_SHARED);
-    if (!addr) {
-        SMAP_LOGGER_ERROR("Map smap config failed.");
-        return -EBADF;
-    }
-    numaBase = JumpToNumaConfig(addr);
-    if (!IsNumaConfigValid(numaBase, mapLen)) {
+    numaBase = JumpToNumaConfig(img->data);
+    if (!IsNumaConfigValid(numaBase, img->len)) {
         SMAP_LOGGER_ERROR("Detected invalid numa config.");
-        UnmapConfig(addr, mapLen);
         return -EINVAL;
     }
 
     WriteOneNumaConfig(numaBase, payload);
-
-    UnmapConfig(addr, mapLen);
     SMAP_LOGGER_DEBUG("Exit ChangeOneNumaConfig.");
     return 0;
 }
 
+/*
+ * LoadOrInitConfigImage - load the current smap config, or build one from the in-memory state
+ *
+ * A missing or corrupted file is rebuilt from memory (the daemon state is authoritative once recovered); other
+ * errors are returned so that a transient failure never overwrites a valid file.
+ */
+static int LoadOrInitConfigImage(struct SmapConfigImage *img)
+{
+    int ret = LoadConfigImage(SmapConfigPath(), img);
+    if (ret == 0) {
+        return 0;
+    }
+    if (ret != -ENOENT && ret != -EINVAL) {
+        SMAP_LOGGER_ERROR("Load smap config failed: %d.", ret);
+        return ret;
+    }
+    if (ret == -EINVAL) {
+        SMAP_LOGGER_WARNING("Smap config is corrupted, rebuild it from memory.");
+    }
+    ret = BuildInitConfigImage(img);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Init smap config error: %d.", ret);
+    }
+    return ret;
+}
+
 static int RecoverFromConfigLocked(void)
 {
-    int ret;
-    int fd;
-    bool exist;
-
-    exist = DoesConfigExist();
-    SMAP_LOGGER_DEBUG("Check smap config existence: %d.", exist);
-
-    fd = RemoveAndOpenConfig(false);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-        return fd;
-    }
-
-    if (exist) {
-        ret = ReadConfig(fd);
-        close(fd);
+    struct SmapConfigImage img = { 0 };
+    int ret = LoadConfigImage(SmapConfigPath(), &img);
+    if (ret == 0) {
+        ret = ParseConfig(&img);
+        FreeConfigImage(&img);
         if (ret == 0) {
             SMAP_LOGGER_INFO("Read config done.");
             return 0;
         }
-
-        // Create a new smap config if read is failed
+        // Create a new smap config if parse is failed
+        SMAP_LOGGER_ERROR("Parse config error: %d.", ret);
+    } else if (ret != -ENOENT && ret != -EINVAL) {
         SMAP_LOGGER_ERROR("Read config error: %d.", ret);
-        fd = RemoveAndOpenConfig(true);
-        if (fd < 0) {
-            SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-            return fd;
-        }
+        return ret;
     }
 
-    ret = InitSmapConfig(fd);
+    ret = BuildInitConfigImage(&img);
+    if (ret == 0) {
+        ret = StoreConfigImage(SmapConfigPath(), &img);
+        FreeConfigImage(&img);
+    }
     if (ret) {
         SMAP_LOGGER_ERROR("Init smap config error: %d.", ret);
     } else {
         SMAP_LOGGER_INFO("Init smap config done.");
     }
-    close(fd);
     return ret;
 }
 
 static int SyncRunModeLocked(RunMode runMode)
 {
-    int ret;
-    int fd;
-    int nrLocalNuma = GetNrLocalNuma();
-    bool exist;
+    struct SmapConfigImage img = { 0 };
 
     if (!IsRunModeValid(runMode)) {
         SMAP_LOGGER_ERROR("SyncRunMode runMode %d is invalid.", runMode);
         return -EINVAL;
     }
 
-    exist = DoesConfigExist();
-    SMAP_LOGGER_DEBUG("Check smap config existence: %d.", exist);
-
     SMAP_LOGGER_INFO("Sync run mode to %d.", runMode);
-    fd = RemoveAndOpenConfig(false);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-        return fd;
+    int ret = LoadOrInitConfigImage(&img);
+    if (ret) {
+        return ret;
     }
-
-    if (!exist) {
-        ret = InitSmapConfig(fd);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Init smap config error: %d.", ret);
-            close(fd);
-            return ret;
-        }
-        SMAP_LOGGER_INFO("Init smap config done.");
-    }
-
-    ret = ChangeRunMode(fd, runMode);
+    ChangeRunMode(&img, runMode);
+    ret = StoreConfigImage(SmapConfigPath(), &img);
+    FreeConfigImage(&img);
     if (ret) {
         SMAP_LOGGER_ERROR("Change run mode failed: %d.", ret);
     } else {
         SMAP_LOGGER_INFO("Change run mode done.");
     }
-    close(fd);
     return ret;
 }
 
 static int SyncOneNumaConfigLocked(int local, int remote, size_t size)
 {
-    int ret;
-    int fd;
+    struct SmapConfigImage img = { 0 };
     int nrLocalNuma = GetNrLocalNuma();
-    bool exist;
     struct NumaPayload config = { local, remote, size };
 
     if (local >= nrLocalNuma) {
@@ -1227,69 +1160,43 @@ static int SyncOneNumaConfigLocked(int local, int remote, size_t size)
         return -EINVAL;
     }
 
-    exist = DoesConfigExist();
-    SMAP_LOGGER_DEBUG("Check smap config existence: %d.", exist);
-
     SMAP_LOGGER_INFO("Synchronize numa config %d-%d to %zu.", local, remote, size);
-    fd = RemoveAndOpenConfig(false);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-        return fd;
+    int ret = LoadOrInitConfigImage(&img);
+    if (ret) {
+        return ret;
     }
-
-    if (!exist) {
-        ret = InitSmapConfig(fd);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Init smap config error: %d.", ret);
-            close(fd);
-            return ret;
-        }
-        SMAP_LOGGER_INFO("Init smap config done.");
+    ret = ChangeOneNumaConfig(&img, &config);
+    if (ret == 0) {
+        ret = StoreConfigImage(SmapConfigPath(), &img);
     }
-
-    ret = ChangeOneNumaConfig(fd, &config);
+    FreeConfigImage(&img);
     if (ret) {
         SMAP_LOGGER_ERROR("Change one numa config failed: %d.", ret);
     } else {
         SMAP_LOGGER_INFO("Change one numa config done.");
     }
-    close(fd);
     return ret;
 }
 
 static int SyncAllProcessConfigLocked(struct ProcessPayload *payload, int nrPayload)
 {
-    int ret;
-    int fd;
-    bool exist;
-
-    exist = DoesConfigExist();
-    SMAP_LOGGER_DEBUG("Check smap config existence: %d.", exist);
+    struct SmapConfigImage img = { 0 };
 
     SMAP_LOGGER_INFO("Synchronize process config begin.");
-    fd = RemoveAndOpenConfig(false);
-    if (fd < 0) {
-        SMAP_LOGGER_ERROR("Open smap config failed: %d.", fd);
-        return fd;
+    int ret = LoadOrInitConfigImage(&img);
+    if (ret) {
+        return ret;
     }
-
-    if (!exist) {
-        ret = InitSmapConfig(fd);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Init smap config error: %d.", ret);
-            close(fd);
-            return ret;
-        }
-        SMAP_LOGGER_INFO("Init smap config done.");
+    ret = ChangeProcessConfig(&img, payload, nrPayload);
+    if (ret == 0) {
+        ret = StoreConfigImage(SmapConfigPath(), &img);
     }
-
-    ret = ChangeProcessConfig(fd, payload, nrPayload);
+    FreeConfigImage(&img);
     if (ret) {
         SMAP_LOGGER_ERROR("Change process config failed: %d.", ret);
     } else {
         SMAP_LOGGER_INFO("Change process config done.");
     }
-    close(fd);
     return ret;
 }
 
