@@ -1324,12 +1324,14 @@ static void AggregateSubMigResults(struct SubMigrateCtx *subs, int nrThreads, st
     for (int i = 0; i < nrThreads; i++) {
         for (int k = 0; k < subs[i].msg.cnt; k++) {
             int orig = subs[i].origIdx[k];
-            if (subs[i].ret < 0) {
-                /* ioctl整体失败（如全局状态竞争-EAGAIN）时内核不回填统计字段，
-                 * 子条目仍为初始值0，若直接聚合会把下发数虚报为成功数，
+            if (!subs[i].msg.migList[k].successToUser) {
+                /* 子条目未被内核处理（ioctl 在建表前失败如 -EAGAIN、条目被跳过，或该条目
+                 * 一页都没迁移）时统计字段不可信，若直接聚合会把下发数虚报为成功数，
                  * 全部计为隔离失败，保证successMigCount真实 */
                 mMsg->migList[orig].failedIsolatedNr += subs[i].msg.migList[k].nr;
             } else {
+                /* 内核处理过该条目：即使 ioctl 中途失败也会回拷统计，未处理的剩余页
+                 * 已计入 failedIsolatedNr，按回填值聚合，不丢弃已成功的页 */
                 mMsg->migList[orig].failedMigNr += subs[i].msg.migList[k].failedMigNr;
                 mMsg->migList[orig].failedIsolatedNr += subs[i].msg.migList[k].failedIsolatedNr;
             }

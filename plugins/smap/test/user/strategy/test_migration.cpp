@@ -656,6 +656,37 @@ TEST_F(MigrationTest, TestAggregateSubMigResultsFailedThreadCounted)
     EXPECT_TRUE(origList.successToUser);
 }
 
+/* ioctl 中途失败但内核已回拷统计（successToUser=true）时按回填值聚合，
+ * 不能把已迁移成功的页整体记为失败 */
+TEST_F(MigrationTest, TestAggregateSubMigResultsPartialFailureUsesKernelCounters)
+{
+    struct MigList origList = {};
+    struct MigrateMsg mMsg = {.cnt = 1, .migList = &origList};
+    struct SubMigrateCtx subs[2] = {};
+    struct MigList subLists[2] = {};
+    int origIdx[2] = {0, 0};
+
+    origList.nr = 32;
+    for (int i = 0; i < 2; i++) {
+        subs[i].msg.cnt = 1;
+        subs[i].msg.migList = &subLists[i];
+        subs[i].origIdx = &origIdx[i];
+        subLists[i].nr = 16;
+    }
+    /* 线程0：处理了 6 页后中止，剩余 10 页由内核计入 failedIsolatedNr */
+    subs[0].ret = -ENOMEM;
+    subLists[0].successToUser = true;
+    subLists[0].failedIsolatedNr = 10;
+    /* 线程1：建表前失败，内核未回拷 */
+    subs[1].ret = -EAGAIN;
+
+    AggregateSubMigResults(subs, 2, &mMsg);
+
+    EXPECT_TRUE(origList.successToUser);
+    EXPECT_EQ((uint64_t)0, origList.failedMigNr);
+    EXPECT_EQ((uint64_t)26, origList.failedIsolatedNr);
+}
+
 /* 回归：多线程迁移整体失败时，DoMigration返回负值且全部页面计入隔离失败，
  * 不得出现 nr - 0 - 0 的假成功计数（fd非法时ioctl必然失败） */
 TEST_F(MigrationTest, TestDoMigrationMultiThreadFailAllAccounted)
