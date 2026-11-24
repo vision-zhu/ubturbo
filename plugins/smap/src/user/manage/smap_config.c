@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <dirent.h>
 
 #include "securec.h"
 #include "smap_user_log.h"
@@ -311,6 +312,38 @@ static int PrepareConfigDir(const char *dir)
 }
 
 /*
+ * RemoveStaleConfigTemps - unlink "smap_config.XXXXXX" temporaries left in the private config dir by a daemon that
+ * died between mkstemp() and rename() in StoreConfigImage. Only regular files owned by the effective user are
+ * removed; symlinks are not followed. Runs once, when the config location is first decided.
+ */
+static void RemoveStaleConfigTemps(const char *dir)
+{
+    static const char prefix[] = "smap_config.";
+    const size_t prefixLen = sizeof(prefix) - 1;
+    const size_t suffixLen = sizeof("XXXXXX") - 1;
+    DIR *d = opendir(dir);
+    if (d == NULL) {
+        return;
+    }
+    int dfd = dirfd(d);
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strlen(de->d_name) != prefixLen + suffixLen || strncmp(de->d_name, prefix, prefixLen) != 0) {
+            continue;
+        }
+        struct stat st;
+        if (fstatat(dfd, de->d_name, &st, AT_SYMLINK_NOFOLLOW) == NORMAL_ERR || !S_ISREG(st.st_mode) ||
+            st.st_uid != geteuid()) {
+            continue;
+        }
+        if (unlinkat(dfd, de->d_name, 0) == 0) {
+            SMAP_LOGGER_WARNING("Removed stale temporary smap config %s/%s.", dir, de->d_name);
+        }
+    }
+    (void)closedir(d);
+}
+
+/*
  * SmapConfigPath - smap config location, decided once per process (caller holds g_smapConfigLock)
  *
  * Prefer the private directory; fall back to the legacy /dev/shm location (with the per-file ownership checks done in
@@ -323,6 +356,7 @@ static const char *SmapConfigPath(void)
         int ret = PrepareConfigDir(SMAP_CONFIG_DIR);
         if (ret == 0) {
             g_smapConfigPath = SMAP_CONFIG_PATH;
+            RemoveStaleConfigTemps(SMAP_CONFIG_DIR);
         } else {
             SMAP_LOGGER_WARNING("Smap config dir %s unavailable: %d, fall back to %s.", SMAP_CONFIG_DIR, ret,
                                 SmapConfigLegacyPath());

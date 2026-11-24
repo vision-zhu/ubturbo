@@ -1934,3 +1934,35 @@ TEST_F(SmapConfigFileTest, LoadAcceptsV3AndRecordsMtime)
     EXPECT_EQ(99ULL, reinterpret_cast<struct ProcessPayloadHeader *>(JumpToProcessPayload(processBase))->startTime);
     FreeConfigImage(&img);
 }
+
+extern "C" void RemoveStaleConfigTemps(const char *dir);
+
+/* 崩溃遗留的 mkstemp 临时文件在首次确定配置位置时被清理；.bak 备份与符号链接不受影响 */
+TEST(SmapConfigTempCleanupTest, RemovesOnlyOwnRegularTemporaries)
+{
+    char dir[] = "/tmp/smap_cfg_tmp_XXXXXX";
+    ASSERT_NE(nullptr, mkdtemp(dir));
+    std::string base(dir);
+    std::string stale = base + "/smap_config.a1B2c3";
+    std::string bak = base + "/smap_config.bak";
+    std::string cfg = base + "/smap_config";
+    std::string link = base + "/smap_config.zzzzzz";
+    for (const std::string &p : {stale, bak, cfg}) {
+        int fd = open(p.c_str(), O_CREAT | O_WRONLY, 0600);
+        ASSERT_GE(fd, 0);
+        close(fd);
+    }
+    ASSERT_EQ(0, symlink(cfg.c_str(), link.c_str()));
+
+    RemoveStaleConfigTemps(dir);
+
+    EXPECT_NE(0, access(stale.c_str(), F_OK));
+    EXPECT_EQ(0, access(bak.c_str(), F_OK));
+    EXPECT_EQ(0, access(cfg.c_str(), F_OK));
+    struct stat st;
+    EXPECT_EQ(0, lstat(link.c_str(), &st));
+    for (const std::string &p : {link, bak, cfg}) {
+        unlink(p.c_str());
+    }
+    rmdir(dir);
+}
