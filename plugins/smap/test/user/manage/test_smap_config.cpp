@@ -1251,6 +1251,9 @@ TEST_F(SmapConfigTest, TestSyncAllProcessConfigSkipsStaleSnapshot)
 
 /* ---------------- 配置文件映像读写（真实文件 I/O，落在临时目录） ---------------- */
 extern "C" const char *SmapConfigPath(void);
+extern "C" const char *SmapConfigLegacyPath(void);
+extern "C" int PrepareConfigDir(const char *dir);
+extern "C" const char *g_smapConfigPath;
 extern "C" int LoadConfigImage(const char *path, struct SmapConfigImage *img);
 extern "C" int StoreConfigImage(const char *path, const struct SmapConfigImage *img);
 extern "C" int BuildInitConfigImage(struct SmapConfigImage *img);
@@ -1277,13 +1280,17 @@ class SmapConfigFileTest : public ::testing::Test {
 protected:
     char dir[64] = {};
     std::string path;
+    std::string legacyPath;
 
     void SetUp() override
     {
         ASSERT_EQ(EOK, strcpy_s(dir, sizeof(dir), "/tmp/smap_cfg_ut_XXXXXX"));
         ASSERT_NE(nullptr, mkdtemp(dir));
         path = std::string(dir) + "/smap_config";
+        legacyPath = std::string(dir) + "/legacy_smap_config";
         MOCKER(SmapConfigPath).stubs().will(returnValue(static_cast<const char *>(path.c_str())));
+        /* 旧位置同样落在临时目录，避免读取/删除宿主机 /dev/shm 下的真实文件 */
+        MOCKER(SmapConfigLegacyPath).stubs().will(returnValue(static_cast<const char *>(legacyPath.c_str())));
         MOCKER(GetNrLocalNuma).stubs().will(returnValue(1));
         MOCKER(WriteNumaConfig).stubs().will(invoke(FakeWriteNumaConfig));
     }
@@ -1637,4 +1644,113 @@ TEST_F(SmapConfigFileTest, RecoverRebuildsWhenParseFails)
     ASSERT_EQ(0, LoadConfigImage((path + SMAP_CONFIG_BAK_SUFFIX).c_str(), &img));
     EXPECT_EQ(MEM_POOL_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
     FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, LoadRejectsSymlinkAndLooseMode)
+{
+    StoreInit(WATERLINE_MODE);
+    struct SmapConfigImage img = {};
+
+    /* 组/其他用户可访问：可能被他人改写，拒绝 */
+    ASSERT_EQ(0, chmod(path.c_str(), 0644));
+    EXPECT_EQ(-EPERM, LoadConfigImage(path.c_str(), &img));
+    ASSERT_EQ(0, chmod(path.c_str(), 0600));
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    FreeConfigImage(&img);
+
+    /* 符号链接：不跟随 */
+    std::string link = std::string(dir) + "/link_config";
+    ASSERT_EQ(0, symlink(path.c_str(), link.c_str()));
+    EXPECT_EQ(-EPERM, LoadConfigImage(link.c_str(), &img));
+    EXPECT_EQ(nullptr, img.data);
+}
+
+TEST_F(SmapConfigFileTest, PrepareConfigDirChecksOwnerAndMode)
+{
+    std::string sub = std::string(dir) + "/run_smap";
+    ASSERT_EQ(0, PrepareConfigDir(sub.c_str()));
+    struct stat st;
+    ASSERT_EQ(0, stat(sub.c_str(), &st));
+    EXPECT_TRUE(S_ISDIR(st.st_mode));
+    EXPECT_EQ(0U, st.st_mode & 077U);
+    /* 已存在且合规：幂等 */
+    EXPECT_EQ(0, PrepareConfigDir(sub.c_str()));
+
+    ASSERT_EQ(0, chmod(sub.c_str(), 0777));
+    EXPECT_EQ(-EPERM, PrepareConfigDir(sub.c_str()));
+    ASSERT_EQ(0, rmdir(sub.c_str()));
+
+    std::string link = std::string(dir) + "/run_smap_link";
+    ASSERT_EQ(0, symlink(dir, link.c_str()));
+    EXPECT_NE(0, PrepareConfigDir(link.c_str()));
+}
+
+TEST_F(SmapConfigFileTest, RecoverMigratesLegacyConfig)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode = MEM_POOL_MODE;
+    ASSERT_EQ(0, StoreConfigImage(legacyPath.c_str(), &img));
+    std::vector<char> legacy(img.data, img.data + img.len);
+    FreeConfigImage(&img);
+
+    MOCKER(ParseConfig).expects(once()).will(returnValue(0));
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    EXPECT_EQ(legacy, ReadRaw());
+    struct stat st;
+    EXPECT_NE(0, stat(legacyPath.c_str(), &st));
+    EXPECT_EQ(1, CountFiles());
+}
+
+TEST_F(SmapConfigFileTest, RecoverIgnoresUntrustedLegacyConfig)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    ASSERT_EQ(0, StoreConfigImage(legacyPath.c_str(), &img));
+    FreeConfigImage(&img);
+    ASSERT_EQ(0, chmod(legacyPath.c_str(), 0666));
+
+    MOCKER(ParseConfig).expects(never());
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    FreeConfigImage(&img);
+    struct stat st;
+    EXPECT_EQ(0, stat(legacyPath.c_str(), &st));
+}
+
+TEST_F(SmapConfigFileTest, RecoverKeepsLegacyConfigWhenParseFails)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    ASSERT_EQ(0, StoreConfigImage(legacyPath.c_str(), &img));
+    FreeConfigImage(&img);
+
+    MOCKER(ParseConfig).expects(once()).will(returnValue(-EINVAL));
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    struct stat st;
+    EXPECT_EQ(0, stat(legacyPath.c_str(), &st));
+    EXPECT_EQ(0, stat(path.c_str(), &st));
+    EXPECT_NE(0, stat((path + SMAP_CONFIG_BAK_SUFFIX).c_str(), &st));
+}
+
+TEST_F(SmapConfigTest, TestSmapConfigPathPrefersPrivateDir)
+{
+    const char *saved = g_smapConfigPath;
+    static const char legacy[] = "/tmp/smap_cfg_ut_legacy_path";
+
+    g_smapConfigPath = nullptr;
+    MOCKER(PrepareConfigDir).expects(once()).will(returnValue(0));
+    EXPECT_STREQ(SMAP_CONFIG_PATH, SmapConfigPath());
+    EXPECT_STREQ(SMAP_CONFIG_PATH, SmapConfigPath());
+    GlobalMockObject::verify();
+
+    /* 私有目录不可用：退回旧位置，且只判定一次 */
+    g_smapConfigPath = nullptr;
+    MOCKER(PrepareConfigDir).expects(once()).will(returnValue(-EACCES));
+    MOCKER(SmapConfigLegacyPath).stubs().will(returnValue(static_cast<const char *>(legacy)));
+    EXPECT_STREQ(legacy, SmapConfigPath());
+    EXPECT_STREQ(legacy, SmapConfigPath());
+    GlobalMockObject::verify();
+
+    g_smapConfigPath = saved;
 }
