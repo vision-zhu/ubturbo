@@ -34,6 +34,7 @@
 #include "manage.h"
 #include "manage_internal.h"
 
+/* 写入 grouped 配置；attr 已注册进槽位表时调用方须持该槽位 attrLock */
 void SetGroupedProcessConfig(ProcessAttr *attr, pid_t pid, const NumaBitmap *nodeBitmap,
                              const GroupMigrationPolicy *policy)
 {
@@ -202,15 +203,18 @@ int ProcessAddGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const Group
         return -EINVAL;
     }
 
-    ProcessAttr *current = GetProcessAttr(pid);
-    if (current) {
-        SetGroupedProcessConfig(current, pid, nodeBitmap, policy);
+    struct PidSlot *slot = PidSlotGetRef(pid);
+    if (slot) {
+        /* 活跃 attr 的配置/位图须持 attrLock 修改，与 worker 及其他 IPC 线程串行 */
+        EnvMutexLock(&slot->attrLock);
+        SetGroupedProcessConfig(slot->attr, pid, nodeBitmap, policy);
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
         SMAP_LOGGER_INFO("Update grouped pid %d success, group count %d.", pid, policy->groupCount);
         ret = SyncAllProcessConfig();
         if (ret) {
             SMAP_LOGGER_WARNING("Synchronize grouped pid %d config maybe failed: %d.", pid, ret);
         }
-        PutProcessAttr(current);
         return 0;
     }
 
@@ -239,7 +243,15 @@ int ProcessAddGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const Group
         return ret;
     }
     SetGroupedProcessConfig(attr, pid, nodeBitmap, policy);
-    PidSlotAdd(GetProcessManager(), attr);
+    /* nr 检查通过不代表一定有空闲槽位（REMOVING/RESERVED 槽位仍被引用）：
+     * 抢槽失败时释放 attr、不计数（计数在 PidSlotAdd 内部完成），向上返回错误 */
+    ret = PidSlotAdd(GetProcessManager(), attr);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("Add pid slot for grouped pid %d failed: %d.", pid, ret);
+        FreeProcessAttrArrays(attr);
+        free(attr);
+        return ret;
+    }
     SMAP_LOGGER_INFO("Add grouped pid %d success, group count %d.", pid, policy->groupCount);
     ret = SyncAllProcessConfig();
     if (ret) {
@@ -255,69 +267,137 @@ int ProcessSetPendingGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, cons
         return -EINVAL;
     }
 
-    ProcessAttr *current = GetProcessAttr(pid);
-    if (!current || !current->groupPolicy.enabled || current->state != PROC_MIGRATE) {
+    struct PidSlot *slot = PidSlotGetRef(pid);
+    if (!slot) {
         SMAP_LOGGER_ERROR("pid %d cannot save pending grouped policy.", pid);
-        PutProcessAttr(current);
+        return -EINVAL;
+    }
+    ProcessAttr *current = slot->attr;
+    /* 与 worker 的 ApplyPendingGroupedPolicy 快照/清除互斥：检查状态与写 pending 在同一临界区 */
+    EnvMutexLock(&slot->attrLock);
+    if (!current->groupPolicy.enabled || current->state != PROC_MIGRATE) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+        SMAP_LOGGER_ERROR("pid %d cannot save pending grouped policy.", pid);
         return -EINVAL;
     }
 
     /* Only an already-managed grouped PID in PROC_MIGRATE can defer refresh. */
-    current->pendingGroupPolicy.valid = true;
-    (void)NumaBitmapCopy(&current->pendingGroupPolicy.nodeBitmap, nodeBitmap);
+    if (!NumaBitmapCopy(&current->pendingGroupPolicy.nodeBitmap, nodeBitmap)) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+        SMAP_LOGGER_ERROR("Copy pending grouped bitmap of pid %d failed.", pid);
+        return -ENOMEM;
+    }
     current->pendingGroupPolicy.policy = *policy;
+    current->pendingGroupPolicy.valid = true;
+    /* 序号用于识别 apply 期间到达的新 pending，防止其被旧快照的清除覆盖 */
+    current->pendingSeq++;
+    EnvMutexUnlock(&slot->attrLock);
+    PidSlotReleaseRefs(&slot, 1);
     SMAP_LOGGER_INFO("Save pending grouped policy for pid %d, group count %d.", pid, policy->groupCount);
-    PutProcessAttr(current);
     return 0;
+}
+
+/* apply 结束（成功或放弃）时清除 pending；apply 期间被重新暂存（序号变化）则保留，下一周期再应用 */
+static void FinishPendingGroupedPolicyLocked(ProcessAttr *attr, uint32_t pendingSeq)
+{
+    if (attr->pendingSeq == pendingSeq) {
+        attr->pendingGroupPolicy.valid = false;
+    } else {
+        attr->pendingGroupPolicy.valid = true;
+        SMAP_LOGGER_INFO("Pending grouped policy of pid %d restaged during apply, defer to next cycle.", attr->pid);
+    }
 }
 
 int ApplyPendingGroupedPolicy(ProcessAttr *attr)
 {
-    if (!attr || !attr->pendingGroupPolicy.valid) {
+    if (!attr) {
         return 0;
     }
 
+    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    if (!attr->pendingGroupPolicy.valid) {
+        if (slot) {
+            EnvMutexUnlock(&slot->attrLock);
+            PidSlotReleaseRefs(&slot, 1);
+        }
+        return 0;
+    }
+    /* 锁内取 pending 快照（位图深拷贝），锁外读 numa_maps / 下发 ioctl */
     GroupMigrationPolicy policy = attr->pendingGroupPolicy.policy;
-    /* 直接引用 pending 位图句柄：仅作只读序列化与拷贝源，不接管所有权 */
-    const NumaBitmap *nodeBitmap = &attr->pendingGroupPolicy.nodeBitmap;
+    NumaBitmap nodeBitmap = { 0 };
+    bool copied = NumaBitmapCopy(&nodeBitmap, &attr->pendingGroupPolicy.nodeBitmap);
+    uint32_t pendingSeq = attr->pendingSeq;
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+    int ret = 0;
+    if (!copied) {
+        SMAP_LOGGER_ERROR("Copy pending grouped bitmap of pid %d failed.", attr->pid);
+        ret = -ENOMEM; /* 保留 pending，下一周期重试 */
+        goto out;
+    }
+
     uint64_t numaPages[SMAP_MAX_NUMNODES] = { 0 };
 
     /* Apply is atomic at manager level: initialize the new policy first. */
     ResetGroupedPolicyRuntime(&policy);
-    int ret = GetPidNumaPagesFromNumaMaps(attr->pid, numaPages, true);
+    ret = GetPidNumaPagesFromNumaMaps(attr->pid, numaPages, true);
     if (ret) {
         SMAP_LOGGER_ERROR("Get pending grouped pid %d numa pages failed: %d.", attr->pid, ret);
-        attr->pendingGroupPolicy.valid = false;
-        return ret;
+    } else {
+        ret = InitGroupedUsedPages(attr->pid, &policy, numaPages);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Init pending grouped pid %d used pages failed: %d.", attr->pid, ret);
+        }
     }
-
-    ret = InitGroupedUsedPages(attr->pid, &policy, numaPages);
     if (ret) {
-        SMAP_LOGGER_ERROR("Init pending grouped pid %d used pages failed: %d.", attr->pid, ret);
-        attr->pendingGroupPolicy.valid = false;
-        return ret;
+        /* 新策略无法生效：放弃该 pending（期间重新暂存的除外） */
+        if (slot) {
+            EnvMutexLock(&slot->attrLock);
+        }
+        FinishPendingGroupedPolicyLocked(attr, pendingSeq);
+        if (slot) {
+            EnvMutexUnlock(&slot->attrLock);
+        }
+        goto out;
     }
 
     struct AccessAddPidPayload payload = {
         .type = NORMAL_SCAN,
         .pid = attr->pid,
         .scanTime = SCAN_TIME_2M,
-        .numaNodes = attr->pendingGroupPolicy.nodeBitmap,
+        .numaNodes = nodeBitmap,
         .pidType = attr->type,
     };
     ret = AccessIoctlAddPid(1, &payload);
     if (ret) {
         SMAP_LOGGER_ERROR("Update pending grouped pid %d tracking failed: %d.", attr->pid, ret);
-        return ret;
+        goto out;
     }
 
     /* Tracking has accepted the new node scope; publish policy to manager. */
-    SetGroupedProcessConfig(attr, attr->pid, nodeBitmap, &policy);
-    attr->pendingGroupPolicy.valid = false;
-    ret = SyncAllProcessConfig();
-    if (ret) {
-        SMAP_LOGGER_WARNING("Synchronize pending grouped pid %d config maybe failed: %d.", attr->pid, ret);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    SetGroupedProcessConfig(attr, attr->pid, &nodeBitmap, &policy);
+    FinishPendingGroupedPolicyLocked(attr, pendingSeq);
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+    int syncRet = SyncAllProcessConfig();
+    if (syncRet) {
+        SMAP_LOGGER_WARNING("Synchronize pending grouped pid %d config maybe failed: %d.", attr->pid, syncRet);
     }
     SMAP_LOGGER_INFO("Apply pending grouped policy for pid %d success.", attr->pid);
-    return 0;
+out:
+    NumaBitmapFree(&nodeBitmap);
+    if (slot) {
+        PidSlotReleaseRefs(&slot, 1);
+    }
+    return ret;
 }
