@@ -1585,6 +1585,17 @@ static int MigrateBackImpl(struct MigrateBackMsg *msg)
             return -EAGAIN;
         }
     }
+    /*
+     * 首次就绪检查与置 BUSY 之间节点未被禁止，并发的 migrate_out/remote_numa_info_set/
+     * pid_remote_numa_migrate 可能已对该节点设置新目标或开始搬迁。BUSY 已阻止新的迁出，
+     * 且相关 pid 已空闲，此处复核一次（正常情况下立即通过），不满足则放弃本次迁回。
+     */
+    ret = CheckMigrateBackReadyMsg(msg);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Smap recheck mig back ready after forbidding nodes err: %d.", ret);
+        ClearMigrateBackBusyForbidden(msg);
+        return ret;
+    }
     SMAP_LOGGER_INFO("migrateback start.");
     ret = IoctlHandler(GetProcessManager()->fds.migrate, msg);
     SMAP_LOGGER_INFO("migrateback result: %d.", ret);

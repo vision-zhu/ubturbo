@@ -1601,6 +1601,24 @@ TEST_F(InterfaceTest, TestSmapMigrateBackReadyFailedClearBusyOnly)
     EnvAtomicSet(&g_forbiddenNodes[4], 0);
 }
 
+TEST_F(InterfaceTest, TestSmapMigrateBackRecheckReadyAfterBusy)
+{
+    struct MigrateBackMsg msg = {.taskID = 1, .count = 1, .payload = {{4, 5, 1}}};
+
+    EnvAtomicSet(&g_status, 1);
+    EnvAtomicSet(&g_forbiddenNodes[4], NODE_FORBIDDEN_USER);
+    MOCKER(CheckMigrateBackMsg).stubs().will(returnValue(0));
+    /* 首次就绪检查通过；置 BUSY 前有并发迁出对该节点设了新目标，复核失败 */
+    MOCKER(CheckMigrateBackReadyMsg).stubs().will(returnValue(0)).then(returnValue(-EAGAIN));
+    MOCKER(CheckProcessIdle).stubs().will(returnValue(true));
+    MOCKER(IoctlHandler).expects(never());
+
+    int ret = ubturbo_smap_migrate_back(&msg);
+    EXPECT_EQ(-EAGAIN, ret);
+    EXPECT_EQ(NODE_FORBIDDEN_USER, EnvAtomicRead(&g_forbiddenNodes[4]));
+    EnvAtomicSet(&g_forbiddenNodes[4], 0);
+}
+
 TEST_F(InterfaceTest, TestSmapMigrateBackIoctlFailedClearBusyOnly)
 {
     struct MigrateBackMsg msg = {.taskID = 1, .count = 1, .payload = {{4, 5, 1}}};
