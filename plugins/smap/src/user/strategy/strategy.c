@@ -55,7 +55,9 @@ uint64_t GetNrFreePagesByNode(int nid)
         }
         break;
     }
-    nr >>= KB_TO_PAGE_SHIFT;
+    /* MemFree 单位为 KB，按实际的普通页大小换算（64K 页内核下不能按 4K 计） */
+    uint64_t pageSizeKB = GetNormalPageSize() / KIB;
+    nr /= pageSizeKB ? pageSizeKB : DEFAULT_PAGE_SIZE_KB;
 
     ret = fclose(file);
     if (ret) {

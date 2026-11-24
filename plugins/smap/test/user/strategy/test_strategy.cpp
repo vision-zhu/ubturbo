@@ -160,6 +160,31 @@ TEST_F(StrategyTest, TestGetNrFreePagesByNodeFour)
     EXPECT_EQ(0, ret);
 }
 
+static char *FakeMeminfoFgets(char *s, int n, FILE *stream)
+{
+    (void)stream;
+    const char line[] = "Node 0 MemFree:         1048576 kB\n";
+    (void)strncpy(s, line, n - 1);
+    s[n - 1] = '\0';
+    return s;
+}
+
+extern "C" uint32_t GetNormalPageSize(void);
+TEST_F(StrategyTest, TestGetNrFreePagesByNodeUsesNormalPageSize)
+{
+    static FILE fakeFile;
+    MOCKER(fopen).stubs().will(returnValue(&fakeFile));
+    MOCKER(fgets).stubs().will(invoke(FakeMeminfoFgets));
+    MOCKER(fclose).stubs().will(returnValue(0));
+
+    MOCKER(GetNormalPageSize).stubs().will(returnValue(4096U)).then(returnValue(65536U)).then(returnValue(0U));
+    EXPECT_EQ(262144ULL, GetNrFreePagesByNode(0));
+    /* 64K 页内核：1GB 空闲只有 16384 个页 */
+    EXPECT_EQ(16384ULL, GetNrFreePagesByNode(0));
+    /* 页大小未初始化时按 4K 兜底 */
+    EXPECT_EQ(262144ULL, GetNrFreePagesByNode(0));
+}
+
 TEST_F(StrategyTest, TestGetNrFreeHugePagesByNode)
 {
     int nid = 1;
