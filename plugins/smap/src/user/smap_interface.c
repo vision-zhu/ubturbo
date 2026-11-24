@@ -850,6 +850,55 @@ static int AddGroupedProcessesToGlobalManager(struct GroupedMigrateOutMsg *msg, 
     return AddGroupedProcessesToGlobalManagerFiltered(msg, nodeBitmap, policies, keepTracking, NULL);
 }
 
+/*
+ * 已纳管 grouped pid 的策略更新：在 attrLock 下判定 state 并决定立即发布或暂存 pending，
+ * 与 worker 的 IDLE->MIGRATE 切换（同一把锁）原子化。迁移中（或调用方要求 forcePending）
+ * 只写 pendingGroupPolicy，由 worker 迁移收尾时 ApplyPendingGroupedPolicy 应用，避免与
+ * 迁移结算并发改写 groupPolicy（含 usedPages 等运行期计数）与 numaNodes。
+ */
+static int UpdateManagedGroupedPolicy(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy,
+                                      bool forcePending)
+{
+    ProcessAttr *attr = GetProcessAttr(pid);
+    if (!attr) {
+        SMAP_LOGGER_ERROR("grouped pid %d is not managed any more.", pid);
+        return -ESRCH;
+    }
+    /* 单测场景 attr 未注册进槽位表时 slot 为空，无并发写者，退化为直接写 */
+    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    int ret = 0;
+    bool staged = false;
+    if (!attr->groupPolicy.enabled) {
+        ret = -EINVAL;
+    } else if (forcePending || attr->state == PROC_MIGRATE) {
+        attr->pendingGroupPolicy.valid = true;
+        (void)NumaBitmapCopy(&attr->pendingGroupPolicy.nodeBitmap, nodeBitmap);
+        attr->pendingGroupPolicy.policy = *policy;
+        staged = true;
+    } else {
+        SetGroupedProcessConfig(attr, pid, nodeBitmap, policy);
+    }
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+    }
+    PutProcessAttr(attr);
+    if (ret) {
+        SMAP_LOGGER_ERROR("pid %d cannot update grouped policy: %d.", pid, ret);
+        return ret;
+    }
+    SMAP_LOGGER_INFO("%s grouped policy for pid %d, group count %d.", staged ? "Save pending" : "Update", pid,
+                     policy->groupCount);
+    ret = SyncAllProcessConfig();
+    if (ret) {
+        SMAP_LOGGER_WARNING("Synchronize grouped pid %d config maybe failed: %d.", pid, ret);
+    }
+    return 0;
+}
+
 static int AddGroupedProcessesToGlobalManagerFiltered(struct GroupedMigrateOutMsg *msg, NumaBitmap *nodeBitmap,
                                                       GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT],
                                                       bool keepTracking[MAX_NR_GROUPED_MIGOUT],
@@ -869,7 +918,9 @@ static int AddGroupedProcessesToGlobalManagerFiltered(struct GroupedMigrateOutMs
         ProcessAttr *prev = GetProcessAttr(msg->payload[i].pid);
         existedBefore[i] = (prev != NULL);
         PutProcessAttr(prev);
-        int ret = ProcessAddGroupedManage(msg->payload[i].pid, &nodeBitmap[i], &policies[i]);
+        int ret = existedBefore[i] ?
+                      UpdateManagedGroupedPolicy(msg->payload[i].pid, &nodeBitmap[i], &policies[i], false) :
+                      ProcessAddGroupedManage(msg->payload[i].pid, &nodeBitmap[i], &policies[i]);
         if (ret) {
             SMAP_LOGGER_ERROR("add grouped process %d failed: %d.", msg->payload[i].pid, ret);
             RollbackGroupedManagerAdds(addedPids, addedCnt);
@@ -936,10 +987,22 @@ static void RollbackGroupedManagerAdds(const pid_t *addedPids, int addedCnt)
     }
 }
 
+/* 仅用于决定是否推迟刷新内核跟踪；最终 apply/pending 在 UpdateManagedGroupedPolicy 的 attrLock 内判定 */
 static bool IsGroupedPendingUpdate(pid_t pid)
 {
     ProcessAttr *attr = GetProcessAttr(pid);
-    bool pending = attr && attr->groupPolicy.enabled && attr->state == PROC_MIGRATE;
+    if (!attr) {
+        return false;
+    }
+    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    bool pending = attr->groupPolicy.enabled && attr->state == PROC_MIGRATE;
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+    }
     PutProcessAttr(attr);
     return pending;
 }
@@ -961,8 +1024,9 @@ static int SetPendingGroupedPolicies(struct GroupedMigrateOutMsg *msg, NumaBitma
         if (!pendingUpdate[i]) {
             continue;
         }
-        /* Save the fully validated policy; no external ABI changes are needed. */
-        int ret = ProcessSetPendingGroupedManage(msg->payload[i].pid, &nodeBitmap[i], &policies[i]);
+        /* Save the fully validated policy; no external ABI changes are needed. The pid may have left
+         * PROC_MIGRATE since the check: still stage it, its tracking refresh was deferred to apply time. */
+        int ret = UpdateManagedGroupedPolicy(msg->payload[i].pid, &nodeBitmap[i], &policies[i], true);
         if (ret) {
             SMAP_LOGGER_ERROR("Set pending grouped pid %d failed: %d.", msg->payload[i].pid, ret);
             return ret;

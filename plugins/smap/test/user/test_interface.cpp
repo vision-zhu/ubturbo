@@ -1385,6 +1385,8 @@ TEST_F(InterfaceTest, TestGroupedMigrateOutRollsBackTrackingWhenManageFailed)
     EnvAtomicSet(&g_status, 0);
 }
 
+extern "C" int UpdateManagedGroupedPolicy(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy,
+                                          bool forcePending);
 TEST_F(InterfaceTest, TestGroupedManageFailureKeepsExistingPidTracking)
 {
     struct GroupedMigrateOutMsg msg = {};
@@ -1397,7 +1399,9 @@ TEST_F(InterfaceTest, TestGroupedManageFailureKeepsExistingPidTracking)
     msg.payload[0].pid = 1234;
     msg.payload[1].pid = 5678;
     MOCKER(GetProcessAttr).stubs().will(returnValue(&existing)).then(returnValue((ProcessAttr *)nullptr));
-    MOCKER(ProcessAddGroupedManage).stubs().will(returnValue(0)).then(returnValue(-ENOMEM));
+    /* 已纳管 pid 走 attrLock 内的策略更新，新 pid 走 ProcessAddGroupedManage */
+    MOCKER(UpdateManagedGroupedPolicy).expects(once()).will(returnValue(0));
+    MOCKER(ProcessAddGroupedManage).expects(once()).will(returnValue(-ENOMEM));
 
     int ret = AddGroupedProcessesToGlobalManager(&msg, nodeBitmap, policies, keepTracking);
     EXPECT_EQ(-ENOMEM, ret);
@@ -5055,6 +5059,52 @@ TEST_F(InterfaceTest, TestBuildGroupedNodeBitmap)
     BuildGroupedNodeBitmap(&payload, &nodeBitmap);
     EXPECT_NE(0U, nodeBitmap.bits[0]);
     NumaBitmapFree(&nodeBitmap);
+}
+
+TEST_F(InterfaceTest, TestUpdateManagedGroupedPolicyStagesWhenMigrating)
+{
+    ProcessAttr attr = {};
+    attr.pid = 123;
+    attr.groupPolicy.enabled = true;
+    attr.groupPolicy.groupCount = 1;
+    attr.state = PROC_MIGRATE;
+    NumaBitmap bitmap = {};
+    GroupMigrationPolicy policy = {};
+    policy.enabled = true;
+    policy.groupCount = 2;
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
+
+    /* 迁移中：只写 pending，不得改写正在被迁移结算使用的生效策略 */
+    EXPECT_EQ(0, UpdateManagedGroupedPolicy(123, &bitmap, &policy, false));
+    EXPECT_TRUE(attr.pendingGroupPolicy.valid);
+    EXPECT_EQ(2, attr.pendingGroupPolicy.policy.groupCount);
+    EXPECT_EQ(1, attr.groupPolicy.groupCount);
+}
+
+TEST_F(InterfaceTest, TestUpdateManagedGroupedPolicyAppliesWhenIdle)
+{
+    ProcessAttr attr = {};
+    attr.pid = 123;
+    attr.groupPolicy.enabled = true;
+    attr.groupPolicy.groupCount = 1;
+    attr.state = PROC_IDLE;
+    NumaBitmap bitmap = {};
+    GroupMigrationPolicy policy = {};
+    policy.enabled = true;
+    policy.groupCount = 2;
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
+
+    EXPECT_EQ(0, UpdateManagedGroupedPolicy(123, &bitmap, &policy, false));
+    EXPECT_FALSE(attr.pendingGroupPolicy.valid);
+    EXPECT_EQ(2, attr.groupPolicy.groupCount);
+
+    /* 判定 pending 后 pid 已回到空闲：仍暂存（其内核跟踪刷新推迟到 apply 时），不得报错 */
+    attr.groupPolicy.groupCount = 1;
+    EXPECT_EQ(0, UpdateManagedGroupedPolicy(123, &bitmap, &policy, true));
+    EXPECT_TRUE(attr.pendingGroupPolicy.valid);
+    EXPECT_EQ(1, attr.groupPolicy.groupCount);
 }
 
 extern "C" bool IsGroupedPendingUpdate(pid_t pid);

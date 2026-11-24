@@ -1386,6 +1386,38 @@ TEST_F(ManageTest, TestPublishProcessManageCandidateStagesCapacityBypass)
     EXPECT_EQ(4, active.pendingTargetConfig.targets[0].remoteNid);
 }
 
+TEST_F(ManageTest, TestPublishProcessManageCandidateStagesWhenMigrationStarted)
+{
+    ProcessAttr active = {};
+    ProcessAttr *prepared = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, prepared);
+    active.pid = 123;
+    active.state = PROC_MIGRATE; /* Prepare 后 worker 已开始迁移 */
+    active.targetConfig.count = 0;
+    prepared->pid = active.pid;
+    prepared->targetConfig.migrateMode = MIG_MEMSIZE_MODE;
+    prepared->targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    prepared->targetConfig.count = 1;
+    prepared->targetConfig.targets[0] = {4, 0, 2048};
+    prepared->ignoreRemoteCapacity = true;
+    ProcessManageCandidate candidate = {
+        .active = &active,
+        .prepared = prepared,
+        .isPending = false,
+    };
+
+    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
+    MOCKER(PublishProcessTargetCandidate).expects(never());
+
+    EXPECT_EQ(0, PublishProcessManageCandidate(&candidate));
+    /* 生效配置不变，新目标暂存为 pending，由 worker 迁移收尾时应用 */
+    EXPECT_EQ(0U, active.targetConfig.count);
+    EXPECT_TRUE(active.pendingTargetConfigValid);
+    EXPECT_TRUE(active.pendingIgnoreRemoteCapacity);
+    EXPECT_EQ(4, active.pendingTargetConfig.targets[0].remoteNid);
+    EXPECT_EQ(1U, active.pendingSeq);
+}
+
 TEST_F(ManageTest, TestPublishProcessManageCandidateNoFreeSlot)
 {
     PidSlotInit(&g_processManager);

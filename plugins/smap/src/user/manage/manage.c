@@ -714,14 +714,8 @@ void CopyProcessAttrArrays(ProcessAttr *dst, const ProcessAttr *src)
     } while (0);
     FOR_EACH_PROCESS_CONFIG_ARRAY(COPY_ARRAY_IF_DIFFERENT)
 #undef COPY_ARRAY_IF_DIFFERENT
-    if (dst->scanAttr.selectedBuckets != NULL && dst->scanAttr.selectedBuckets != src->scanAttr.selectedBuckets) {
-        size_t bytes = (size_t)GetNumaCap() * sizeof(*dst->scanAttr.selectedBuckets);
-        (void)memcpy_s(dst->scanAttr.selectedBuckets, bytes, src->scanAttr.selectedBuckets, bytes);
-    }
-    if (dst->scanAttr.actCount != NULL && dst->scanAttr.actCount != src->scanAttr.actCount) {
-        size_t bytes = (size_t)GetNumaCap() * sizeof(*dst->scanAttr.actCount);
-        (void)memcpy_s(dst->scanAttr.actCount, bytes, src->scanAttr.actCount, bytes);
-    }
+    /* scanAttr.selectedBuckets / actCount 是扫描运行期统计，由 worker 持续更新，不属于配置：
+     * 发布候选时不回写，否则会用 Prepare 时的陈旧快照覆盖 worker 期间写入的最新统计 */
     /* 变长位图：指针相同（栈上候选共享 active 位图）时跳过，其余按内容深拷贝 */
     if (dst->numaAttr.numaNodes.bits != src->numaAttr.numaNodes.bits) {
         (void)NumaBitmapCopy(&dst->numaAttr.numaNodes, &src->numaAttr.numaNodes);
@@ -1511,8 +1505,15 @@ int PrepareProcessManageCandidate(ProcessParam *param, PidType type, ProcessMana
             DiscardProcessManageCandidate(candidate);
             return -ENOMEM;
         }
+        /* 快照须持 attrLock：worker 在迁移流水中持锁更新运行期字段，无锁拷贝会得到撕裂的快照 */
+        if (candidate->slot) {
+            EnvMutexLock(&candidate->slot->attrLock);
+        }
         *prepared = *active;
         ret = CloneProcessAttrArrays(prepared, active);
+        if (candidate->slot) {
+            EnvMutexUnlock(&candidate->slot->attrLock);
+        }
         if (ret) {
             free(prepared);
             PutProcessAttr(active);
@@ -1575,6 +1576,44 @@ int PrepareProcessManageCandidate(ProcessParam *param, PidType type, ProcessMana
     return 0;
 }
 
+/*
+ * 发布前用 active 的当前值覆盖候选中的运行期状态：候选是 Prepare 时的快照，期间 worker
+ * 可能已更新这些字段，整体回写会丢失其更新。只有目标配置类字段以候选为准。须持 attrLock。
+ */
+static void RefreshCandidateRuntimeStateLocked(ProcessAttr *prepared, const ProcessAttr *active)
+{
+    StrategyAttribute *ps = &prepared->strategyAttr;
+    const StrategyAttribute *as = &active->strategyAttr;
+    (void)memcpy_s(ps->nrPagesPerLocalNuma, sizeof(ps->nrPagesPerLocalNuma), as->nrPagesPerLocalNuma,
+                   sizeof(as->nrPagesPerLocalNuma));
+    (void)memcpy_s(ps->dir, sizeof(ps->dir), as->dir, sizeof(as->dir));
+    (void)memcpy_s(ps->ubBwRestrict, sizeof(ps->ubBwRestrict), as->ubBwRestrict, sizeof(as->ubBwRestrict));
+    prepared->isFirstScan = active->isFirstScan;
+    prepared->scanTime = active->scanTime;
+    prepared->migPeriod = active->migPeriod;
+    /* 同步迁移保护是接口线程设置的运行期保护，不属于目标配置；与 ApplyPendingMigrationTargets
+     * 一致，发布新目标后须等新一轮快照再判定远端是否清空 */
+    prepared->syncWaitRemoteEmpty = active->syncWaitRemoteEmpty;
+    prepared->syncWaitRemoteEmptySnapshotValid = active->syncWaitRemoteEmpty ? false :
+                                                                               active->syncWaitRemoteEmptySnapshotValid;
+}
+
+/* 须持 attrLock：把候选目标暂存为 active 的 pending，由 worker 在迁移收尾时应用 */
+static void StageCandidateAsPendingLocked(ProcessAttr *active, const ProcessAttr *prepared, bool preparedPending)
+{
+    if (preparedPending) {
+        active->pendingTargetConfig = prepared->pendingTargetConfig;
+        active->pendingTargetConfigValid = prepared->pendingTargetConfigValid;
+        active->pendingIgnoreRemoteCapacity = prepared->pendingIgnoreRemoteCapacity;
+    } else {
+        /* Prepare 时为空闲态已按立即应用构造候选，发布时 worker 已进入迁移：改为暂存 */
+        active->pendingTargetConfig = prepared->targetConfig;
+        active->pendingTargetConfigValid = true;
+        active->pendingIgnoreRemoteCapacity = prepared->ignoreRemoteCapacity;
+    }
+    active->pendingSeq++;
+}
+
 int PublishProcessManageCandidate(ProcessManageCandidate *candidate)
 {
     if (!candidate || !candidate->prepared) {
@@ -1582,20 +1621,19 @@ int PublishProcessManageCandidate(ProcessManageCandidate *candidate)
     }
 
     ProcessAttr *prepared = candidate->prepared;
-    if (candidate->isPending) {
-        /* 加锁写 pending 字段，与扫描线程 ApplyPendingMigrationTargets 的快照/清除互斥；
-         * 锁用 Prepare 阶段持引用的宿主槽位，保证锁与 active 绑定：按 pid 重查在槽位已
-         * 摘除(REMOVING，PidSlotGetRef 返回空)时会退化为无锁写、在 pid 复用时可能锁错
-         * 槽位。单测场景 attr 未注册进槽位表（slot 为空）时无并发写者，退化为直接写。
-         * 槽位引用由末尾 DiscardProcessManageCandidate 归还 */
-        struct PidSlot *slot = candidate->slot;
-        if (slot) {
-            EnvMutexLock(&slot->attrLock);
-        }
-        candidate->active->pendingTargetConfig = prepared->pendingTargetConfig;
-        candidate->active->pendingTargetConfigValid = prepared->pendingTargetConfigValid;
-        candidate->active->pendingIgnoreRemoteCapacity = prepared->pendingIgnoreRemoteCapacity;
-        candidate->active->pendingSeq++;
+    /*
+     * 已纳管 pid：持 Prepare 阶段解析的宿主槽位 attrLock 重新判定 state 并在锁内发布，
+     * 与 worker 的 IDLE->MIGRATE 切换（同一把锁）原子化：迁移中只写 pending，空闲时才
+     * 覆写生效配置。锁与 active 绑定，避免按 pid 重查到已摘除或复用的槽位。单测场景
+     * attr 未注册进槽位表（slot 为空）时无并发写者，退化为直接写。
+     */
+    struct PidSlot *slot = candidate->isNew ? NULL : candidate->slot;
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    bool stagePending = !candidate->isNew && (candidate->isPending || candidate->active->state == PROC_MIGRATE);
+    if (stagePending) {
+        StageCandidateAsPendingLocked(candidate->active, prepared, candidate->isPending);
         if (slot) {
             EnvMutexUnlock(&slot->attrLock);
         }
@@ -1620,7 +1658,11 @@ int PublishProcessManageCandidate(ProcessManageCandidate *candidate)
         candidate->prepared = NULL;
         SMAP_LOGGER_INFO("Add pid %d to list done.", prepared->pid);
     } else {
+        RefreshCandidateRuntimeStateLocked(prepared, candidate->active);
         PublishProcessTargetCandidate(candidate->active, prepared);
+        if (slot) {
+            EnvMutexUnlock(&slot->attrLock);
+        }
         SMAP_LOGGER_INFO("Update pid %d migrate config.", prepared->pid);
     }
 
