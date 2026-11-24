@@ -103,6 +103,44 @@ TEST_F(InnerInterfaceTest, TestSmapQueryVmMemRatio)
     FreeProcessAttrArrays(&current);
 }
 
+TEST_F(InnerInterfaceTest, TestSmapQueryVmMemRatioSkipsInvalidL1)
+{
+    EnvAtomicSet(&g_status, 1);
+    struct VmRatioMsg msg;
+    struct ProcessManager *manager = GetProcessManager();
+    ProcessAttr proc = {};
+    ProcessAttr vmNoL1 = {};
+    ProcessAttr vm = {};
+    proc.type = PROCESS_TYPE;
+    proc.pid = 11;
+    vmNoL1.type = VM_TYPE;
+    vmNoL1.pid = 12;
+    vm.type = VM_TYPE;
+    vm.pid = 13;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    ASSERT_EQ(0, InitProcessAttrArrays(&proc));
+    ASSERT_EQ(0, InitProcessAttrArrays(&vmNoL1));
+    ASSERT_EQ(0, InitProcessAttrArrays(&vm));
+    /* 普通进程与一台 VM 的 L1 尚未确定（首轮回读前位图为空） */
+    NumaBitmapSet(&vm.numaAttr.numaNodes, 0);
+    NumaBitmapSet(&vm.numaAttr.numaNodes, 4);
+    NM_AT(vm.strategyAttr.l3RemoteMemRatio, 0, 4) = TEST_DEFAULT_LOCAL_MEM_RATIO;
+    memset(&manager->slots, 0, sizeof(manager->slots));
+    PidSlotAdd(manager, &proc);
+    PidSlotAdd(manager, &vmNoL1);
+    PidSlotAdd(manager, &vm);
+
+    /* 与之无关的进程/VM 的 L1 为空不得让整个查询失败 */
+    EXPECT_EQ(0, SmapQueryVmMemRatio(&msg));
+    EXPECT_EQ(1, msg.nrVm);
+    EXPECT_EQ(13, msg.vr[0].pid);
+    EXPECT_EQ(HUNDRED - TEST_DEFAULT_LOCAL_MEM_RATIO, msg.vr[0].ratio);
+    memset(&manager->slots, 0, sizeof(manager->slots));
+    FreeProcessAttrArrays(&proc);
+    FreeProcessAttrArrays(&vmNoL1);
+    FreeProcessAttrArrays(&vm);
+}
+
 /* --- SmapSetLogLevel tests --- */
 
 TEST_F(InnerInterfaceTest, TestSmapSetLogLevelValidDebug)
