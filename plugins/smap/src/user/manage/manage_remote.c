@@ -165,6 +165,10 @@ int ValidateProcessTargetConfig(const ProcessTargetConfig *config)
     uint64_t totalRatio = 0;
     uint64_t pageSizeKB = (IsHugeMode() ? PAGESIZE_2M : PAGESIZE_4K) / KIB;
     for (uint32_t i = 0; i < copy.count; i++) {
+        /* remoteNid 是下游矩阵（行跨度 = cap）与位图的下标，必须落在 [nrLocalNuma, cap) */
+        if (!IsRemoteNidValid(copy.targets[i].remoteNid)) {
+            return -EINVAL;
+        }
         for (uint32_t j = i + 1; j < copy.count; j++) {
             if (copy.targets[i].remoteNid == copy.targets[j].remoteNid) {
                 return -EINVAL;
