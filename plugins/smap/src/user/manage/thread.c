@@ -209,13 +209,26 @@ static void *EventLoopMain(void *arg)
     return NULL;
 }
 
+/* 等待一个迁移周期；stop 置位并广播后立即返回，避免大周期配置下 stop 长时间阻塞 */
+static void ScanMigrateWaitPeriod(struct ProcessManager *manager)
+{
+    EnvMutexLock(&manager->scanMigrateLock);
+    if (!EnvAtomicRead(&manager->scanMigrateStop)) {
+        (void)EnvCondTimedWaitMs(&manager->scanMigrateCond, &manager->scanMigrateLock, manager->migPeriod);
+    }
+    EnvMutexUnlock(&manager->scanMigrateLock);
+}
+
 static void *ThreadMainEvent(void *args)
 {
     struct ProcessManager *manager = args;
 
     SMAP_LOGGER_INFO("ScanMigrate daemon thread %lu created.", gettid());
     while (!EnvAtomicRead(&manager->scanMigrateStop)) {
-        EnvMsleep(manager->migPeriod);
+        ScanMigrateWaitPeriod(manager);
+        if (EnvAtomicRead(&manager->scanMigrateStop)) {
+            break;
+        }
         ManagerDaemonWork(manager);
     }
     return NULL;
@@ -230,11 +243,20 @@ int InitScanMigrateThread(struct ProcessManager *manager, uint32_t period)
      * DestroyScanMigrateThread 通过判断 pthread_t 是否为零来跳过无效 join */
     (void)memset_s(&manager->scanMigrateThread, sizeof(manager->scanMigrateThread), 0,
                    sizeof(manager->scanMigrateThread));
+    EnvMutexInit(&manager->scanMigrateLock);
+    ret = EnvCondInitMonotonic(&manager->scanMigrateCond);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Init scan migrate cond failed: %d.", ret);
+        EnvMutexDestroy(&manager->scanMigrateLock);
+        return -ret;
+    }
     ret = pthread_create(&manager->scanMigrateThread, NULL, ThreadMainEvent, manager);
     if (ret) {
         SMAP_LOGGER_ERROR("Create scan migrate thread failed: %d.", ret);
         (void)memset_s(&manager->scanMigrateThread, sizeof(manager->scanMigrateThread), 0,
                        sizeof(manager->scanMigrateThread));
+        EnvCondDestroy(&manager->scanMigrateCond);
+        EnvMutexDestroy(&manager->scanMigrateLock);
         return -ret;
     }
     return 0;
@@ -245,10 +267,20 @@ int DestroyScanMigrateThread(struct ProcessManager *manager)
     pthread_t zeroThread;
     (void)memset_s(&zeroThread, sizeof(zeroThread), 0, sizeof(zeroThread));
 
-    EnvAtomicSet(&manager->scanMigrateStop, 1);
     /* 仅在 pthread_t 非零（即线程已成功创建）时才 join，避免对未初始化的 pthread_t 执行未定义行为 */
     if (memcmp(&manager->scanMigrateThread, &zeroThread, sizeof(pthread_t)) != 0) {
+        /* 持锁置停止标志并广播：线程要么尚未进入等待（会看到标志），要么正在等待（被唤醒） */
+        EnvMutexLock(&manager->scanMigrateLock);
+        EnvAtomicSet(&manager->scanMigrateStop, 1);
+        EnvCondBroadcast(&manager->scanMigrateCond);
+        EnvMutexUnlock(&manager->scanMigrateLock);
         pthread_join(manager->scanMigrateThread, NULL);
+        (void)memset_s(&manager->scanMigrateThread, sizeof(manager->scanMigrateThread), 0,
+                       sizeof(manager->scanMigrateThread));
+        EnvCondDestroy(&manager->scanMigrateCond);
+        EnvMutexDestroy(&manager->scanMigrateLock);
+    } else {
+        EnvAtomicSet(&manager->scanMigrateStop, 1);
     }
     SMAP_LOGGER_INFO("ScanMigrate thread destroyed.");
     return 0;

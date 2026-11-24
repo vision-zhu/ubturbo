@@ -610,6 +610,8 @@ struct ProcessManager {
     uint32_t migPeriod; // 迁移周期，运行时动态调整
     EnvAtomic scanMigrateStop; // 扫描迁移线程停止标志
     pthread_t scanMigrateThread; // 扫描迁移线程
+    EnvMutex scanMigrateLock; // 与 scanMigrateCond 配合，使周期等待可被 stop 唤醒
+    EnvCond scanMigrateCond;
     struct RemoteNumaInfo remoteNumaInfo; // 借用远端内存数量
     EnvMutex threadLock;
     struct UbBwMonitor ubBwMonitor; // UB带宽监控
