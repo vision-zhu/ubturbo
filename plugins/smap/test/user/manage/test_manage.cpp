@@ -60,7 +60,7 @@ extern "C" int PrepareProcessManageCandidate(ProcessParam *param, PidType type, 
 extern "C" int StagePendingMigrationTargets(ProcessAttr *attr, const ProcessTargetConfig *config,
                                             bool ignoreRemoteCapacity);
 extern "C" void DiscardProcessManageCandidate(ProcessManageCandidate *candidate);
-extern "C" void PublishProcessManageCandidate(ProcessManageCandidate *candidate);
+extern "C" int PublishProcessManageCandidate(ProcessManageCandidate *candidate);
 
 extern "C" int ValidateProcessTargetConfig(const ProcessTargetConfig *config);
 extern "C" int BuildProcessTargetConfigFromParam(const ProcessParam *param, ProcessTargetConfig *config);
@@ -1383,6 +1383,33 @@ TEST_F(ManageTest, TestPublishProcessManageCandidateStagesCapacityBypass)
     EXPECT_TRUE(active.pendingTargetConfigValid);
     EXPECT_TRUE(active.pendingIgnoreRemoteCapacity);
     EXPECT_EQ(4, active.pendingTargetConfig.targets[0].remoteNid);
+}
+
+TEST_F(ManageTest, TestPublishProcessManageCandidateNoFreeSlot)
+{
+    PidSlotInit(&g_processManager);
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_REMOVING);
+    }
+    ProcessAttr *prepared = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, prepared);
+    prepared->pid = 210;
+    prepared->type = VM_TYPE;
+    ProcessManageCandidate candidate = {
+        .prepared = prepared,
+        .isNew = true,
+    };
+    uint16_t nrBefore = g_processManager.nr[VM_TYPE];
+
+    MOCKER(SyncAllProcessConfig).expects(never());
+    /* REMOVING 槽位仍占位导致无空闲槽位：返回错误、释放候选、计数不变 */
+    EXPECT_EQ(-ENOSPC, PublishProcessManageCandidate(&candidate));
+    EXPECT_EQ(nullptr, candidate.prepared);
+    EXPECT_EQ(nrBefore, g_processManager.nr[VM_TYPE]);
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_FREE);
+    }
+    PidSlotDestroy(&g_processManager);
 }
 
 TEST_F(ManageTest, TestPrepareProcessManageCandidateAffinityFailureUsesResident)

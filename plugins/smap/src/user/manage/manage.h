@@ -712,7 +712,8 @@ int SetLocalNumaByCpu(pid_t pid, uint32_t *nodeBitmap);
 
 int PrepareProcessManageCandidate(ProcessParam *param, PidType type, ProcessManageCandidate *candidate);
 void DiscardProcessManageCandidate(ProcessManageCandidate *candidate);
-void PublishProcessManageCandidate(ProcessManageCandidate *candidate);
+/* 返回 0 成功；新纳管时 PidSlotAdd 失败返回其错误码（-ENOSPC/-EEXIST），候选已释放 */
+int PublishProcessManageCandidate(ProcessManageCandidate *candidate);
 int ProcessAddManage(ProcessParam *param);
 int UpdateManagedProcessTrackingMode(ProcessAttr *attr, ScanType scanType, uint32_t scanTime, uint32_t duration);
 int ConfigureMigrationTargets(ProcessAttr *attr, const ProcessTargetConfig *config);
