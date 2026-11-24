@@ -1903,6 +1903,38 @@ TEST_F(InterfaceTest, TestRecoverRemoveInvalidProcess)
     }
 }
 
+extern "C" void RecoverTrimOverLimitProcess(void);
+TEST_F(InterfaceTest, TestRecoverTrimOverLimitProcess)
+{
+    struct ProcessManager *manager = &g_processManager;
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        manager->slots[i].memFreqFd = -1;
+        EnvMutexInit(&manager->slots[i].attrLock);
+    }
+    manager->nr[VM_TYPE] = 0;
+    manager->nr[PROCESS_TYPE] = 0;
+    MOCKER(IsHugeMode).stubs().will(returnValue(true));
+    /* 持久化残留超过 2M 模式上限：恢复时按槽位顺序保留前 MAX_2M_PROCESSES_CNT 个 */
+    for (int i = 0; i < MAX_2M_PROCESSES_CNT + 2; i++) {
+        ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+        ASSERT_NE(nullptr, attr);
+        attr->pid = 20000 + i;
+        attr->type = VM_TYPE;
+        ASSERT_EQ(i, PidSlotAdd(manager, attr));
+    }
+    RecoverTrimOverLimitProcess();
+    EXPECT_EQ(MAX_2M_PROCESSES_CNT, manager->nr[VM_TYPE]);
+    EXPECT_EQ(PID_SLOT_INUSE, EnvAtomicRead(&manager->slots[MAX_2M_PROCESSES_CNT - 1].state));
+    EXPECT_EQ(PID_SLOT_FREE, EnvAtomicRead(&manager->slots[MAX_2M_PROCESSES_CNT].state));
+    EXPECT_EQ(PID_SLOT_FREE, EnvAtomicRead(&manager->slots[MAX_2M_PROCESSES_CNT + 1].state));
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        if (manager->slots[i].attr != nullptr) {
+            PidSlotRemove(manager, manager->slots[i].pid);
+        }
+    }
+    EXPECT_EQ(0, manager->nr[VM_TYPE]);
+}
+
 extern "C" void RecoverAllMMapType(void);
 TEST_F(InterfaceTest, TestRecoverAllMMapType)
 {

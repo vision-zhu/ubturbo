@@ -1862,6 +1862,26 @@ static void RecoverRemoveInvalidProcess(void)
     }
 }
 
+/*
+ * 恢复路径不经过准入校验，持久化残留可能超出当前页模式的纳管上限（如 2M 模式 > 100）。
+ * 超出部分无法下发内核（SyncProcessToKernel 按上限截断），保留在用户态会被扫描线程
+ * 按纳管处理却没有内核数据，故按槽位顺序保留前 max 个，其余剔除并告警。
+ */
+static void RecoverTrimOverLimitProcess(void)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    int maxNr = GetCurrentMaxNrPid();
+    struct PidSlot *all[MAX_PID_SLOTS];
+    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
+    for (size_t k = (size_t)maxNr; k < n; k++) {
+        pid_t pid = all[k]->pid;
+        if (PidSlotRemove(manager, pid)) {
+            SMAP_LOGGER_WARNING("Recover drop pid %d: managed pid count exceeds limit %d.", pid, maxNr);
+        }
+    }
+    PidSlotReleaseRefs(all, n);
+}
+
 static void RecoverAllMMapType(void)
 {
     int ret;
@@ -1887,6 +1907,7 @@ static int Recover(void)
     }
     SMAP_LOGGER_INFO("Recover from config done.");
     RecoverRemoveInvalidProcess();
+    RecoverTrimOverLimitProcess();
     /* Persist the normalized recovery state and the effective Pair target. */
     ret = SyncAllProcessConfig();
     if (ret) {
