@@ -318,17 +318,23 @@ int BuildPidData(ProcessAttr *attr)
         }
     }
     /*
-     * 原位覆写 attr 现有位图，避免在扫描热路径上释放读侧（查询/序列化
-     * 线程）正引用的 bits；仅在属性未绑定或字数不一致时才替换句柄。
+     * 原位覆写 attr 现有位图（NumaBitmapCopy 在字数一致时不重新分配），避免
+     * 释放读侧（查询/序列化线程）正引用的 bits；持 attrLock 与其他写者串行。
      */
-    NumaBitmap *attrNodes = &attr->numaAttr.numaNodes;
-    if (attrNodes->bits != NULL && attrNodes->nWords == numaNodes.nWords) {
-        size_t bytes = (size_t)numaNodes.nWords * sizeof(unsigned long);
-        (void)memcpy_s(attrNodes->bits, bytes, numaNodes.bits, bytes);
-        NumaBitmapFree(&numaNodes);
-    } else {
-        NumaBitmapFree(attrNodes);
-        *attrNodes = numaNodes;
+    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    bool copied = NumaBitmapCopy(&attr->numaAttr.numaNodes, &numaNodes);
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+    }
+    NumaBitmapFree(&numaNodes);
+    if (!copied) {
+        SMAP_LOGGER_ERROR("Copy numaNodes for pid %d failed.", attr->pid);
+        InvokeFreqCallbacks(attr);
+        return -ENOMEM;
     }
     SMAP_LOGGER_INFO("Pid %d, numaNodes nWords %u, nrLocalNuma %u.", attr->pid, attr->numaAttr.numaNodes.nWords,
                      GetProcessManager()->nrLocalNuma);

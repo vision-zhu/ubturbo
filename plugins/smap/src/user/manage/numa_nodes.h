@@ -93,14 +93,29 @@ static inline void NumaBitmapFree(NumaBitmap *bm)
     bm->nWords = 0;
 }
 
-/* 深拷贝：使 dst 持有与 src 等长的独立缓冲区并复制内容 */
+static inline void NumaBitmapZero(NumaBitmap *bm)
+{
+    if (bm == NULL || bm->bits == NULL) {
+        return;
+    }
+    (void)memset_s(bm->bits, (size_t)bm->nWords * sizeof(unsigned long), 0, (size_t)bm->nWords * sizeof(unsigned long));
+}
+
+/*
+ * 深拷贝：使 dst 持有与 src 等长的独立缓冲区并复制内容。
+ * dst 已持有独立且等长的缓冲区时原地覆写、不重新分配：活跃 attr 的位图
+ * 被其他线程无锁读取，释放旧缓冲区会让并发读者访问已释放内存。位图字数
+ * 由运行期 cap 决定（初始化后只读），因此活跃位图的缓冲区一经分配便与
+ * attr 同生命周期，仅在 FreeProcessAttrArrays 时释放。
+ * src 为空位图时把 dst 清零（保留缓冲区）；dst 未绑定时保持为空。
+ */
 static inline bool NumaBitmapCopy(NumaBitmap *dst, const NumaBitmap *src)
 {
     if (dst == NULL || src == NULL) {
         return false;
     }
     if (src->bits == NULL || src->nWords == 0) {
-        NumaBitmapFree(dst);
+        NumaBitmapZero(dst);
         return true;
     }
     if (dst->bits == src->bits) {
@@ -109,6 +124,9 @@ static inline bool NumaBitmapCopy(NumaBitmap *dst, const NumaBitmap *src)
         dst->nWords = 0;
     }
     size_t bytes = (size_t)src->nWords * sizeof(unsigned long);
+    if (dst->bits != NULL && dst->nWords == src->nWords) {
+        return memcpy_s(dst->bits, bytes, src->bits, bytes) == EOK;
+    }
     unsigned long *buf = (unsigned long *)malloc(bytes);
     if (buf == NULL) {
         return false;
@@ -150,14 +168,6 @@ static inline void NumaBitmapClear(NumaBitmap *bm, int nid)
         return;
     }
     bm->bits[w] &= ~NID_MASK(nid);
-}
-
-static inline void NumaBitmapZero(NumaBitmap *bm)
-{
-    if (bm == NULL || bm->bits == NULL) {
-        return;
-    }
-    (void)memset_s(bm->bits, (size_t)bm->nWords * sizeof(unsigned long), 0, (size_t)bm->nWords * sizeof(unsigned long));
 }
 
 /* ---------- L1（本地）/ L2（远端）辅助函数 ---------- */
