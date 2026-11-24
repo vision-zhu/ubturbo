@@ -2590,9 +2590,23 @@ TEST_F(ManageTest, TestGetNodeFromCpu)
     int cpu = 1234;
     int ret = GetNodeFromCpu(cpu);
     EXPECT_EQ(ret, -EINVAL);
-    MOCKER(access).stubs().will(returnValue(0));
-    ret = GetNodeFromCpu(cpu);
-    EXPECT_EQ(ret, 0);
+    /* cpu0 在运行 UT 的主机上必然存在，经 sysfs 的 nodeM 链接解析出合法节点 */
+    ret = GetNodeFromCpu(0);
+    EXPECT_GE(ret, 0);
+    EXPECT_LT(ret, (int)GetNumaCap());
+}
+
+TEST_F(ManageTest, TestSetLocalNumaByCpuSkipsNonLocalNode)
+{
+    uint32_t bitmap = 0;
+    g_processManager.nrLocalNuma = 4;
+    CPU_ZERO(&g_fake_cpu_mask);
+    CPU_SET(1, &g_fake_cpu_mask);
+    MOCKER(sched_getaffinity).stubs().will(invoke(fake_sched_getaffinity));
+    /* 节点号 >= 32 时左移 uint32_t 溢出；>= nrLocalNuma 也不属于本地位掩码，均应跳过 */
+    MOCKER(GetNodeFromCpu).stubs().will(returnValue(40));
+    EXPECT_EQ(0, SetLocalNumaByCpu(1, &bitmap));
+    EXPECT_EQ(0U, bitmap);
 }
 
 #ifdef CPU_ISSET

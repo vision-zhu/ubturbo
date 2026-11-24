@@ -9,6 +9,7 @@
  */
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -1011,23 +1012,45 @@ unsigned long GetPidNrPages(pid_t pid)
     return (g_processManager.tracking.pageSize == g_pageSizeHuge) ? GetHugePageCount(pid) : GetNormalPageCount(pid);
 }
 
+#define CPU_DIR_PATH "/sys/devices/system/cpu/cpu%d"
+#define CPU_NODE_LINK_PREFIX "node"
+#define DECIMAL_BASE 10
+
+/*
+ * 从 /sys/devices/system/cpu/cpuN/ 下唯一的 nodeM 链接解析 CPU 所属节点：一次 readdir，
+ * 取代按 cap（最大 1024）逐个 access("cpuN/nodeM") 的探测（每 pid 每次刷新 CPU数×cap 次系统调用）。
+ */
 static int GetNodeFromCpu(int cpu)
 {
-    int ret;
     char path[BUFFER_SIZE];
-    /* sysfs 仅存在真实节点目录（< nr_node_ids ≤ cap），按 cap 探测避免空转 */
-    int cap = (int)GetNumaCap();
-    for (int node = 0; node < cap; node++) {
-        ret = snprintf_s(path, sizeof(path), sizeof(path), CPU_NUMA_PATH, cpu, node);
-        if (ret == -1) {
-            return -EINVAL;
+    if (snprintf_s(path, sizeof(path), sizeof(path) - 1, CPU_DIR_PATH, cpu) < 0) {
+        return -EINVAL;
+    }
+    DIR *dir = opendir(path);
+    if (dir == NULL) {
+        SMAP_LOGGER_ERROR("open cpu %d dir failed: %d.", cpu, errno);
+        return -EINVAL;
+    }
+    int node = -EINVAL;
+    size_t prefixLen = strlen(CPU_NODE_LINK_PREFIX);
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        const char *name = entry->d_name;
+        if (strncmp(name, CPU_NODE_LINK_PREFIX, prefixLen) != 0 || !isdigit((unsigned char)name[prefixLen])) {
+            continue;
         }
-        if (access(path, F_OK) == 0) {
-            return node;
+        char *end = NULL;
+        long nid = strtol(name + prefixLen, &end, DECIMAL_BASE);
+        if (*end == '\0' && nid >= 0 && nid < (long)GetNumaCap()) {
+            node = (int)nid;
+            break;
         }
     }
-    SMAP_LOGGER_ERROR("open cpu %d node failed.", cpu);
-    return -EINVAL;
+    (void)closedir(dir);
+    if (node < 0) {
+        SMAP_LOGGER_ERROR("open cpu %d node failed.", cpu);
+    }
+    return node;
 }
 
 int GetNumaNodesForPid(pid_t pid, int *node)
@@ -1725,6 +1748,10 @@ int SetLocalNumaByCpu(pid_t pid, uint32_t *nodeBitmap)
         if (nid == -EINVAL) {
             SMAP_LOGGER_ERROR("Get node from cpu%d failed: %d.", i, ret);
             return -EINVAL;
+        }
+        /* 本地位掩码为 uint32_t 且只描述本地节点：越界节点（>= nrLocalNuma 或 >= 32）跳过，避免移位溢出 */
+        if (nid >= GetNrLocalNuma() || nid >= (int)(sizeof(*nodeBitmap) * BIT_TO_BYTE)) {
+            continue;
         }
         *nodeBitmap |= (1U << nid);
     }
