@@ -302,6 +302,10 @@ int BuildPairSwapPlans(struct ProcessManager *manager, PairPlan plans[], size_t 
                 }
             }
         }
+        if (!process) {
+            /* 两轮之间进程可能已被并发移除：不再为其规划 swap */
+            continue;
+        }
         int sourceLocalNid = process->targetConfig.sourceLocalNid;
         bool sourceMismatch = process->targetConfig.count > 0 && sourceLocalNid != NUMA_NO_NODE &&
                               sourceLocalNid != plan->localNid;
@@ -487,6 +491,7 @@ OUT:
  * [nrLocalNuma][cap]。各矩阵在 stageCnt 确定后按需堆分配。
  */
 typedef struct {
+    struct PidSlot *slot;
     ProcessAttr *process;
     bool *pairSeen;
     uint32_t *nrMigratePages; /* demote+swap：l→r */
@@ -535,6 +540,7 @@ int ApplyPairPlansForState(struct ProcessManager *manager, const PairPlan plans[
             ret = -EOVERFLOW;
             goto OUT;
         }
+        stages[stageCnt].slot = all[k];
         stages[stageCnt++].process = process;
     }
 
@@ -569,14 +575,15 @@ int ApplyPairPlansForState(struct ProcessManager *manager, const PairPlan plans[
     /* 方向矩阵为扁平堆指针，分配尺寸 = nrLocalNuma 行 × cap 列元素 */
     size_t matrixBytes = stageElements * sizeof(uint32_t);
     for (size_t i = 0; i < stageCnt; i++) {
+        /* 写活跃 attr 的策略矩阵须持该 slot 的 attrLock */
+        EnvMutexLock(&stages[i].slot->attrLock);
         ret = memcpy_s(stages[i].process->strategyAttr.nrMigratePages, matrixBytes, stages[i].nrMigratePages,
                        matrixBytes);
-        if (ret != EOK) {
-            ret = -ret;
-            goto OUT;
+        if (ret == EOK) {
+            ret = memcpy_s(stages[i].process->strategyAttr.nrMigrateBackPages, matrixBytes,
+                           stages[i].nrMigrateBackPages, matrixBytes);
         }
-        ret = memcpy_s(stages[i].process->strategyAttr.nrMigrateBackPages, matrixBytes, stages[i].nrMigrateBackPages,
-                       matrixBytes);
+        EnvMutexUnlock(&stages[i].slot->attrLock);
         if (ret != EOK) {
             ret = -ret;
             goto OUT;

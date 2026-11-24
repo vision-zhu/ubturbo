@@ -1032,6 +1032,25 @@ TEST_F(MigrationTest, TestBuildPairSwapPlansUsesRemainingBidirectionalBudget)
     FreeProcessAttrArrays(&process);
 }
 
+/* 第一轮校验通过后进程被并发移除：第二轮取不到 attr 时跳过，不解引用空指针 */
+TEST_F(MigrationTest, TestBuildPairSwapPlansSkipsProcessRemovedBetweenRounds)
+{
+    ProcessManager manager = {};
+    manager.nrLocalNuma = 2;
+    ProcessAttr process = {.pid = 100, .scanType = NORMAL_SCAN};
+    process.enableSwap = true;
+    PairPlan plan = MakePairPlan(100, 0, 2, 10, 10);
+    PairPlanContext context = {.nrLocalNuma = 2};
+    context.freePages[0] = 10;
+    PairPidBudget budget = {.pid = 100, .maxMigratePages = 12, .plannedPages = 2};
+
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&process)).then(returnValue((ProcessAttr *)nullptr));
+    ASSERT_EQ(0, BuildPairSwapPlans(&manager, &plan, 1, &context, &budget, 1));
+    EXPECT_EQ(0U, plan.swapPages);
+    EXPECT_EQ(2U, budget.plannedPages);
+    EXPECT_EQ(0U, context.plannedPages[0]);
+}
+
 TEST_F(MigrationTest, TestBuildPairSwapPlansSkipsNonConfiguredSourceLocal)
 {
     ProcessManager manager = {};
