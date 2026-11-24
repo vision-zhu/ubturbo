@@ -658,7 +658,6 @@ static int RecoverProcessConfig(char *processBase)
                              attr->targetConfig.targets[j].memSizeKB);
         }
         PidSlotAdd(manager, attr);
-        manager->nr[attr->type]++;
     }
     if (errFlag) {
         for (int i = 0; i < MAX_PID_SLOTS; i++) {

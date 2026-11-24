@@ -1997,6 +1997,26 @@ TEST_F(ManageTest, TestPidSlotRemoveSkipsStaleRemovingSlot)
     PidSlotDestroy(&g_processManager);
 }
 
+TEST_F(ManageTest, TestPidSlotNrCountedOnlyOnRealAddRemove)
+{
+    PidSlotInit(&g_processManager);
+    g_processManager.nr[VM_TYPE] = 0;
+    g_processManager.nr[PROCESS_TYPE] = 0;
+    ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, attr);
+    attr->pid = 205;
+    attr->type = VM_TYPE;
+
+    ASSERT_GE(PidSlotAdd(&g_processManager, attr), 0);
+    EXPECT_EQ(1, LoadMangerNrVmNum());
+    /* 两个移除请求都拿到过 attr 引用：只有真正完成摘除的一次递减，计数不会下溢 */
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 205));
+    EXPECT_FALSE(PidSlotRemove(&g_processManager, 205));
+    EXPECT_EQ(0, LoadMangerNrVmNum());
+    EXPECT_EQ(0, LoadMangerNrProcessNum());
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

@@ -392,12 +392,39 @@ int ProcessManagerInit(uint32_t pageType)
 
 int LoadMangerNrProcessNum(void)
 {
-    return g_processManager.nr[PROCESS_TYPE];
+    return __atomic_load_n(&g_processManager.nr[PROCESS_TYPE], __ATOMIC_SEQ_CST);
 }
 
 int LoadMangerNrVmNum(void)
 {
-    return g_processManager.nr[VM_TYPE];
+    return __atomic_load_n(&g_processManager.nr[VM_TYPE], __ATOMIC_SEQ_CST);
+}
+
+/*
+ * 纳管计数 nr[type] 只在 PidSlotAdd/PidSlotRemove 真正增删 INUSE 槽位时原子更新，
+ * 保证计数与 INUSE 槽位一一对应：并发重复移除只会成功一次，不会双减下溢。
+ */
+static bool IsPidTypeIndexValid(PidType type)
+{
+    return type >= PROCESS_TYPE && type < TYPE_MAX;
+}
+
+static void PidSlotNrInc(struct ProcessManager *manager, PidType type)
+{
+    if (IsPidTypeIndexValid(type)) {
+        (void)__atomic_add_fetch(&manager->nr[type], 1, __ATOMIC_SEQ_CST);
+    }
+}
+
+static void PidSlotNrDec(struct ProcessManager *manager, PidType type)
+{
+    if (!IsPidTypeIndexValid(type)) {
+        return;
+    }
+    uint16_t old = __atomic_load_n(&manager->nr[type], __ATOMIC_SEQ_CST);
+    while (old > 0 &&
+           !__atomic_compare_exchange_n(&manager->nr[type], &old, old - 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+    }
 }
 
 bool PidIsValid(pid_t pid)
@@ -772,6 +799,7 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
         EnvAtomicSet(&s->eventEnqueued, 0);
         s->freqWaiters = NULL;
         EnvAtomicSet(&s->state, PID_SLOT_INUSE);
+        PidSlotNrInc(manager, attr->type);
         return i;
     }
     return -1;
@@ -798,7 +826,9 @@ bool PidSlotRemove(struct ProcessManager *manager, pid_t pid)
         /* 注销必须与 EventLoopRegisterPid 持同一把 attrLock 串行化：
          * 若移除时已注册 mem_freq fd，此处注销并 close，防止复槽后 fd 泄漏给新 pid */
         EventLoopUnregisterSlotLocked(s);
+        PidType type = s->attr ? s->attr->type : TYPE_MAX;
         EnvMutexUnlock(&s->attrLock);
+        PidSlotNrDec(manager, type);
         if (AtomicDecrease(&s->refs, 1) == 1) {
             PidSlotTryReclaim(manager, i);
         }
@@ -1381,7 +1411,6 @@ int AddProcess(ProcessParam *param, PidType type)
     attr->scanTime = DEFAULT_SCAN_PERIOD;
     PidSlotAdd(&g_processManager, attr);
     SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", attr->pid, attr->scanTime);
-    g_processManager.nr[type]++;
 
     ret = SyncAllProcessConfig();
     if (ret) {
@@ -1540,7 +1569,6 @@ void PublishProcessManageCandidate(ProcessManageCandidate *candidate)
 
     if (candidate->isNew) {
         PidSlotAdd(&g_processManager, prepared);
-        g_processManager.nr[prepared->type]++;
         candidate->prepared = NULL;
         SMAP_LOGGER_INFO("Add pid %d to list done.", prepared->pid);
     } else {
@@ -1942,9 +1970,7 @@ void CheckAndRemoveInvalidProcess(void)
                 SMAP_LOGGER_ERROR("access ioctl remove pid %d error: %d.", pid, ret);
             }
 
-            if (PidSlotRemove(&g_processManager, attr->pid)) {
-                g_processManager.nr[attr->type]--;
-            }
+            (void)PidSlotRemove(&g_processManager, attr->pid);
             ret = SyncAllProcessConfig();
             if (ret) {
                 SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", pid, ret);
@@ -2052,10 +2078,7 @@ static void ClearManagedWholeProcess(pid_t pid, bool *removed)
         return;
     }
 
-    PidType type = attr->type;
-    if (PidSlotRemove(manager, attr->pid) && type >= PROCESS_TYPE && type < TYPE_MAX && manager->nr[type] > 0) {
-        manager->nr[type]--;
-    }
+    (void)PidSlotRemove(manager, attr->pid);
     *removed = true;
     SMAP_LOGGER_INFO("Remove pid: %d, from managed process.", pid);
     PutProcessAttr(attr);
@@ -2164,9 +2187,7 @@ void RemoveManagedProcess(int nr, pid_t *pidArr)
             SMAP_LOGGER_WARNING("pid: %d, not exist, not need to remove.", pidArr[i]);
             continue;
         }
-        if (PidSlotRemove(&g_processManager, attr->pid)) {
-            g_processManager.nr[attr->type]--;
-        }
+        (void)PidSlotRemove(&g_processManager, attr->pid);
         SMAP_LOGGER_INFO("Remove pid: %d, from managed process.", pidArr[i]);
         ret = SyncAllProcessConfig();
         if (ret) {
@@ -2190,7 +2211,9 @@ void RemoveAllManagedProcess(void)
         PidSlotRemove(&g_processManager, attr->pid);
     }
     PidSlotReleaseRefs(all, n);
-    g_processManager.nr[VM_TYPE] = g_processManager.nr[PROCESS_TYPE] = 0;
+    /* 销毁路径（无并发纳管）兜底归零：计数本应已随槽位摘除归零 */
+    __atomic_store_n(&g_processManager.nr[VM_TYPE], 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&g_processManager.nr[PROCESS_TYPE], 0, __ATOMIC_SEQ_CST);
 }
 
 /*

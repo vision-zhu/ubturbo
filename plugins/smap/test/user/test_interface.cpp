@@ -701,6 +701,9 @@ TEST_F(InterfaceTest, TestCheckMigrateOutMsgMigOutCount)
      * CheckMigrateOutMsg 的跟踪模式校验拒绝。 */
     ProcessAttr processes = {.pid = msg.payload[0].pid, .scanType = NORMAL_SCAN, .next = nullptr};
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    /* nr 由 PidSlotAdd 计数：清掉上一段手工设置的满额计数 */
+    g_processManager.nr[VM_TYPE] = MAX_2M_PROCESSES_CNT - 1;
+    g_processManager.nr[PROCESS_TYPE] = 0;
     PidSlotAdd(&g_processManager, &processes);
     MOCKER(GetPidTypeFromComm).stubs().will(returnValue((int)VM_TYPE));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)true));
@@ -1865,8 +1868,9 @@ TEST_F(InterfaceTest, TestRecoverRemoveInvalidProcess)
     int ret;
     struct ProcessManager manager;
     memset(&manager, 0, sizeof(manager));
+    /* nr 由 PidSlotAdd 计数 */
     manager.nr[0] = 0;
-    manager.nr[1] = 2;
+    manager.nr[1] = 0;
     ProcessAttr *attr;
     ProcessAttr *attr1;
     ProcessAttr *attr2;
