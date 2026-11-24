@@ -6022,6 +6022,59 @@ TEST_F(ManageTest, TestBuildAllPairTargetsFailureDoesNotPublishUsage)
     DestroyPairTargetManager(&manager);
 }
 
+/* 单 pid 仲裁只处理该 pid 涉及的远端，结果须与全量仲裁逐项一致 */
+TEST_F(ManageTest, TestBuildPidArbitratedTargetsMatchesGlobalArbitration)
+{
+    ProcessManager manager;
+    InitPairTargetManager(&manager, 2);
+    NM_AT(manager.remoteNumaInfo.privateSize, 0, 2) = 1;
+    manager.remoteNumaInfo.sharedSize[2] = 1;
+    manager.remoteNumaInfo.sharedSize[3] = 2;
+
+    ProcessAttr pids[3];
+    InitRatioPairProcess(&pids[0], 100, 2, 400, 400, 50);
+    InitRatioPairProcess(&pids[1], 200, 2, 800, 0, 30);
+    InitRatioPairProcess(&pids[2], 300, 2, 0, 600, 40);
+    /* pid 200 同时迁往远端 2/3，pid 300 只迁往远端 3 */
+    pids[1].targetConfig.count = 2;
+    pids[1].targetConfig.targets[1] = {3, 20, 0};
+    pids[2].targetConfig.targets[0] = {3, 40, 0};
+    memset(&manager.slots, 0, sizeof(manager.slots));
+    for (auto &pid : pids) {
+        PidSlotAdd(&manager, &pid);
+    }
+
+    AllPairTargetResult global = RunBuildAllPairTargets(&manager);
+    ASSERT_EQ(0, global.ret);
+    ASSERT_GT(global.targetCnt, 0U);
+    for (auto &pid : pids) {
+        PairTarget targets[32] = {};
+        size_t cnt = 0;
+        EnvMutexLock(&manager.remoteNumaInfo.lock);
+        int ret = BuildPidArbitratedTargetsLocked(&manager, pid.pid, targets, 32, &cnt);
+        EnvMutexUnlock(&manager.remoteNumaInfo.lock);
+        ASSERT_EQ(0, ret);
+        size_t expected = 0;
+        for (size_t i = 0; i < global.targetCnt; i++) {
+            if (global.targets[i].pid == pid.pid) {
+                expected++;
+            }
+        }
+        EXPECT_EQ(expected, cnt);
+        for (size_t i = 0; i < cnt; i++) {
+            EXPECT_EQ(pid.pid, targets[i].pid);
+            EXPECT_EQ(global.Requested(pid.pid, targets[i].localNid, targets[i].remoteNid), targets[i].requestedPages);
+            EXPECT_EQ(global.Target(pid.pid, targets[i].localNid, targets[i].remoteNid), targets[i].targetPages);
+        }
+    }
+
+    memset(&manager.slots, 0, sizeof(manager.slots));
+    for (auto &pid : pids) {
+        FreeProcessAttrArrays(&pid);
+    }
+    DestroyPairTargetManager(&manager);
+}
+
 extern "C" void SetRunMode(RunMode runMode);
 TEST_F(ManageTest, TestSetRunMode)
 {
