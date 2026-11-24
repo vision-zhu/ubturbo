@@ -4640,6 +4640,23 @@ TEST_F(InterfaceTest, TestBuildMigRemoteNumaMsg)
 
     int ret = BuildMigRemoteNumaMsg(&msg, &ioctlMsg);
     EXPECT_EQ(0, ret);
+    /* RATIO 模式：未经校验的 memSize 不得下发 */
+    EXPECT_TRUE(ioctlMsg.payloads[0].isRatioMode);
+    EXPECT_EQ(50, ioctlMsg.payloads[0].ratio);
+    EXPECT_EQ(0U, ioctlMsg.payloads[0].memSize);
+    free(ioctlMsg.payloads);
+    free(ioctlMsg.migResArray);
+
+    /* MEMSIZE 模式：未经校验的 ratio（可为负）不得触发比例迁移或入账 */
+    msg.payload[0].migrateMode = MIG_MEMSIZE_MODE;
+    msg.payload[0].ratio = -50;
+    msg.payload[0].memSize = 4096;
+    ioctlMsg = {};
+    ret = BuildMigRemoteNumaMsg(&msg, &ioctlMsg);
+    EXPECT_EQ(0, ret);
+    EXPECT_FALSE(ioctlMsg.payloads[0].isRatioMode);
+    EXPECT_EQ(0, ioctlMsg.payloads[0].ratio);
+    EXPECT_EQ(4096U, ioctlMsg.payloads[0].memSize);
 
     free(ioctlMsg.payloads);
     free(ioctlMsg.migResArray);
