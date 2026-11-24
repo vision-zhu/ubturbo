@@ -1071,6 +1071,73 @@ static int AppendCycleMigResult(struct MigrateMsg *dst, const struct MigrateMsg 
     return 0;
 }
 
+typedef struct {
+    uint64_t idx;
+    actc_t freq;
+    uint8_t prior;
+    bool isWhiteListPage;
+} CompPageCand;
+
+/* 迁出（本地 -> 远端）：白名单页最后，频次升序（最冷优先） */
+static int CompPageColdFirst(const void *a, const void *b)
+{
+    const CompPageCand *p1 = a;
+    const CompPageCand *p2 = b;
+    if (p1->isWhiteListPage != p2->isWhiteListPage) {
+        return p1->isWhiteListPage ? 1 : -1;
+    }
+    if (p1->freq != p2->freq) {
+        return p1->freq < p2->freq ? -1 : 1;
+    }
+    return (int)p2->prior - (int)p1->prior;
+}
+
+/* 迁回（远端 -> 本地）：白名单页最后，频次降序（最热优先） */
+static int CompPageHotFirst(const void *a, const void *b)
+{
+    const CompPageCand *p1 = a;
+    const CompPageCand *p2 = b;
+    if (p1->isWhiteListPage != p2->isWhiteListPage) {
+        return p1->isWhiteListPage ? 1 : -1;
+    }
+    if (p1->freq != p2->freq) {
+        return p1->freq > p2->freq ? -1 : 1;
+    }
+    return (int)p1->prior - (int)p2->prior;
+}
+
+static int CompPageIdxAsc(const void *a, const void *b)
+{
+    uint64_t lhs = *(const uint64_t *)a;
+    uint64_t rhs = *(const uint64_t *)b;
+    return lhs < rhs ? -1 : (lhs > rhs ? 1 : 0);
+}
+
+/* 按方向依据本轮扫描频次选页：迁出取最冷、迁回取最热，结果按页序号升序下发。 */
+static int SelectCompPages(ProcessAttr *process, int from, uint64_t nr, uint64_t *addr)
+{
+    uint64_t sourcePages = process->scanAttr.actcLen[from];
+    CompPageCand *cands = malloc(sizeof(*cands) * sourcePages);
+    if (!cands) {
+        return -ENOMEM;
+    }
+    for (uint64_t i = 0; i < sourcePages; i++) {
+        const ActcData *data = &process->scanAttr.actcData[from][i];
+        cands[i].idx = i;
+        cands[i].freq = data->freq;
+        cands[i].prior = data->prior;
+        cands[i].isWhiteListPage = data->isWhiteListPage;
+    }
+    bool fromLocal = from < GetNrLocalNuma();
+    qsort(cands, sourcePages, sizeof(*cands), fromLocal ? CompPageColdFirst : CompPageHotFirst);
+    for (uint64_t i = 0; i < nr; i++) {
+        addr[i] = cands[i].idx;
+    }
+    free(cands);
+    qsort(addr, nr, sizeof(*addr), CompPageIdxAsc);
+    return 0;
+}
+
 static uint64_t BuildCompMigListFromScan(ProcessAttr *process, GroupSwapCompPlan *plan, struct MigList *list)
 {
     uint64_t sourcePages = process->scanAttr.actcLen[plan->from];
@@ -1087,13 +1154,16 @@ static uint64_t BuildCompMigListFromScan(ProcessAttr *process, GroupSwapCompPlan
         plan->shouldFreeze = true;
         return 0;
     }
+    if (SelectCompPages(process, plan->from, nr, list->addr)) {
+        free(list->addr);
+        list->addr = NULL;
+        plan->shouldFreeze = true;
+        return 0;
+    }
     list->pid = plan->pid;
     list->from = plan->from;
     list->to = plan->to;
     list->nr = nr;
-    for (uint64_t i = 0; i < nr; i++) {
-        list->addr[i] = i;
-    }
     plan->built = nr;
     if (nr < plan->need) {
         plan->shouldFreeze = true;
