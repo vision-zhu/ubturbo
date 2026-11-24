@@ -9,6 +9,7 @@
 
 #include "manage/manage.h"
 #include "manage/thread.h"
+#include "manage/thread_pool.h"
 
 using namespace std;
 
@@ -80,4 +81,34 @@ TEST_F(ThreadTest, TestDestroyScanMigrateThread)
     ret = DestroyScanMigrateThread(&pm);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(1, EnvAtomicRead(&pm.scanMigrateStop));
+}
+
+TEST_F(ThreadTest, TestThreadPoolDestroyIdempotent)
+{
+    struct ProcessManager *pm = (struct ProcessManager *)calloc(1, sizeof(struct ProcessManager));
+    ASSERT_NE(nullptr, pm);
+
+    ASSERT_EQ(0, ThreadPoolInit(pm, 1));
+    EXPECT_TRUE(pm->threadPool.inited);
+    ThreadPoolDestroy(pm);
+    EXPECT_FALSE(pm->threadPool.inited);
+    // 重复销毁不得再次 join / 销毁已销毁的锁
+    MOCKER(pthread_join).expects(never());
+    ThreadPoolDestroy(pm);
+    free(pm);
+}
+
+TEST_F(ThreadTest, TestThreadPoolSubmitRejectedAfterStop)
+{
+    struct ProcessManager *pm = (struct ProcessManager *)calloc(1, sizeof(struct ProcessManager));
+    ASSERT_NE(nullptr, pm);
+    struct PidSlot slot;
+    memset(&slot, 0, sizeof(slot));
+
+    ASSERT_EQ(0, ThreadPoolInit(pm, 1));
+    EnvAtomicSet(&pm->threadPool.stop, 1);
+    EXPECT_EQ(-ESHUTDOWN, ThreadPoolSubmit(pm, &slot, 1));
+    EXPECT_EQ(0U, pm->threadPool.count);
+    ThreadPoolDestroy(pm);
+    free(pm);
 }

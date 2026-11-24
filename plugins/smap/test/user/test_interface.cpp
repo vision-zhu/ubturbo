@@ -284,6 +284,32 @@ TEST_F(InterfaceTest, TestInitAllThreads)
     EXPECT_EQ(-EPERM, ret);
 }
 
+TEST_F(InterfaceTest, TestInitAllThreadsPoolInitFailedNoDoubleDestroy)
+{
+    struct ProcessManager pm;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(ThreadPoolInit).stubs().will(returnValue(-EAGAIN));
+    // ThreadPoolInit 失败时已自行回滚，InitAllThreads 不得再销毁线程池
+    MOCKER(ThreadPoolDestroy).expects(never());
+    MOCKER(InitEventLoop).expects(never());
+    EXPECT_EQ(-EAGAIN, InitAllThreads(&pm));
+}
+
+TEST_F(InterfaceTest, TestInitAllThreadsEventLoopFailedDestroyPoolOnce)
+{
+    struct ProcessManager pm;
+
+    EnvMutexInit(&pm.threadLock);
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(ThreadPoolInit).stubs().will(returnValue(0));
+    MOCKER(InitEventLoop).stubs().will(returnValue(-EMFILE));
+    MOCKER(ThreadPoolDestroy).expects(once()).will(ignoreReturnValue());
+    MOCKER(InitScanMigrateThread).expects(never());
+    EXPECT_EQ(-EMFILE, InitAllThreads(&pm));
+}
+
 extern "C" bool GetFileConfSwitchConfig(void);
 TEST_F(InterfaceTest, TestInitAllThreadsHugeMode)
 {

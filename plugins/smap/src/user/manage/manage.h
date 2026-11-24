@@ -597,6 +597,7 @@ typedef struct {
     EnvAtomic stop;
     pthread_t workers[MAX_POOL_WORKERS];
     int nrWorkers;
+    bool inited; /* lock/cond 已初始化；ThreadPoolDestroy 据此保证幂等 */
 } ThreadPool;
 
 struct ProcessManager {

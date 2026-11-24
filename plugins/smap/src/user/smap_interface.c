@@ -320,16 +320,20 @@ static int InitAllThreads(struct ProcessManager *manager)
     if (GetFileConfSwitchConfig()) {
         migPeriod = GetMigratePeriodConfig();
     }
+    /* 各步骤分别回滚已完成的前序步骤，每个对象只销毁一次 */
     ret = ThreadPoolInit(manager, 0);
     if (ret) {
+        /* ThreadPoolInit 失败时已自行回滚 */
         SMAP_LOGGER_ERROR("init migrate worker thread pool error: %d.", ret);
+        goto out;
     }
-    ret = ret ? ret : InitEventLoop(manager);
+    ret = InitEventLoop(manager);
     if (ret) {
         SMAP_LOGGER_ERROR("init mem_freq event loop error: %d.", ret);
         ThreadPoolDestroy(manager);
+        goto out;
     }
-    ret = ret ? ret : InitScanMigrateThread(manager, migPeriod);
+    ret = InitScanMigrateThread(manager, migPeriod);
     if (ret) {
         SMAP_LOGGER_ERROR("init scan migrate work thread error: %d.", ret);
         /* InitScanMigrateThread 失败时 scanMigrateThread 已被清零，
@@ -337,6 +341,7 @@ static int InitAllThreads(struct ProcessManager *manager)
         DestroyEventLoop(manager);
         ThreadPoolDestroy(manager);
     }
+out:
     EnvMutexUnlock(&manager->threadLock);
     return ret;
 }
