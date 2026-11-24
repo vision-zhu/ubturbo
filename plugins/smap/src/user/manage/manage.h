@@ -789,7 +789,7 @@ void GetProcessPeriods(const ProcessAttr *attr, uint32_t *scanTime, uint32_t *mi
 void PidSlotInit(struct ProcessManager *manager);
 void PidSlotDestroy(struct ProcessManager *manager);
 int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr);
-void PidSlotRemove(struct ProcessManager *manager, pid_t pid);
+bool PidSlotRemove(struct ProcessManager *manager, pid_t pid);
 bool PidSlotEmpty(struct ProcessManager *manager);
 struct PidSlot *PidSlotGetRef(pid_t pid);
 struct PidSlot *PidSlotGetRefByAttr(const ProcessAttr *attr);

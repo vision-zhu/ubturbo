@@ -777,17 +777,23 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
     return -1;
 }
 
-void PidSlotRemove(struct ProcessManager *manager, pid_t pid)
+/*
+ * 摘除 pid 的 INUSE 槽位。同 pid 可能同时存在一个仍被引用的 REMOVING 旧槽位与一个
+ * 重新纳管的 INUSE 新槽位，故只匹配 INUSE 槽位，CAS 失败（被并发摘除）时继续查找。
+ * 返回 true 表示由本次调用完成 INUSE->REMOVING 摘除；false 表示未找到或已被他人摘除，
+ * 调用方据此避免重复递减计数。
+ */
+bool PidSlotRemove(struct ProcessManager *manager, pid_t pid)
 {
     for (int i = 0; i < MAX_PID_SLOTS; i++) {
         struct PidSlot *s = &manager->slots[i];
-        if (s->pid != pid) {
+        if (EnvAtomicRead(&s->state) != PID_SLOT_INUSE || s->pid != pid) {
             continue;
         }
         EnvMutexLock(&s->attrLock);
-        if (EnvAtomicCmpAndSwap(PID_SLOT_INUSE, PID_SLOT_REMOVING, &s->state) != PID_SLOT_INUSE) {
+        if (s->pid != pid || EnvAtomicCmpAndSwap(PID_SLOT_INUSE, PID_SLOT_REMOVING, &s->state) != PID_SLOT_INUSE) {
             EnvMutexUnlock(&s->attrLock);
-            return;
+            continue;
         }
         /* 注销必须与 EventLoopRegisterPid 持同一把 attrLock 串行化：
          * 若移除时已注册 mem_freq fd，此处注销并 close，防止复槽后 fd 泄漏给新 pid */
@@ -796,8 +802,9 @@ void PidSlotRemove(struct ProcessManager *manager, pid_t pid)
         if (AtomicDecrease(&s->refs, 1) == 1) {
             PidSlotTryReclaim(manager, i);
         }
-        return;
+        return true;
     }
+    return false;
 }
 
 bool PidSlotEmpty(struct ProcessManager *manager)
@@ -1935,8 +1942,9 @@ void CheckAndRemoveInvalidProcess(void)
                 SMAP_LOGGER_ERROR("access ioctl remove pid %d error: %d.", pid, ret);
             }
 
-            PidSlotRemove(&g_processManager, attr->pid);
-            g_processManager.nr[attr->type]--;
+            if (PidSlotRemove(&g_processManager, attr->pid)) {
+                g_processManager.nr[attr->type]--;
+            }
             ret = SyncAllProcessConfig();
             if (ret) {
                 SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", pid, ret);
@@ -2045,8 +2053,7 @@ static void ClearManagedWholeProcess(pid_t pid, bool *removed)
     }
 
     PidType type = attr->type;
-    PidSlotRemove(manager, attr->pid);
-    if (type >= PROCESS_TYPE && type < TYPE_MAX && manager->nr[type] > 0) {
+    if (PidSlotRemove(manager, attr->pid) && type >= PROCESS_TYPE && type < TYPE_MAX && manager->nr[type] > 0) {
         manager->nr[type]--;
     }
     *removed = true;
@@ -2157,9 +2164,10 @@ void RemoveManagedProcess(int nr, pid_t *pidArr)
             SMAP_LOGGER_WARNING("pid: %d, not exist, not need to remove.", pidArr[i]);
             continue;
         }
-        PidSlotRemove(&g_processManager, attr->pid);
+        if (PidSlotRemove(&g_processManager, attr->pid)) {
+            g_processManager.nr[attr->type]--;
+        }
         SMAP_LOGGER_INFO("Remove pid: %d, from managed process.", pidArr[i]);
-        g_processManager.nr[attr->type]--;
         ret = SyncAllProcessConfig();
         if (ret) {
             SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", pidArr[i], ret);
