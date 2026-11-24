@@ -3546,21 +3546,20 @@ static int BuildMigRemoteNumaMsg(struct MigrateEscapeMsg *msg, struct MigPidRemo
         return -ENOMEM;
     }
     for (i = 0; i < msg->count; i++) {
+        /* 按 migrateMode 取值：校验只覆盖当前模式的字段，另一字段未经校验，不得下发内核或入账 */
+        bool ratioMode = msg->payload[i].migrateMode == MIG_RATIO_MODE;
+        int ratio = ratioMode ? msg->payload[i].ratio : 0;
         ioctlMsg->payloads[i].pid = msg->payload[i].pid;
         ioctlMsg->payloads[i].srcNid = msg->payload[i].srcNid;
         ioctlMsg->payloads[i].destNid = msg->payload[i].destNid;
-        ioctlMsg->payloads[i].ratio = msg->payload[i].ratio;
+        ioctlMsg->payloads[i].ratio = ratio;
         int srcRatio = GetAttrNidInitRatio(msg->payload[i].pid, msg->payload[i].srcNid);
-        ioctlMsg->payloads[i].keepRatio = srcRatio - msg->payload[i].ratio;
-        ioctlMsg->payloads[i].memSize = msg->payload[i].memSize;
-        if (GetRunMode() == WATERLINE_MODE && msg->payload[i].ratio != 0) {
-            ioctlMsg->payloads[i].isRatioMode = true;
-        } else {
-            ioctlMsg->payloads[i].isRatioMode = false;
-        }
+        ioctlMsg->payloads[i].keepRatio = srcRatio - ratio;
+        ioctlMsg->payloads[i].memSize = ratioMode ? 0 : msg->payload[i].memSize;
+        ioctlMsg->payloads[i].isRatioMode = ratioMode && GetRunMode() == WATERLINE_MODE;
 
         SMAP_LOGGER_INFO("[escape_msg] pid=%d from=%d to=%d ratio=%d keep_ratio=%d memsize=%llu is_ratio_mode=%d",
-                         msg->payload[i].pid, msg->payload[i].srcNid, msg->payload[i].destNid, msg->payload[i].ratio,
+                         msg->payload[i].pid, msg->payload[i].srcNid, msg->payload[i].destNid, ratio,
                          ioctlMsg->payloads[i].keepRatio, ioctlMsg->payloads[i].memSize,
                          ioctlMsg->payloads[i].isRatioMode);
     }
