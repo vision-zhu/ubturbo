@@ -356,6 +356,7 @@ typedef struct {
     MigrateDirection dir[SMAP_NODE_CAP_LIMIT]; // 算法决策各numa的迁出的方向 demote/promote/swap
     UbBwRestrictType ubBwRestrict[SMAP_NODE_CAP_LIMIT]; // 各NUMA的UB带宽限制策略
     SeparateParam separateParam;
+    uint32_t migPairCursor; // 单 pid 迁移条目超限时，下一轮优先下发的 pair（L * nrRemote + R - nrLocal）
 } StrategyAttribute;
 
 typedef struct {

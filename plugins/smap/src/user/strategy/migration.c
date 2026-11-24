@@ -751,37 +751,55 @@ static int BuildMigrationMsg(ProcessAttr *process, struct MigrateMsg *mMsg, uint
     }
 
     uint64_t nrMigTotal = 0;
-    int nrLocalNuma = GetNrLocalNuma();
+    int nrRemote = cap - nrLocal;
+    size_t pairCnt = (size_t)nrLocal * (size_t)nrRemote;
+    size_t start = pairCnt ? process->strategyAttr.migPairCursor % pairCnt : 0;
+    bool deferred = false;
+    size_t firstDeferred = 0;
     /* Group mig_list entries per local node: for each local L, emit its back
        (remote->L) and out (L->remote) entries together so the kernel's
        first-active scan co-schedules migrate-back into L with migrate-out
-       from L, avoiding a local node being filled without being freed. */
-    for (int L = 0; L < nrLocalNuma; L++) {
-        for (int R = nrLocalNuma; R < cap; R++) {
-            /* back into L, out from L */
-            struct MigList *cells[2] = { MigListCell(migList, R, L), MigListCell(migList, L, R) };
-            for (int c = 0; c < 2; c++) {
-                if (!cells[c]->nr) {
-                    continue;
-                }
-                ret = AddMigListCapped(mMsg, cells[c], MAX_PER_PID_MIG_LIST_COUNT);
-                if (ret == -ENOSPC) {
-                    SMAP_LOGGER_WARNING("Pid %d migration list is deferred by kernel entry limit.", process->pid);
-                    DestroyMigListMatrix(migList);
-                    *migratePage += nrMigTotal;
-                    return 0;
-                }
-                if (ret) {
-                    SMAP_LOGGER_ERROR("Pid %d AddMigList %d %d failed: %d.", process->pid, cells[c]->from, cells[c]->to,
-                                      ret);
-                    DestroyMigListMatrix(migList);
-                    return ret;
-                }
-                nrMigTotal += cells[c]->nr;
-                SMAP_LOGGER_INFO("Numa %d --> Numa %d, mig %d pages.", cells[c]->from, cells[c]->to, cells[c]->nr);
+       from L, avoiding a local node being filled without being freed.
+       A pair is added whole or deferred whole when the per-pid entry limit
+       would split it; the next cycle starts from the first deferred pair so
+       later pairs are not starved by earlier ones that always have work. */
+    for (size_t k = 0; k < pairCnt; k++) {
+        size_t p = (start + k) % pairCnt;
+        int L = (int)(p / (size_t)nrRemote);
+        int R = nrLocal + (int)(p % (size_t)nrRemote);
+        /* back into L, out from L */
+        struct MigList *cells[2] = { MigListCell(migList, R, L), MigListCell(migList, L, R) };
+        int need = (cells[0]->nr ? 1 : 0) + (cells[1]->nr ? 1 : 0);
+        if (need == 0) {
+            continue;
+        }
+        if (mMsg->cnt + need > MAX_PER_PID_MIG_LIST_COUNT) {
+            if (!deferred) {
+                deferred = true;
+                firstDeferred = p;
             }
+            continue;
+        }
+        for (int c = 0; c < 2; c++) {
+            if (!cells[c]->nr) {
+                continue;
+            }
+            ret = AddMigListCapped(mMsg, cells[c], MAX_PER_PID_MIG_LIST_COUNT);
+            if (ret) {
+                SMAP_LOGGER_ERROR("Pid %d AddMigList %d %d failed: %d.", process->pid, cells[c]->from, cells[c]->to,
+                                  ret);
+                DestroyMigListMatrix(migList);
+                return ret;
+            }
+            nrMigTotal += cells[c]->nr;
+            SMAP_LOGGER_INFO("Numa %d --> Numa %d, mig %d pages.", cells[c]->from, cells[c]->to, cells[c]->nr);
         }
     }
+    if (deferred) {
+        SMAP_LOGGER_WARNING("Pid %d migration pairs from %d-%d are deferred by kernel entry limit.", process->pid,
+                            (int)(firstDeferred / (size_t)nrRemote), nrLocal + (int)(firstDeferred % (size_t)nrRemote));
+    }
+    process->strategyAttr.migPairCursor = deferred ? (uint32_t)firstDeferred : 0;
     DestroyMigListMatrix(migList);
     *migratePage = *migratePage + nrMigTotal;
     SMAP_LOGGER_DEBUG("Pid %d migList len %llu.", process->pid, nrMigTotal);
