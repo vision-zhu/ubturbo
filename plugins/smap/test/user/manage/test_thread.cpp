@@ -157,3 +157,26 @@ TEST_F(ThreadTest, TestDestroyScanMigrateThreadWakesLongPeriod)
     EXPECT_EQ(1, EnvAtomicRead(&pm->scanMigrateStop));
     free(pm);
 }
+
+TEST_F(ThreadTest, TestThreadPoolSubmitIndexWrapsWithinRing)
+{
+    struct ProcessManager *pm = (struct ProcessManager *)calloc(1, sizeof(struct ProcessManager));
+    ASSERT_NE(nullptr, pm);
+    struct PidSlot slot;
+    memset(&slot, 0, sizeof(slot));
+    ThreadPool *pool = &pm->threadPool;
+    EnvMutexInit(&pool->lock);
+    EnvCondInit(&pool->cond);
+
+    pool->tail = MAX_PID_SLOTS - 1;
+    pool->head = MAX_PID_SLOTS - 1;
+    EXPECT_EQ(0, ThreadPoolSubmit(pm, &slot, 1));
+    EXPECT_EQ(0, ThreadPoolSubmit(pm, &slot, 2));
+    EXPECT_EQ(1U, pool->tail);
+    EXPECT_EQ(1, pool->ring[MAX_PID_SLOTS - 1].pid);
+    EXPECT_EQ(2, pool->ring[0].pid);
+    EXPECT_EQ(2U, pool->count);
+    EnvCondDestroy(&pool->cond);
+    EnvMutexDestroy(&pool->lock);
+    free(pm);
+}
