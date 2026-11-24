@@ -566,6 +566,54 @@ TEST_F(SceneTest, TestConfigMultiVmRatioInGroupsTwo)
     EXPECT_EQ(false, current.adaptMem.enableAdaptMem);
 }
 
+static ProcessAttr *g_ratioVm;
+static ProcessAttr *g_memsizeVm;
+static bool g_ratioVmMarked;
+static bool g_memsizeVmMarked;
+static void RecordAdaptMarks(struct ProcessManager *manager)
+{
+    (void)manager;
+    g_ratioVmMarked = g_ratioVm->adaptMem.enableAdaptMem;
+    g_memsizeVmMarked = g_memsizeVm->adaptMem.enableAdaptMem;
+}
+
+/* 同一 (L1,L2) 上的 memsize/grouped VM 不能被内层循环标为可调，否则其虚假余量会分给 ratio VM */
+TEST_F(SceneTest, TestConfigMultiVmRatioInGroupsSkipsMemsizeVm)
+{
+    struct ProcessManager *manager = GetProcessManager();
+    ProcessAttr ratioVm = {};
+    ProcessAttr memsizeVm = {};
+    ratioVm.pid = 1;
+    ratioVm.scanType = NORMAL_SCAN;
+    ratioVm.migrateMode = MIG_RATIO_MODE;
+    memsizeVm.pid = 2;
+    memsizeVm.scanType = NORMAL_SCAN;
+    memsizeVm.migrateMode = MIG_MEMSIZE_MODE;
+    memsizeVm.groupPolicy.enabled = true;
+    memset(&manager->slots, 0, sizeof(manager->slots));
+    PidSlotAdd(manager, &memsizeVm);
+    PidSlotAdd(manager, &ratioVm);
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    ASSERT_EQ(0, InitProcessAttrArrays(&ratioVm));
+    ASSERT_EQ(0, InitProcessAttrArrays(&memsizeVm));
+    NumaBitmapSet(&ratioVm.numaAttr.numaNodes, 0);
+    NumaBitmapSet(&ratioVm.numaAttr.numaNodes, 4);
+    NumaBitmapSet(&memsizeVm.numaAttr.numaNodes, 0);
+    NumaBitmapSet(&memsizeVm.numaAttr.numaNodes, 4);
+    g_ratioVm = &ratioVm;
+    g_memsizeVm = &memsizeVm;
+    g_ratioVmMarked = false;
+    g_memsizeVmMarked = true;
+    MOCKER(ConfigMultiVmRatio).stubs().will(invoke(RecordAdaptMarks));
+
+    ConfigMultiVmRatioInGroups(manager);
+    EXPECT_TRUE(g_ratioVmMarked);
+    EXPECT_FALSE(g_memsizeVmMarked);
+    memset(&manager->slots, 0, sizeof(manager->slots));
+    FreeProcessAttrArrays(&ratioVm);
+    FreeProcessAttrArrays(&memsizeVm);
+}
+
 extern "C" void SkipMultiProcessRatio(struct ProcessManager *manager);
 TEST_F(SceneTest, TestSkipMultiProcessRatio)
 {
