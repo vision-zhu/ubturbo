@@ -426,23 +426,42 @@ static bool IsReadyForAdapt(ProcessAttr *attr)
     return true;
 }
 
-static void AdjustVmMemRatio(struct ProcessManager *manager, int64_t *surpluses, int len)
+/*
+ * daemon 侧一次性快照：surplus 与目标 VM（持引用的 slot）及当时的统计窗口一一对应，
+ * 采集与回写使用同一份快照，不再二次采集按序号对齐。
+ */
+typedef struct {
+    struct PidSlot *slot;
+    int pageIdx;
+    uint32_t nrPages;
+    uint32_t nrL1Guarantee;
+} VmRatioSnap;
+
+/* 回写在 attrLock 内完成，与 worker 的 SetProcessSceneAttr 串行；
+ * 快照之后统计窗口已被 worker 推进的 VM 本轮跳过，下轮按新数据重算。 */
+static void AdjustVmMemRatio(const VmRatioSnap snaps[], int64_t *surpluses, int len)
 {
-    int i = 0;
     if (len <= 0) {
         return;
     }
     BalanceSurpluses(surpluses, len);
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n && i < len; k++) {
-        ProcessAttr *current = all[k]->attr;
-        if (!IsReadyForAdapt(current)) {
-            continue;
-        }
+    for (int i = 0; i < len; i++) {
+        struct PidSlot *slot = snaps[i].slot;
+        ProcessAttr *current = slot->attr;
+        int64_t planned = (int64_t)snaps[i].nrL1Guarantee + surpluses[i];
+        planned = MAX(planned, 0);
+        planned = MIN(planned, (int64_t)snaps[i].nrPages);
+
+        EnvMutexLock(&slot->attrLock);
         SceneInfo *info = &current->sceneInfo;
         PageInfo *p = &info->pageInfo[info->pageInfoIndex];
-        p->nrL1Planed = p->nrL1Guarantee + surpluses[i];
+        if (info->pageInfoIndex != snaps[i].pageIdx || p->nrPages != snaps[i].nrPages ||
+            p->nrL1Guarantee != snaps[i].nrL1Guarantee) {
+            EnvMutexUnlock(&slot->attrLock);
+            SMAP_LOGGER_DEBUG("pid %d scene stats changed during ratio adapt, retry next round.", current->pid);
+            continue;
+        }
+        p->nrL1Planed = (uint32_t)planned;
         SMAP_LOGGER_INFO("AdjustVmMemRatio nrL1Planed: %u, nrL1Guarantee: %u, surpluses: %lld.", p->nrL1Planed,
                          p->nrL1Guarantee, surpluses[i]);
         SetLocalMemStatus(info);
@@ -452,9 +471,8 @@ static void AdjustVmMemRatio(struct ProcessManager *manager, int64_t *surpluses,
             info->currScene = MAX(LIGHT_STABLE_SCENE, (int)info->currScene - 1);
         }
         UpdateMemRatio(current);
-        i++;
+        EnvMutexUnlock(&slot->attrLock);
     }
-    PidSlotReleaseRefs(all, n);
 }
 
 void ConfigMultiVmRatio(struct ProcessManager *manager)
@@ -464,31 +482,45 @@ void ConfigMultiVmRatio(struct ProcessManager *manager)
         SMAP_LOGGER_DEBUG("No vm is found, skip adapt mem ratio.");
         return;
     }
-    int i = 0;
-    int64_t surpluses[nrVms];
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n && i < nrVms; k++) {
+    VmRatioSnap *snaps = calloc(n ? n : 1, sizeof(*snaps));
+    int64_t *surpluses = calloc(n ? n : 1, sizeof(*surpluses));
+    if (!snaps || !surpluses) {
+        SMAP_LOGGER_ERROR("alloc vm ratio snapshot failed.");
+        goto OUT;
+    }
+    int cnt = 0;
+    for (size_t k = 0; k < n; k++) {
         ProcessAttr *current = all[k]->attr;
         if (!IsReadyForAdapt(current)) {
             continue;
         }
+        EnvMutexLock(&all[k]->attrLock);
         SceneInfo *info = &current->sceneInfo;
         PageInfo *p = &info->pageInfo[info->pageInfoIndex];
+        snaps[cnt].slot = all[k];
+        snaps[cnt].pageIdx = info->pageInfoIndex;
+        snaps[cnt].nrPages = p->nrPages;
+        snaps[cnt].nrL1Guarantee = p->nrL1Guarantee;
         int l1Node = GetAttrL1(current);
         int l2Node = GetAttrL2(current);
         if (l1Node >= 0 && l2Node >= manager->nrLocalNuma) {
             int64_t localPages =
                 (int64_t)(p->nrPages * (HUNDRED - NM_AT(current->strategyAttr.l2RemoteMemRatio, l1Node, l2Node)) /
                           HUNDRED);
-            surpluses[i] = localPages - (int64_t)p->nrL1Guarantee;
+            surpluses[cnt] = localPages - (int64_t)p->nrL1Guarantee;
         } else {
-            surpluses[i] = 0; // 后续流程中不会更改配比
+            surpluses[cnt] = 0; // 后续流程中不会更改配比
         }
-        i++;
+        EnvMutexUnlock(&all[k]->attrLock);
+        cnt++;
     }
+    AdjustVmMemRatio(snaps, surpluses, cnt);
+OUT:
     PidSlotReleaseRefs(all, n);
-    AdjustVmMemRatio(manager, surpluses, i);
+    free(snaps);
+    free(surpluses);
 }
 
 static void GetMaxNuma(struct ProcessManager *manager, int *maxL1node, int *maxL2node)
@@ -513,14 +545,17 @@ static void GetMaxNuma(struct ProcessManager *manager, int *maxL1node, int *maxL
     *maxL2node = l2Node;
 }
 
-static bool ProcessMultiNumaVmNode(ProcessAttr *process)
+static bool ProcessMultiNumaVmNode(struct PidSlot *slot)
 {
+    ProcessAttr *process = slot->attr;
     if (IsMultiNumaVm(process)) {
         /* l2/l3RemoteMemRatio 第一维为 nrLocalNuma，列跨度 = 运行期 cap，仅拷贝实际分配的元素数 */
         int nrLocalNuma = GetNrLocalNuma();
         size_t bytes = sizeof(double) * NM_COUNT(nrLocalNuma);
+        EnvMutexLock(&slot->attrLock);
         errno_t ret =
             memcpy_s(process->strategyAttr.l3RemoteMemRatio, bytes, process->strategyAttr.l2RemoteMemRatio, bytes);
+        EnvMutexUnlock(&slot->attrLock);
         if (ret != EOK) {
             SMAP_LOGGER_ERROR("memcpy l3 remote mem ratio failed.");
             return false;
@@ -554,7 +589,7 @@ static void ConfigMultiVmRatioInGroups(struct ProcessManager *manager)
         if (current->scanType != NORMAL_SCAN) {
             continue;
         }
-        if (ProcessMultiNumaVmNode(current)) {
+        if (ProcessMultiNumaVmNode(all[a])) {
             continue;
         }
         if (current->migrateMode == MIG_MEMSIZE_MODE) {
@@ -605,8 +640,10 @@ static void SkipMultiProcessRatio(struct ProcessManager *manager)
         if (current->scanType != NORMAL_SCAN) {
             continue;
         }
+        EnvMutexLock(&all[k]->attrLock);
         int ret =
             memcpy_s(current->strategyAttr.l3RemoteMemRatio, bytes, current->strategyAttr.l2RemoteMemRatio, bytes);
+        EnvMutexUnlock(&all[k]->attrLock);
         if (ret) {
             SMAP_LOGGER_ERROR("memcpy l3 remote mem ratio failed.");
         }

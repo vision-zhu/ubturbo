@@ -1603,7 +1603,13 @@ static void CalProcessNuma(StrategyAttribute *strategyAttr)
             double resRatio =
                 ((double)NM_AT(strategyAttr->allocRemoteNrPages, i, j) / strategyAttr->nrPagesPerLocalNuma[i]) -
                 (NM_AT(strategyAttr->l3RemoteMemRatio, i, j) / HUNDRED);
-            int32_t tmp = ceil(strategyAttr->nrPagesPerLocalNuma[i] * resRatio);
+            double planned = ceil(strategyAttr->nrPagesPerLocalNuma[i] * resRatio);
+            /* 异常配比会让 double -> int32 越界（UB）：超出范围的结果丢弃 */
+            if (!isfinite(planned) || planned > INT32_MAX || planned < -(double)INT32_MAX) {
+                SMAP_LOGGER_ERROR("CalProcessNuma [%d][%d] planned pages %.0lf out of range, skip.", i, j, planned);
+                continue;
+            }
+            int32_t tmp = (int32_t)planned;
             SMAP_LOGGER_DEBUG("CalProcessNuma l3Ratio[%d][%d]: %.2lf, resRatio: %.2lf, tmp: %d.", i, j,
                               NM_AT(strategyAttr->l3RemoteMemRatio, i, j), resRatio, tmp);
 
@@ -1774,7 +1780,9 @@ static void UpdateScene(struct ProcessManager *manager)
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n; k++) {
         if (all[k]->attr) {
+            EnvMutexLock(&all[k]->attrLock);
             UpdateScenePerPid(all[k]->attr);
+            EnvMutexUnlock(&all[k]->attrLock);
         }
     }
     PidSlotReleaseRefs(all, n);
@@ -2158,7 +2166,10 @@ static int ProcessPidScanMigrate(struct ProcessManager *manager, struct PidSlot 
         return 0;
     }
     if (!GetFileConfSwitchConfig()) {
+        /* 场景统计与 daemon 的 ConfigRatios 共享 sceneInfo，持 attrLock 串行 */
+        EnvMutexLock(&slot->attrLock);
         UpdateScenePerPid(attr);
+        EnvMutexUnlock(&slot->attrLock);
     }
     ApplyUbBwStop(attr, manager);
     /* 候选切换（attrLock 双检），与 API 线程状态读写序列化 */
