@@ -4025,8 +4025,21 @@ TEST_F(ManageTest, TestEnableProcessMigrateDisableRetryFail)
 
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(IsPidArrayStateChangeReady).stubs().will(returnValue(0));
+    MOCKER(SmapStopRequested).stubs().will(returnValue(false));
     int ret = EnableProcessMigrate(pidArr, 1, DISABLE_PROCESS_MIGRATE);
     EXPECT_EQ(-ETIMEDOUT, ret);
+}
+
+/* 等待状态切换期间 SMAP 开始停止：不再重试，立即返回 -EPERM，避免阻塞 stop 的在途排空 */
+TEST_F(ManageTest, TestEnableProcessMigrateStopsWaitingOnStop)
+{
+    pid_t pidArr[] = {1};
+
+    EnvMutexInit(&g_processManager.threadLock);
+    MOCKER(IsPidArrayStateChangeReady).expects(once()).will(returnValue(0));
+    MOCKER(SmapStopRequested).stubs().will(returnValue(true));
+    MOCKER(SetPidArrState).expects(never());
+    EXPECT_EQ(-EPERM, EnableProcessMigrate(pidArr, 1, DISABLE_PROCESS_MIGRATE));
 }
 
 TEST_F(ManageTest, TestEnableProcessMigrateDisableRetrySuccess)
@@ -4035,6 +4048,7 @@ TEST_F(ManageTest, TestEnableProcessMigrateDisableRetrySuccess)
 
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(IsPidArrayStateChangeReady).stubs().will(returnValue(0)).then(returnValue(1));
+    MOCKER(SmapStopRequested).stubs().will(returnValue(false));
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     MOCKER(SetPidArrState).expects(once()).will(returnValue(1));
     int ret = EnableProcessMigrate(pidArr, 1, DISABLE_PROCESS_MIGRATE);

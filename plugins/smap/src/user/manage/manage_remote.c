@@ -34,6 +34,7 @@
 #include "manage.h"
 #include "node_matrix.h"
 #include "manage_internal.h"
+#include "smap_inner_interface.h"
 
 void InitProcessTargetConfig(ProcessTargetConfig *config)
 {
@@ -1701,6 +1702,11 @@ int EnableProcessMigrate(pid_t *pidArr, int len, int enable)
         if (--retry < 0) {
             SMAP_LOGGER_INFO("wait for pid state to change timed out, enable: %d.", enable);
             return -ETIMEDOUT;
+        }
+        /* stop 在销毁前等待在途接口退出：停止请求到达后不再重试，避免把 stop 阻塞到重试上限 */
+        if (SmapStopRequested()) {
+            SMAP_LOGGER_WARNING("Smap is stopping, stop waiting for pid state to change, enable: %d.", enable);
+            return -EPERM;
         }
         SMAP_LOGGER_INFO("wait for pid state to change, %d more times left.", retry);
         EnvMsleep(WAIT_PROC_STATE_PERIOD);
