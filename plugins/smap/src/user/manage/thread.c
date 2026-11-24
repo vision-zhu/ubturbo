@@ -272,6 +272,7 @@ static void EventLoopStopAndJoin(EventLoop *l)
     EventLoopNotifyWakeFd(l);
     if (l->inited) {
         pthread_join(l->thread, NULL);
+        l->inited = false;
     }
 }
 
@@ -319,7 +320,7 @@ int DestroyEventLoop(struct ProcessManager *m)
     if (l->epfd < 0) {
         return 0;
     }
-    l->inited = false;
+    /* 必须先 join 事件循环线程再注销槽位、关闭 fd：inited 由 StopAndJoin 在 join 后清除 */
     EventLoopStopAndJoin(l);
     for (int i = 0; i < MAX_PID_SLOTS; i++) {
         EventLoopUnregisterSlot(&m->slots[i]);
