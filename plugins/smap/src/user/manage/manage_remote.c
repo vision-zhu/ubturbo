@@ -1179,6 +1179,15 @@ bool CheckReadyMigrateBack(int destNid)
     return false;
 }
 
+/* disable 只能从空闲/已禁止态切换；enable 不得打断迁回 */
+static bool IsStateChangeReady(enum ProcessState st, int enable)
+{
+    if (enable == DISABLE_PROCESS_MIGRATE) {
+        return st == PROC_IDLE || st == PROC_MOVE;
+    }
+    return st != PROC_BACK;
+}
+
 /*
  * 检查pidArr是否都符合状态切换的要求，会跳过未纳管的pid，不会返回错误
  *
@@ -1202,10 +1211,7 @@ int IsPidArrayStateChangeReady(pid_t *pidArr, int len, int enable)
         EnvMutexUnlock(&slot->attrLock);
         PutProcessAttr(attr);
         SMAP_LOGGER_DEBUG("pid %d actual state %d.", pidArr[i], st);
-        if (enable == DISABLE_PROCESS_MIGRATE && (st != PROC_IDLE && st != PROC_MOVE)) {
-            return 0;
-        }
-        if (enable == ENABLE_PROCESS_MIGRATE && st == PROC_BACK) {
+        if (!IsStateChangeReady(st, enable)) {
             return 0;
         }
     }
@@ -1240,8 +1246,40 @@ int IsPidArrInState(pid_t *pidArr, int len, enum ProcessState state)
     return 1;
 }
 
-void SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable)
+/* 恢复本次 SetPidArrState 已切换的 pid：仅在状态仍为本次写入值时回写原状态 */
+static void RollbackPidArrState(struct PidSlot **slots, const enum ProcessState *prev, int len, enum ProcessState state)
 {
+    for (int i = 0; i < len; i++) {
+        if (!slots[i]) {
+            continue;
+        }
+        EnvMutexLock(&slots[i]->attrLock);
+        if (slots[i]->attr->state == state) {
+            slots[i]->attr->state = prev[i];
+        }
+        EnvMutexUnlock(&slots[i]->attrLock);
+    }
+}
+
+/*
+ * 按 enable 语义切换 pidArr 的状态，跳过未纳管的 pid。worker 在 attrLock 下做 IDLE->MIGRATE
+ * 切换，IsPidArrayStateChangeReady 与本函数之间 worker 可能已开始迁移，故在同一 attrLock
+ * 临界区内复核就绪条件后再写入：任一 pid 未就绪时，把本次已切换的 pid 恢复原状态并返回 0，
+ * 由调用方重试；全部完成返回 1；内存不足返回 -ENOMEM。
+ */
+int SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable)
+{
+    if (!pidArr || len <= 0) {
+        return 1;
+    }
+    struct PidSlot **slots = calloc((size_t)len, sizeof(*slots));
+    enum ProcessState *prev = calloc((size_t)len, sizeof(*prev));
+    if (!slots || !prev) {
+        free(slots);
+        free(prev);
+        return -ENOMEM;
+    }
+    int ready = 1;
     for (int i = 0; i < len; i++) {
         struct PidSlot *slot = PidSlotGetRef(pidArr[i]);
         if (!slot) {
@@ -1249,17 +1287,36 @@ void SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable)
         }
         ProcessAttr *attr = slot->attr;
         EnvMutexLock(&slot->attrLock);
-        /* enable == 1时，迁移状态的pid也视为合理状态，不需要设置为空闲态 */
-        if (enable == ENABLE_PROCESS_MIGRATE && attr->state == PROC_MIGRATE) {
-            SMAP_LOGGER_DEBUG("pid %d is in PROC_MIGRATE state.", attr->pid);
+        enum ProcessState st = attr->state;
+        if (!IsStateChangeReady(st, enable)) {
             EnvMutexUnlock(&slot->attrLock);
-            PutProcessAttr(attr);
+            PidSlotReleaseRefs(&slot, 1);
+            SMAP_LOGGER_INFO("pid %d state changed to %d before switching, retry.", pidArr[i], st);
+            ready = 0;
+            break;
+        }
+        /* enable == 1时，迁移状态的pid也视为合理状态，不需要设置为空闲态 */
+        if ((enable == ENABLE_PROCESS_MIGRATE && st == PROC_MIGRATE) || st == state) {
+            EnvMutexUnlock(&slot->attrLock);
+            PidSlotReleaseRefs(&slot, 1);
             continue;
         }
+        prev[i] = st;
         attr->state = state;
         EnvMutexUnlock(&slot->attrLock);
-        PutProcessAttr(attr);
+        slots[i] = slot; /* 保留引用直至返回，用于回滚 */
     }
+    if (!ready) {
+        RollbackPidArrState(slots, prev, len, state);
+    }
+    for (int i = 0; i < len; i++) {
+        if (slots[i]) {
+            PidSlotReleaseRefs(&slots[i], 1);
+        }
+    }
+    free(slots);
+    free(prev);
+    return ready;
 }
 
 /*
@@ -1612,12 +1669,15 @@ int EnableProcessMigrate(pid_t *pidArr, int len, int enable)
     while (true) {
         int ret = IsPidArrayStateChangeReady(pidArr, len, enable);
         if (ret == 1) {
+            /* 锁内复核：期间 worker 已切到迁移（或迁回已开始）时不写入，按未就绪重试 */
+            ret = SetPidArrState(pidArr, len, newState, enable);
+        }
+        if (ret == 1) {
             if (enable == ENABLE_PROCESS_MIGRATE) {
                 SMAP_LOGGER_INFO("set pids state to migrate state: %d or %d succeed.", PROC_IDLE, PROC_MIGRATE);
             } else {
                 SMAP_LOGGER_INFO("set pids state from %d to %d succeed.", PROC_IDLE, PROC_MOVE);
             }
-            SetPidArrState(pidArr, len, newState, enable);
             ret = SyncAllProcessConfig();
             if (ret) {
                 SMAP_LOGGER_WARNING("Synchronize pid state maybe failed: %d.", ret);

@@ -3461,7 +3461,7 @@ TEST_F(ManageTest, TestIsPidArrInState)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" void SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable);
+extern "C" int SetPidArrState(pid_t *pidArr, int len, enum ProcessState state, int enable);
 TEST_F(ManageTest, TestSetPidArrState)
 {
     ProcessAttr pid1 = {.pid = 1, .state = PROC_IDLE};
@@ -3471,9 +3471,32 @@ TEST_F(ManageTest, TestSetPidArrState)
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
     PidSlotAdd(&g_processManager, &pid1);
     PidSlotAdd(&g_processManager, &pid2);
-    SetPidArrState(pidArr, 2, PROC_MOVE, 0);
+    EXPECT_EQ(1, SetPidArrState(pidArr, 2, PROC_MOVE, 0));
     EXPECT_EQ(PROC_MOVE, pid1.state);
     EXPECT_EQ(PROC_MOVE, pid2.state);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+}
+
+/* 就绪检查之后 worker 已把某 pid 切到迁移：disable 不得写入，已切换的 pid 恢复原状态并要求重试 */
+TEST_F(ManageTest, TestSetPidArrStateRechecksMigratingPid)
+{
+    ProcessAttr pid1 = {.pid = 1, .state = PROC_IDLE};
+    ProcessAttr pid2 = {.pid = 2, .state = PROC_MIGRATE};
+    pid_t pidArr[] = {1, 2};
+
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    PidSlotAdd(&g_processManager, &pid1);
+    PidSlotAdd(&g_processManager, &pid2);
+    EXPECT_EQ(0, SetPidArrState(pidArr, 2, PROC_MOVE, DISABLE_PROCESS_MIGRATE));
+    EXPECT_EQ(PROC_IDLE, pid1.state);
+    EXPECT_EQ(PROC_MIGRATE, pid2.state);
+
+    /* enable 不得打断已开始的迁回 */
+    pid2.state = PROC_BACK;
+    pid1.state = PROC_MOVE;
+    EXPECT_EQ(0, SetPidArrState(pidArr, 2, PROC_IDLE, ENABLE_PROCESS_MIGRATE));
+    EXPECT_EQ(PROC_MOVE, pid1.state);
+    EXPECT_EQ(PROC_BACK, pid2.state);
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
 }
 
@@ -3889,7 +3912,7 @@ TEST_F(ManageTest, TestEnableProcessMigrateDisableRetrySuccess)
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(IsPidArrayStateChangeReady).stubs().will(returnValue(0)).then(returnValue(1));
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
-    MOCKER(SetPidArrState).expects(once());
+    MOCKER(SetPidArrState).expects(once()).will(returnValue(1));
     int ret = EnableProcessMigrate(pidArr, 1, DISABLE_PROCESS_MIGRATE);
     EXPECT_EQ(0, ret);
 }
@@ -3900,7 +3923,7 @@ TEST_F(ManageTest, TestEnableProcessMigrateDisableNormal)
 
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(IsPidArrayStateChangeReady).stubs().will(returnValue(1));
-    MOCKER(SetPidArrState).expects(once());
+    MOCKER(SetPidArrState).expects(once()).will(returnValue(1));
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     int ret = EnableProcessMigrate(pidArr, 1, DISABLE_PROCESS_MIGRATE);
     EXPECT_EQ(0, ret);
@@ -3912,7 +3935,7 @@ TEST_F(ManageTest, TestEnableProcessMigrateEnableNormal)
 
     EnvMutexInit(&g_processManager.threadLock);
     MOCKER(IsPidArrayStateChangeReady).stubs().will(returnValue(1));
-    MOCKER(SetPidArrState).expects(once());
+    MOCKER(SetPidArrState).expects(once()).will(returnValue(1));
     MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
     int ret = EnableProcessMigrate(pidArr, 1, ENABLE_PROCESS_MIGRATE);
     EXPECT_EQ(0, ret);
