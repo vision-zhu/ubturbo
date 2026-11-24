@@ -386,6 +386,7 @@ int ProcessManagerInit(uint32_t pageType)
     g_processManager.ubBwMonitor.ubBwThreshold = GetUbBwThresholdConfig();
     g_processManager.ubBwMonitor.currentFluxRet = -ENODATA;
     RemoteNumaInfoInit();
+    ResetUbBwRestrict();
     PidSlotInit(&g_processManager);
     EnvMutexInit(&g_processManager.threadLock);
     InitSceneInfo(&g_processManager.sceneInfo, (PageType)pageType);
@@ -2554,6 +2555,7 @@ int DestroyProcessManager(void)
     free(g_processManager.remoteNumaInfo.privateUsedInfo);
     free(g_processManager.remoteNumaInfo.privateInFlight);
     (void)memset_s(&g_processManager, sizeof(struct ProcessManager), 0, sizeof(struct ProcessManager));
+    ResetUbBwRestrict();
     return 0;
 }
 

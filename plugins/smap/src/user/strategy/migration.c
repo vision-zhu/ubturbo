@@ -1765,6 +1765,20 @@ static void PublishUbBwRestrict(struct ProcessManager *manager)
     EnvMutexUnlock(&g_ubBwRestrictLock);
 }
 
+/*
+ * 把快照恢复为 NORMAL。快照是进程级静态数据，不随 g_processManager 复位：start/stop 时、
+ * 以及 daemon 因无纳管 pid 跳过刷新时都须清除，避免新纳管 pid 的 worker 在 daemon 首次
+ * 刷新之前沿用上一轮遗留的 SWAP_STOP。
+ */
+void ResetUbBwRestrict(void)
+{
+    EnvMutexLock(&g_ubBwRestrictLock);
+    for (int nid = 0; nid < SMAP_NODE_CAP_LIMIT; nid++) {
+        g_ubBwRestrictSnap[nid] = UB_BW_NORMAL;
+    }
+    EnvMutexUnlock(&g_ubBwRestrictLock);
+}
+
 /* PID worker：从快照拷贝本周期限制；上轮的 SWAP_STOP 在监控关闭或查询失败后随快照一起清除。 */
 static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
 {
@@ -2325,6 +2339,7 @@ void PidMigrationWork(struct ProcessManager *manager, struct PidSlot *slot, pid_
 int ManagerDaemonWork(struct ProcessManager *manager)
 {
     if (PidSlotEmpty(manager)) {
+        ResetUbBwRestrict();
         return 0;
     }
     /* 远端 NUMA 可能在运行期动态上线/下线，每个周期同步一次节点集合，

@@ -2118,6 +2118,33 @@ TEST_F(MigrationTest, TestApplyUbBwStopBwExceedThreshold)
     EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[1]);
 }
 
+/* 无纳管 pid 时 daemon 跳过刷新：快照须复位，新纳管 pid 不得沿用上一轮遗留的 SWAP_STOP */
+TEST_F(MigrationTest, TestUbBwRestrictResetWhenNoPidManaged)
+{
+    struct ProcessManager *manager = (struct ProcessManager *)calloc(1, sizeof(struct ProcessManager));
+    ASSERT_NE(nullptr, manager);
+    manager->ubBwMonitor.ubBwThreshold = 500;
+    manager->ubBwMonitor.currentFluxRet = 0;
+    manager->ubBwMonitor.currentFluxMb.len = 1;
+    manager->ubBwMonitor.currentFluxMb.flux[0].numaId = 2;
+    manager->ubBwMonitor.currentFluxMb.flux[0].readMb = 300;
+    manager->ubBwMonitor.currentFluxMb.flux[0].writeMb = 300;
+    ProcessAttr current = {};
+    PublishUbBwRestrict(manager);
+    ApplyUbBwStop(&current, manager);
+    EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[2]);
+
+    EXPECT_EQ(0, ManagerDaemonWork(manager));
+    ApplyUbBwStop(&current, manager);
+    EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[2]);
+
+    PublishUbBwRestrict(manager);
+    ResetUbBwRestrict();
+    ApplyUbBwStop(&current, manager);
+    EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[2]);
+    free(manager);
+}
+
 TEST_F(MigrationTest, TestApplyUbBwStopBwBelowThreshold)
 {
     ProcessAttr current = {};
