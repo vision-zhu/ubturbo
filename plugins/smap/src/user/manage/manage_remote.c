@@ -927,18 +927,28 @@ int SetProcessConfig(ProcessAttr *attr, ProcessParam *param, bool skipRemoteResi
                                                        skipRemoteResidencyCheck);
 }
 
+/*
+ * 串行化远端容量配置的"持久化 + 内存更新"。配置文件 I/O（DoesConfigExist、
+ * RemoveAndOpenConfig、写盘等）只在本锁内进行，不进入 remoteNumaInfo.lock：
+ * 后者被所有 pid 流水的规划/结算与迁回就绪检查共用，慢盘时会把它们全部阻塞。
+ * 锁顺序：g_remoteNumaConfigLock 先于 remoteNumaInfo.lock。
+ */
+static pthread_mutex_t g_remoteNumaConfigLock = PTHREAD_MUTEX_INITIALIZER;
+
 int SetRemoteNumaInfo(int srcNid, int destNid, uint64_t size)
 {
     int ret;
     struct RemoteNumaInfo *numaInfo = &GetProcessManager()->remoteNumaInfo;
-    EnvMutexLock(&numaInfo->lock);
+    (void)pthread_mutex_lock(&g_remoteNumaConfigLock);
+    /* 先持久化，失败则不改内存状态 */
     ret = SyncOneNumaConfig(srcNid, destNid, size);
     if (ret) {
         SMAP_LOGGER_ERROR("SyncOneNumaConfig %d-%d to %llu failed: %d.", srcNid, destNid, size, ret);
-        EnvMutexUnlock(&numaInfo->lock);
+        (void)pthread_mutex_unlock(&g_remoteNumaConfigLock);
         return -EBADF;
     }
     SMAP_LOGGER_INFO("SetRemoteNumaInfo %d-%d to %llu.", srcNid, destNid, size);
+    EnvMutexLock(&numaInfo->lock);
     if (srcNid == NUMA_NO_NODE) {
         numaInfo->sharedSize[destNid] = size;
     } else {
@@ -968,6 +978,7 @@ int SetRemoteNumaInfo(int srcNid, int destNid, uint64_t size)
     ClearRemoteMemUsed();
     CalRemoteMemUsed();
     EnvMutexUnlock(&numaInfo->lock);
+    (void)pthread_mutex_unlock(&g_remoteNumaConfigLock);
     return 0;
 }
 
