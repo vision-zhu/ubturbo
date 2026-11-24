@@ -2563,6 +2563,30 @@ out_free:
     return ret;
 }
 
+static void RollbackUnmanagedTracking(const pid_t *pidArr, const bool *wasManaged, int from, int len)
+{
+    struct AccessRemovePidPayload payload[MAX_NR_MIGOUT] = { 0 };
+    int count = 0;
+    for (int i = from; i < len && count < MAX_NR_MIGOUT; i++) {
+        if (wasManaged[i]) {
+            continue;
+        }
+        ProcessAttr *attr = GetProcessAttr(pidArr[i]);
+        bool managed = (attr != NULL);
+        PutProcessAttr(attr);
+        if (!managed) {
+            payload[count++].pid = pidArr[i];
+        }
+    }
+    if (count == 0) {
+        return;
+    }
+    int ret = AccessIoctlRemovePid(count, payload);
+    if (ret) {
+        SMAP_LOGGER_WARNING("Rollback process tracking of %d pids failed: %d.", count, ret);
+    }
+}
+
 static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
 {
     int ret = 0;
@@ -2583,6 +2607,14 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
         return ret;
     }
 
+    /* 记录请求前的纳管状态（g_manageLock 下稳定），失败时只回滚本次新加入内核跟踪的 pid */
+    bool wasManaged[MAX_NR_MIGOUT] = { false };
+    for (int i = 0; i < len; i++) {
+        ProcessAttr *prev = GetProcessAttr(pidArr[i]);
+        wasManaged[i] = (prev != NULL);
+        PutProcessAttr(prev);
+    }
+
     ret = AddProcessTracking(pidArr, scanTime, duration, len, scanType);
     if (ret) {
         SMAP_LOGGER_ERROR("Smap module add process tracking failed.");
@@ -2590,6 +2622,7 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
     }
     SMAP_LOGGER_INFO("Add process tracking done.");
     bool hasManagedProcess = false;
+    int failedIdx = len;
     // Add an unmanaged pid, or update only scan mode for a managed pid.
     for (int i = 0; i < len; i++) {
         ProcessAttr *attr = GetProcessAttr(pidArr[i]);
@@ -2598,7 +2631,8 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
             if (ret) {
                 SMAP_LOGGER_ERROR("Update managed process %d scan type failed: %d.", pidArr[i], ret);
                 PutProcessAttr(attr);
-                return ret;
+                failedIdx = i;
+                break;
             }
             hasManagedProcess = true;
             SMAP_LOGGER_INFO("Update managed process %d scan type to %d done.", pidArr[i], scanType);
@@ -2611,7 +2645,9 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
         ProcessParam *param = calloc(1, sizeof(*param));
         if (param == NULL) {
             SMAP_LOGGER_ERROR("Add process tracking %d failed: -ENOMEM.", pidArr[i]);
-            return -ENOMEM;
+            ret = -ENOMEM;
+            failedIdx = i;
+            break;
         }
         param->count = 1;
         param->pid = pidArr[i];
@@ -2625,15 +2661,20 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
         free(param);
         if (ret) {
             SMAP_LOGGER_ERROR("Add process tracking %d failed: %d.", pidArr[i], ret);
-            return ret;
+            failedIdx = i;
+            break;
         }
         SMAP_LOGGER_INFO("Add process %d tracking done.", pidArr[i]);
     }
+    if (ret) {
+        /* 内核已一次性加入全部 pid：撤销失败位置及之后、本次新加入且未纳管的 pid 的跟踪，
+         * 避免内核持续扫描用户态未管理的进程；此前已成功纳管的 pid 保持生效 */
+        RollbackUnmanagedTracking(pidArr, wasManaged, failedIdx, len);
+    }
     if (hasManagedProcess) {
-        ret = SyncAllProcessConfig();
-        if (ret) {
-            SMAP_LOGGER_WARNING("Synchronize managed process tracking config maybe failed: %d.", ret);
-            ret = 0;
+        int syncRet = SyncAllProcessConfig();
+        if (syncRet) {
+            SMAP_LOGGER_WARNING("Synchronize managed process tracking config maybe failed: %d.", syncRet);
         }
     }
     SMAP_LOGGER_INFO("Add process tracking manage result: %d.", ret);

@@ -3958,6 +3958,8 @@ TEST_F(InterfaceTest, TestSmapAddProcessTrackingCheckAddManage)
     MOCKER(GetPidTypeFromComm).stubs().will(returnValue((int)VM_TYPE));
     MOCKER(IsPidTypeValid).stubs().will(returnValue(true));
     MOCKER(IsPidTypeCompatibleWithMode).stubs().will(returnValue(true));
+    // 纳管失败：本次新加入内核跟踪、用户态未纳管的 pid 必须撤销跟踪
+    MOCKER(AccessIoctlRemovePid).expects(once()).with(eq(1), any()).will(returnValue(0));
     int ret = ubturbo_smap_process_tracking_add(pidArr, scanTime, duration, 1, 0);
     EXPECT_EQ(-EINVAL, ret);
     EXPECT_TRUE(EnvMutexIsRelease(&g_processManager.threadLock));
