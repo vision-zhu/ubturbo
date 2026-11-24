@@ -52,6 +52,12 @@ static EnvAtomic g_status;
 static EnvAtomic g_apiInFlight;
 /* 串行化 start/stop，避免两者的初始化与销毁交错 */
 static EnvMutex g_lifecycleLock = { PTHREAD_MUTEX_INITIALIZER };
+/*
+ * 串行化改变纳管集合的接口（migrate_out[_sync]/grouped/tracking_add/tracking_remove/remove），
+ * 使「是否已纳管、数量上限」的校验与随后的纳管/移除成为原子操作，避免并发请求把同一
+ * pid 纳管进两个槽位或突破上限。只覆盖校验+发布，不得在持锁期间做长时间等待。
+ */
+static EnvMutex g_manageLock = { PTHREAD_MUTEX_INITIALIZER };
 
 #define STOP_DRAIN_POLL_MS 10
 #define STOP_DRAIN_LOG_INTERVAL_MS 1000
@@ -1128,7 +1134,7 @@ static void PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int 
     }
 }
 
-static int MigrateOutWithCapacityPolicy(struct MigrateOutMsg *msg, int pageType, bool ignoreRemoteCapacity)
+static int MigrateOutWithCapacityPolicyLocked(struct MigrateOutMsg *msg, int pageType, bool ignoreRemoteCapacity)
 {
     struct ProcessManager *manager = GetProcessManager();
 
@@ -1161,6 +1167,14 @@ static int MigrateOutWithCapacityPolicy(struct MigrateOutMsg *msg, int pageType,
     PublishMigrateOutCandidates(candidates, msg->count);
 
     return prepareError;
+}
+
+static int MigrateOutWithCapacityPolicy(struct MigrateOutMsg *msg, int pageType, bool ignoreRemoteCapacity)
+{
+    EnvMutexLock(&g_manageLock);
+    int ret = MigrateOutWithCapacityPolicyLocked(msg, pageType, ignoreRemoteCapacity);
+    EnvMutexUnlock(&g_manageLock);
+    return ret;
 }
 
 int ubturbo_smap_migrate_out(struct MigrateOutMsg *msg, int pageType)
@@ -1244,9 +1258,17 @@ out_free_bitmap:
     return ret;
 }
 
+static int MigrateOutGroupedImplManaged(struct GroupedMigrateOutMsg *msg, int pageType)
+{
+    EnvMutexLock(&g_manageLock);
+    int ret = MigrateOutGroupedImpl(msg, pageType);
+    EnvMutexUnlock(&g_manageLock);
+    return ret;
+}
+
 int ubturbo_smap_migrate_out_grouped(struct GroupedMigrateOutMsg *msg, int pageType)
 {
-    SMAP_API_CALL(MigrateOutGroupedImpl(msg, pageType));
+    SMAP_API_CALL(MigrateOutGroupedImplManaged(msg, pageType));
 }
 
 static int CheckMigrateBackMsg(struct MigrateBackMsg *msg)
@@ -1538,9 +1560,17 @@ static int RemoveImpl(struct RemoveMsg *msg, int pageType)
     return ret;
 }
 
+static int RemoveImplManaged(struct RemoveMsg *msg, int pageType)
+{
+    EnvMutexLock(&g_manageLock);
+    int ret = RemoveImpl(msg, pageType);
+    EnvMutexUnlock(&g_manageLock);
+    return ret;
+}
+
 int ubturbo_smap_remove(struct RemoveMsg *msg, int pageType)
 {
-    SMAP_API_CALL(RemoveImpl(msg, pageType));
+    SMAP_API_CALL(RemoveImplManaged(msg, pageType));
 }
 
 static bool HasRemotePages(ProcessAttr *attr)
@@ -2589,9 +2619,17 @@ static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *d
     return ret;
 }
 
+static int ProcessTrackingAddImplManaged(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
+{
+    EnvMutexLock(&g_manageLock);
+    int ret = ProcessTrackingAddImpl(pidArr, scanTime, duration, len, scanType);
+    EnvMutexUnlock(&g_manageLock);
+    return ret;
+}
+
 int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
 {
-    SMAP_API_CALL(ProcessTrackingAddImpl(pidArr, scanTime, duration, len, scanType));
+    SMAP_API_CALL(ProcessTrackingAddImplManaged(pidArr, scanTime, duration, len, scanType));
 }
 
 static int CheckRemoveProcessTrackingMsg(pid_t *pidArr, int len)
@@ -2660,9 +2698,17 @@ static int ProcessTrackingRemoveImpl(pid_t *pidArr, int len, int flag)
     return ret;
 }
 
+static int ProcessTrackingRemoveImplManaged(pid_t *pidArr, int len, int flag)
+{
+    EnvMutexLock(&g_manageLock);
+    int ret = ProcessTrackingRemoveImpl(pidArr, len, flag);
+    EnvMutexUnlock(&g_manageLock);
+    return ret;
+}
+
 int ubturbo_smap_process_tracking_remove(pid_t *pidArr, int len, int flag)
 {
-    SMAP_API_CALL(ProcessTrackingRemoveImpl(pidArr, len, flag));
+    SMAP_API_CALL(ProcessTrackingRemoveImplManaged(pidArr, len, flag));
 }
 
 static int ProcessMigrateEnableImpl(pid_t *pidArr, int len, int enable, int flags)

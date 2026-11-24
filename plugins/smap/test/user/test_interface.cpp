@@ -4396,6 +4396,8 @@ TEST_F(InterfaceTest, TestSmapQueryRemoteNumaFreq)
     NumaBitmapSet(&attr2->numaAttr.numaNodes, 4);
     attr1->scanType = NORMAL_SCAN;
     attr2->scanType = NORMAL_SCAN;
+    attr1->pid = 4401; /* PidSlotAdd 拒绝重复 pid */
+    attr2->pid = 4402;
     PidSlotAdd(&manager, attr1);
     PidSlotAdd(&manager, attr2);
 

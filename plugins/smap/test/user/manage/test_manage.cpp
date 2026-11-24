@@ -2041,6 +2041,45 @@ TEST_F(ManageTest, TestPidSlotAddKeepsTransientReaderRef)
     PidSlotDestroy(&g_processManager);
 }
 
+TEST_F(ManageTest, TestPidSlotAddRejectsDuplicatePid)
+{
+    PidSlotInit(&g_processManager);
+    g_processManager.nr[VM_TYPE] = 0;
+    ProcessAttr *first = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ProcessAttr *second = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, first);
+    ASSERT_NE(nullptr, second);
+    first->pid = second->pid = 208;
+    first->type = second->type = VM_TYPE;
+
+    ASSERT_GE(PidSlotAdd(&g_processManager, first), 0);
+    /* 并发纳管同一 pid：第二个必须被拒绝，不得出现两个 INUSE 槽位或计数 +2 */
+    EXPECT_EQ(-EEXIST, PidSlotAdd(&g_processManager, second));
+    EXPECT_EQ(1, LoadMangerNrVmNum());
+    free(second);
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 208));
+    EXPECT_EQ(0, LoadMangerNrVmNum());
+    PidSlotDestroy(&g_processManager);
+}
+
+TEST_F(ManageTest, TestPidSlotAddNoFreeSlot)
+{
+    PidSlotInit(&g_processManager);
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_REMOVING);
+    }
+    ProcessAttr attr = {};
+    attr.pid = 209;
+    attr.type = VM_TYPE;
+    uint16_t nrBefore = g_processManager.nr[VM_TYPE];
+    EXPECT_EQ(-ENOSPC, PidSlotAdd(&g_processManager, &attr));
+    EXPECT_EQ(nrBefore, g_processManager.nr[VM_TYPE]);
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_FREE);
+    }
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

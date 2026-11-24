@@ -783,8 +783,25 @@ static void PidSlotTryReclaim(struct ProcessManager *manager, int i)
     EnvAtomicSet(&s->state, PID_SLOT_FREE);
 }
 
-int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
+/* 串行化 PidSlotAdd 的「查重 + 占槽」，保证同一 pid 至多一个 INUSE 槽位 */
+static EnvMutex g_pidSlotAddLock = { PTHREAD_MUTEX_INITIALIZER };
+
+static bool PidSlotInUseLocked(struct ProcessManager *manager, pid_t pid)
 {
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        struct PidSlot *s = &manager->slots[i];
+        if (EnvAtomicRead(&s->state) == PID_SLOT_INUSE && s->pid == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int PidSlotAddLocked(struct ProcessManager *manager, ProcessAttr *attr)
+{
+    if (PidSlotInUseLocked(manager, attr->pid)) {
+        return -EEXIST;
+    }
     for (int i = 0; i < MAX_PID_SLOTS; i++) {
         struct PidSlot *s = &manager->slots[i];
         if (EnvAtomicCmpAndSwap(PID_SLOT_FREE, PID_SLOT_RESERVED, &s->state) != PID_SLOT_FREE) {
@@ -804,7 +821,22 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
         PidSlotNrInc(manager, attr->type);
         return i;
     }
-    return -1;
+    return -ENOSPC;
+}
+
+/*
+ * 发布 attr 到空闲槽位并计数。返回槽位下标；-EEXIST 表示该 pid 已有 INUSE 槽位，
+ * -ENOSPC 表示无空闲槽位。失败时 attr 所有权仍归调用方（须释放），计数不变。
+ */
+int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
+{
+    EnvMutexLock(&g_pidSlotAddLock);
+    int ret = PidSlotAddLocked(manager, attr);
+    EnvMutexUnlock(&g_pidSlotAddLock);
+    if (ret < 0) {
+        SMAP_LOGGER_ERROR("Add pid %d to slot failed: %d.", attr->pid, ret);
+    }
+    return ret;
 }
 
 /*
