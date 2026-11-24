@@ -1942,6 +1942,28 @@ TEST_F(ManageTest, TestFreqWaiterTimeout)
     PidSlotDestroy(&g_processManager);
 }
 
+TEST_F(ManageTest, TestFreqWaiterCancelOnRemovingSlot)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr attr = {.pid = 201};
+    attr.scanType = NORMAL_SCAN;
+    int idx = PidSlotAdd(&g_processManager, &attr);
+    ASSERT_GE(idx, 0);
+    struct PidSlot *slot = &g_processManager.slots[idx];
+    struct FreqWaiter w = {.bufLen = 4, .retCode = -ETIMEDOUT};
+    sem_init(&w.sem, 0, 0);
+    ASSERT_EQ(0, RegisterFreqWaiter(&attr, &w));
+    /* 模拟并发 remove：槽位已 REMOVING，等待者仍持引用。Cancel 必须仍能摘除，
+     * 否则先前已取得引用的 InvokeFreqCallbacks 会写已销毁的等待者栈帧 */
+    EnvAtomicSet(&slot->state, PID_SLOT_REMOVING);
+    EXPECT_FALSE(CancelFreqWaiter(&attr, &w));
+    EXPECT_EQ(nullptr, slot->freqWaiters);
+    sem_destroy(&w.sem);
+    slot->attr = nullptr;
+    EnvAtomicSet(&slot->state, PID_SLOT_FREE);
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

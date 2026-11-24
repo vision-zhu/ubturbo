@@ -1122,15 +1122,32 @@ int RegisterFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w)
  * 摘除与 InvokeFreqCallbacks 的 take-all 在同一把 attrLock 临界区串行，
  * 不会出现"已 take 但未 post"的中间态。
  */
+/*
+ * 按 attr 定位宿主槽位，不要求 INUSE：调用方已持有该槽位引用（GetProcessAttr），
+ * 槽位在引用归还前不会被回收，attr 指针稳定。槽位进入 REMOVING 后
+ * PidSlotGetRefByAttr 取不到引用，但等待者仍挂在链表上，必须仍能摘除。
+ */
+static struct PidSlot *PidSlotFindHeldByAttr(const ProcessAttr *attr)
+{
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        struct PidSlot *s = &g_processManager.slots[i];
+        if (s->attr == attr && EnvAtomicRead(&s->state) != PID_SLOT_FREE) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
 bool CancelFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w)
 {
     if (!attr || !w) {
         return false; /* 无 post 来源：retCode 保持 -ETIMEDOUT */
     }
-    struct PidSlot *slot = ProcessAttrLockTake(attr);
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr);
     if (!slot) {
         return false; /* 槽位未注册：注册时也未入任何链表，无 post 来源 */
     }
+    EnvMutexLock(&slot->attrLock);
     bool found = false;
     struct FreqWaiter **pp = &slot->freqWaiters;
     while (*pp) {
@@ -1142,7 +1159,7 @@ bool CancelFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w)
         }
         pp = &(*pp)->next;
     }
-    ProcessAttrLockPut(slot);
+    EnvMutexUnlock(&slot->attrLock);
     /* 仍在链表 → 已摘除，无人 post（false）；不在链表 → take-all 全摘语义下必已被处理
      * （true，sem 已 post，调用方 sem_trywait 消费后读结果） */
     return !found;

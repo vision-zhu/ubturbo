@@ -65,7 +65,7 @@ struct FreqWaiter {
  * 返回 0 = 已注册（有回调来源）；-EINVAL = attr/w 非法或槽位未注册（无回调
  * 来源，调用方应立即失败而非等待） */
 int RegisterFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w);
-/* 超时取消等待者。返回 true = waiter 已被 scan worker take-all 处理（sem 已 post，
+/* 超时取消等待者，调用方须仍持有 attr 所属槽位的引用（槽位可已处于 REMOVING）。返回 true = waiter 已被 scan worker take-all 处理（sem 已 post，
  * 调用方 sem_trywait 消费后读结果）；false = 未被处理（已摘除该 waiter / attr=w 非法 /
  * 槽位未注册，均无 post 来源，retCode 保持 -ETIMEDOUT） */
 bool CancelFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w);
