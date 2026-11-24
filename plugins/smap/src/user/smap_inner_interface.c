@@ -36,7 +36,6 @@ int SmapEnableAdaptMem(int flag)
 
 static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
 {
-    int ret = 0;
     if (!vrMsg) {
         SMAP_LOGGER_ERROR("Query failed as msg is null.");
         return -EINVAL;
@@ -50,18 +49,17 @@ static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
         ProcessAttr *current = all[k]->attr;
         /* 位图与比例矩阵由扫描/迁移线程持 attrLock 更新，读取同样持锁保证一致 */
         EnvMutexLock(&all[k]->attrLock);
-        int l1Node = GetAttrL1(current);
-        int l2Node = GetAttrL2(current);
-
-        if (l1Node < 0) {
-            EnvMutexUnlock(&all[k]->attrLock);
-            SMAP_LOGGER_ERROR("SmapQueryVmMemRatio pid %d L1 is invalid.", current->pid);
-            ret = -EINVAL;
-            PidSlotReleaseRefs(all, n);
-            break;
-        }
+        /* 先过滤非 VM：普通进程/跟踪进程首轮回读前 L1 可能为空，不得影响 VM 查询 */
         if (current->type != VM_TYPE) {
             EnvMutexUnlock(&all[k]->attrLock);
+            continue;
+        }
+        int l1Node = GetAttrL1(current);
+        int l2Node = GetAttrL2(current);
+        if (l1Node < 0) {
+            /* 单个 VM 的 L1 尚未确定（首轮回读前）：跳过该 VM，不让整个查询失败 */
+            EnvMutexUnlock(&all[k]->attrLock);
+            SMAP_LOGGER_WARNING("SmapQueryVmMemRatio pid %d L1 is invalid, skip.", current->pid);
             continue;
         }
         /* 兜底：VM 仅 2M 模式准入（上限 MAX_2M_PROCESSES_CNT），但恢复路径不经过准入校验，
@@ -79,12 +77,8 @@ static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
         vrMsg->nrVm++;
         EnvMutexUnlock(&all[k]->attrLock);
     }
-
-    if (ret == 0) {
-        PidSlotReleaseRefs(all, n);
-    }
-
-    return ret;
+    PidSlotReleaseRefs(all, n);
+    return 0;
 }
 
 int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg)
