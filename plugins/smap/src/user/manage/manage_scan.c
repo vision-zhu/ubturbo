@@ -384,7 +384,10 @@ int BuildPidData(ProcessAttr *attr)
          * 否则 sync-wait 会基于保护开启/目标发布之前的快照提前判定远端已清空 */
         ScanAttrLock(slot);
         if (attr->configEpoch == startEpoch) {
+            /* 账本由 pid 间仲裁在 remoteNumaInfo.lock 内读取：锁序 attrLock → remoteNumaInfo.lock */
+            EnvMutexLock(&GetProcessManager()->remoteNumaInfo.lock);
             CalibratePairAccount(attr);
+            EnvMutexUnlock(&GetProcessManager()->remoteNumaInfo.lock);
             if (attr->syncWaitRemoteEmpty) {
                 attr->syncWaitRemoteEmptySnapshotValid = true;
             }
