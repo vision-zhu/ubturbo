@@ -1187,6 +1187,34 @@ TEST_F(InterfaceTest, TestCheckGroupedPayloadAcceptsHigherLocalNid)
     g_processManager.nrLocalNuma = oldNrLocalNuma;
 }
 
+TEST_F(InterfaceTest, TestCheckGroupedPayloadRejectsOversizedSizes)
+{
+    struct GroupedMigrateOutPayload payload = {};
+    int oldNrLocalNuma = g_processManager.nrLocalNuma;
+
+    g_processManager.nrLocalNuma = 4;
+    payload.pid = 1234;
+    payload.groupCount = 1;
+    payload.groups[0].localCount = 1;
+    payload.groups[0].locals[0].nid = 0;
+    /* 接近 UINT64_MAX 的本地预留会让大页向上取整回绕为 0，必须拒绝 */
+    payload.groups[0].locals[0].size = UINT64_MAX;
+    payload.groups[0].targetCount = 1;
+    payload.groups[0].targets[0].nid = 4;
+    payload.groups[0].targets[0].size = 2048;
+    MOCKER(IsOnlineRemoteNidValid).stubs().will(returnValue(true));
+    MOCKER(IsNodeForbidden).stubs().will(returnValue(false));
+    EXPECT_EQ(-EINVAL, CheckGroupedPayload(&payload, 0));
+
+    payload.groups[0].locals[0].size = 2048;
+    payload.groups[0].targets[0].size = UINT64_MAX;
+    EXPECT_EQ(-EINVAL, CheckGroupedPayload(&payload, 0));
+
+    payload.groups[0].targets[0].size = 2048;
+    EXPECT_EQ(0, CheckGroupedPayload(&payload, 0));
+    g_processManager.nrLocalNuma = oldNrLocalNuma;
+}
+
 TEST_F(InterfaceTest, TestCheckGroupedPayloadInvalidLocalCases)
 {
     struct GroupedMigrateOutPayload payload = {};
