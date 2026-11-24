@@ -88,29 +88,29 @@ TEST_F(AccessIoctlTest, TestAccessIoctlWalkPagemap)
     EXPECT_EQ(-ENODEV, ret);
 }
 
-extern "C" void IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
+extern "C" int IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
 TEST_F(AccessIoctlTest, TestIoctlSetScanCpuRangeSuccess)
 {
     MOCKER((int (*)(int, unsigned long, void *))ioctl).stubs().will(returnValue(0));
-    IoctlSetScanCpuRange(1, 3);
+    EXPECT_EQ(0, IoctlSetScanCpuRange(1, 3));
 }
 
 TEST_F(AccessIoctlTest, TestIoctlSetScanCpuRangeFailed)
 {
     MOCKER((int (*)(int, unsigned long, void *))ioctl).stubs().will(returnValue(-1));
-    IoctlSetScanCpuRange(1, 3);
+    EXPECT_GT(0, IoctlSetScanCpuRange(1, 3));
 }
-extern "C" void IoctlSetRemoteScanMode(uint32_t mode);
+extern "C" int IoctlSetRemoteScanMode(uint32_t mode);
 TEST_F(AccessIoctlTest, TestIoctlSetRemoteScanModeSuccess)
 {
     MOCKER((int (*)(int, unsigned long, void *))ioctl).stubs().will(returnValue(0));
-    IoctlSetRemoteScanMode(1);
+    EXPECT_EQ(0, IoctlSetRemoteScanMode(1));
 }
 
 TEST_F(AccessIoctlTest, TestIoctlSetRemoteScanModeFailed)
 {
     MOCKER((int (*)(int, unsigned long, void *))ioctl).stubs().will(returnValue(-1));
-    IoctlSetRemoteScanMode(2);
+    EXPECT_GT(0, IoctlSetRemoteScanMode(2));
 }
 /* ---- GetNodeCapFromStatus：Mems_allowed 打印宽度解析获取 cap（方案 F） ---- */
 

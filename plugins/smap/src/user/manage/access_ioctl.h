@@ -107,9 +107,9 @@ int AccessIoctlRemoveAllPid(void);
 int AccessIoctlWalkPagemap(pid_t pid, struct ProcessMemBitmap *pmb);
 int AccessIoctlRestartPid(pid_t pid);
 int AccessIoctlCreateProcfs(struct UserInfo *ui);
-void IoctlUpdateUbDmaAvail(uint32_t value);
-void IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
-void IoctlSetRemoteScanMode(uint32_t mode);
-void IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap);
+int IoctlUpdateUbDmaAvail(uint32_t value);
+int IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
+int IoctlSetRemoteScanMode(uint32_t mode);
+int IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap);
 
 #endif /* __ACCESS_IOCTL_H__ */

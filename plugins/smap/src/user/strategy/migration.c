@@ -1693,23 +1693,27 @@ static void UpdateScene(struct ProcessManager *manager)
     PidSlotReleaseRefs(all, n);
 }
 
+/* 配置变更下推内核：ioctl 失败时保留 Changed 标志，下一个 daemon 周期重试。 */
 static void MigrationUpdateMigrateModeAndScanCpu(void)
 {
     if (GetMigrateModeChanged()) {
-        IoctlUpdateUbDmaAvail(GetMigrateModeConfig());
         SMAP_LOGGER_INFO("Start update migrate mode from config to %u.", GetMigrateModeConfig());
-        SetMigrateModeChanged(false);
+        if (!IoctlUpdateUbDmaAvail(GetMigrateModeConfig())) {
+            SetMigrateModeChanged(false);
+        }
     }
 
     if (GetScanCpuChanged()) {
-        IoctlSetScanCpuRange(GetScanCpuMinConfig(), GetScanCpuMaxConfig());
         SMAP_LOGGER_INFO("Start update scan cpu (%u-%u).", GetScanCpuMinConfig(), GetScanCpuMaxConfig());
-        SetScanCpuChanged(false);
+        if (!IoctlSetScanCpuRange(GetScanCpuMinConfig(), GetScanCpuMaxConfig())) {
+            SetScanCpuChanged(false);
+        }
     }
 
     if (GetRemoteScanModeChanged()) {
-        IoctlSetRemoteScanMode(GetRemoteScanModeConfig());
-        SetRemoteScanModeChanged(false);
+        if (!IoctlSetRemoteScanMode(GetRemoteScanModeConfig())) {
+            SetRemoteScanModeChanged(false);
+        }
     }
 
     /* user space only reads the config file and pushes values down: one
@@ -1719,11 +1723,12 @@ static void MigrationUpdateMigrateModeAndScanCpu(void)
      * resets when the kernel module is unloaded, so a stale on-kernel
      * switch can never be assumed off. */
     if (GetSwapEnableChanged() || GetL3ColdThresholdChanged()) {
-        IoctlSetSwapConfig(GetSwapEnableConfig(), GetL3ColdThresholdConfig(), GetHugetlbSwapSupported());
         SMAP_LOGGER_INFO("Start update swap config: enable=%d, l3ColdThreshold=%u, hugetlbSwap=%d.",
                          GetSwapEnableConfig(), GetL3ColdThresholdConfig(), GetHugetlbSwapSupported());
-        SetSwapEnableChanged(false);
-        SetL3ColdThresholdChanged(false);
+        if (!IoctlSetSwapConfig(GetSwapEnableConfig(), GetL3ColdThresholdConfig(), GetHugetlbSwapSupported())) {
+            SetSwapEnableChanged(false);
+            SetL3ColdThresholdChanged(false);
+        }
     }
 }
 /* 每个扫描完成事件触发一次 PID 迁移流水；daemon 负责周期维护。 */
