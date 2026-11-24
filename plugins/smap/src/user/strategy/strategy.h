@@ -17,10 +17,6 @@
 #define FREE_BYTES_INDEX 3
 #define DEFAULT_PAGE_SIZE_KB 4
 
-static inline void CalcMaxMigrate(uint divisor, uint64_t total, uint64_t *res)
-{
-    *res = total / divisor;
-}
 static inline uint32_t NrLocalPage(ProcessAttr *process)
 {
     uint32_t pages = 0;

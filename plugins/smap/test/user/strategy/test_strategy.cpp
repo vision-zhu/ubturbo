@@ -48,8 +48,6 @@ TEST_F(StrategyTest, TestRunStrategyOne)
     process.scanAttr.actcData[0] = &actcData;
 struct MigList *mlist = TestMlist();
     MOCKER(IsHugeMode).stubs().will(returnValue(true));
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
     int ret = RunStrategy(&process, mlist, mlistSize);
     EXPECT_EQ(-EINVAL, ret);
 }
@@ -62,8 +60,6 @@ TEST_F(StrategyTest, TestRunStrategyTwo)
     process.scanAttr.actcData[0] = &actcData;
 struct MigList *mlist = TestMlist();
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
     int ret = RunStrategy(&process, mlist, mlistSize);
     EXPECT_EQ(-EINVAL, ret);
 }
@@ -73,8 +69,6 @@ TEST_F(StrategyTest, TestRunStrategyThree)
     size_t mlistSize = 0;
     ProcessAttr process;
 struct MigList *mlist = TestMlist();
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
-    MOCKER(SeparateStrategy).stubs().will(returnValue(0));
     int ret = RunStrategy(&process, mlist, mlistSize);
     EXPECT_EQ(-EINVAL, ret);
 }
