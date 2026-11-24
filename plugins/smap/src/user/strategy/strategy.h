@@ -15,7 +15,7 @@
 #include "smap_user_log.h"
 
 #define FREE_BYTES_INDEX 3
-#define KB_TO_PAGE_SHIFT 2
+#define DEFAULT_PAGE_SIZE_KB 4
 
 static inline void CalcMaxMigrate(uint divisor, uint64_t total, uint64_t *res)
 {
