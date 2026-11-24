@@ -1047,7 +1047,7 @@ int GetNumaNodesForPid(pid_t pid, int *node)
         if (CPU_ISSET(i, &mask)) {
             cpuNode = GetNodeFromCpu(i);
             if (cpuNode == -EINVAL) {
-                SMAP_LOGGER_ERROR("pid % get node from cpu failed: %d.", pid, ret);
+                SMAP_LOGGER_ERROR("pid %d get node from cpu %d failed.", pid, i);
                 return -EINVAL;
             }
             *node = cpuNode;
