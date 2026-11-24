@@ -356,3 +356,45 @@ TEST_F(SmapLogCoreTest, TestLongLineIsTruncatedNotDropped)
     EXPECT_EQ((size_t)(SMAP_LOG_MAX_MSG_LEN * 2 - 2), last.size());
     EXPECT_NE(string::npos, last.find(prefix));
 }
+
+TEST_F(SmapLogCoreTest, TestLogFileCreatedWithRestrictedMode)
+{
+    SmapLogConfig config;
+    strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
+    config.maxFileSize = 1024 * 1024;
+    config.maxFileCount = 2;
+    config.minLogLevel = SMAP_LOG_CORE_INFO;
+    (void)remove(testLogFile.c_str());
+
+    /* 不依赖 umask：即使 umask 为 0 也只能得到 0640 */
+    mode_t oldMask = umask(0);
+    ASSERT_EQ(0, SmapLogCoreInit(&config));
+    umask(oldMask);
+    SmapLogCoreExit();
+    struct stat st;
+    ASSERT_EQ(0, stat(testLogFile.c_str(), &st));
+    EXPECT_EQ((mode_t)SMAP_LOG_FILE_MODE, st.st_mode & 0777);
+
+    /* 旧版本留下的宽权限日志被收紧 */
+    ASSERT_EQ(0, chmod(testLogFile.c_str(), 0666));
+    ASSERT_EQ(0, SmapLogCoreInit(&config));
+    SmapLogCoreExit();
+    ASSERT_EQ(0, stat(testLogFile.c_str(), &st));
+    EXPECT_EQ((mode_t)SMAP_LOG_FILE_MODE, st.st_mode & 0777);
+}
+
+TEST_F(SmapLogCoreTest, TestLogFileSymlinkRefused)
+{
+    string target = testLogFile + ".target";
+    (void)remove(testLogFile.c_str());
+    ASSERT_EQ(0, symlink(target.c_str(), testLogFile.c_str()));
+
+    SmapLogConfig config;
+    strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
+    config.maxFileSize = 1024 * 1024;
+    config.maxFileCount = 2;
+    config.minLogLevel = SMAP_LOG_CORE_INFO;
+    EXPECT_EQ(-EIO, SmapLogCoreInit(&config));
+    EXPECT_NE(0, access(target.c_str(), F_OK));
+    (void)unlink(testLogFile.c_str());
+}

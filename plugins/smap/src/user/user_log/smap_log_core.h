@@ -20,6 +20,8 @@
 #define SMAP_LOG_MAX_FILE_SIZE_DEFAULT (200 * 1024 * 1024)
 #define SMAP_LOG_MAX_FILE_COUNT_DEFAULT 50
 #define NS_PER_USEC 1000
+/* 日志含受管 pid、内存布局与迁移地址等运维信息：仅属主可写，同组可读，其他用户无权限 */
+#define SMAP_LOG_FILE_MODE 0640
 
 typedef enum SmapLogCoreLevel {
     SMAP_LOG_CORE_TRACE = 0,

@@ -15,6 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include "securec.h"
 #include "smap_log_core.h"
@@ -75,8 +76,20 @@ static FILE *OpenLogFile(const char *basePath)
         return NULL;
     }
 
-    fp = fopen(filePath, "a");
+    /* 显式权限创建（不依赖进程 umask），不跟随符号链接 */
+    int fd = open(filePath, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, SMAP_LOG_FILE_MODE);
+    if (fd < 0) {
+        return NULL;
+    }
+    /* 旧版本按 umask 创建的日志可能为 0644：收紧到 0640（失败不影响写日志） */
+    struct stat st;
+    if (fstat(fd, &st) == 0 && (st.st_mode & (mode_t)~SMAP_LOG_FILE_MODE & (S_IRWXG | S_IRWXO)) != 0) {
+        (void)fchmod(fd, SMAP_LOG_FILE_MODE);
+    }
+
+    fp = fdopen(fd, "a");
     if (fp == NULL) {
+        (void)close(fd);
         return NULL;
     }
 
