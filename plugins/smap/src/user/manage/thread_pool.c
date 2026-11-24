@@ -57,6 +57,7 @@ int ThreadPoolInit(struct ProcessManager *manager, int workers)
     (void)memset_s(pool, sizeof(*pool), 0, sizeof(*pool));
     EnvMutexInit(&pool->lock);
     EnvCondInit(&pool->cond);
+    pool->inited = true;
     pool->nrWorkers = workers;
     for (int i = 0; i < workers; i++) {
         int err = pthread_create(&pool->workers[i], NULL, Worker, manager);
@@ -101,6 +102,10 @@ void ThreadPoolDestroy(struct ProcessManager *manager)
     }
 
     ThreadPool *pool = &manager->threadPool;
+    /* 幂等：Init 失败路径已自行销毁，调用方回滚时可能再次调用 */
+    if (!pool->inited) {
+        return;
+    }
     EnvAtomicSet(&pool->stop, 1);
     EnvMutexLock(&pool->lock);
     EnvCondBroadcast(&pool->cond);
@@ -111,4 +116,5 @@ void ThreadPoolDestroy(struct ProcessManager *manager)
     pool->nrWorkers = 0;
     EnvCondDestroy(&pool->cond);
     EnvMutexDestroy(&pool->lock);
+    pool->inited = false;
 }
