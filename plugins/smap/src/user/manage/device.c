@@ -236,6 +236,9 @@ void DeinitTrackingDev(struct ProcessManager *manager)
     }
 }
 
+/* 保护 manager->ubBwMonitor.currentFluxMb/currentFluxRet 的发布与快照读取 */
+static pthread_mutex_t g_ubFluxLock = PTHREAD_MUTEX_INITIALIZER;
+
 void GetUbFluxMb(void)
 {
     struct ProcessManager *manager = GetProcessManager();
@@ -246,24 +249,63 @@ void GetUbFluxMb(void)
         return;
     }
 
-    struct UbFluxMbStatistic *result = &(manager->ubBwMonitor.currentFluxMb);
+    /* ioctl 先写入私有缓冲区：内核 copy_to_user 直接覆写共享结构会让并发读者
+     * 看到新 len 配旧 flux（或相反）；成功后再在锁内整体发布 */
+    struct UbFluxMbStatistic *result = calloc(1, sizeof(*result));
+    if (result == NULL) {
+        SMAP_LOGGER_ERROR("Alloc UB flux buffer failed.");
+        ret = -ENOMEM;
+    } else {
+        ret = ioctl(manager->fds.access, SMAP_IOCTL_UB_WATCH_CMD, result);
+        if (ret == 0 && (result->len < 0 || result->len > SMAP_MAX_NUMNODES)) {
+            SMAP_LOGGER_ERROR("UB flux len %d out of range.", result->len);
+            ret = -EINVAL;
+        }
+    }
 
-    ret = ioctl(manager->fds.access, SMAP_IOCTL_UB_WATCH_CMD, result);
-
+    (void)pthread_mutex_lock(&g_ubFluxLock);
     manager->ubBwMonitor.currentFluxRet = ret;
-    if (manager->ubBwMonitor.currentFluxRet) {
+    if (ret == 0) {
+        manager->ubBwMonitor.currentFluxMb = *result;
+    }
+    (void)pthread_mutex_unlock(&g_ubFluxLock);
+
+    if (ret) {
         SMAP_LOGGER_ERROR("ioctl SMAP_IOCTL_UB_WATCH_CMD failed on scan device.");
+        free(result);
         return;
     }
 
-    for (int i = 0; i < manager->ubBwMonitor.currentFluxMb.len; i++) {
-        uint32_t totalBw =
-            manager->ubBwMonitor.currentFluxMb.flux[i].readMb + manager->ubBwMonitor.currentFluxMb.flux[i].writeMb;
+    for (int i = 0; i < result->len; i++) {
+        uint32_t totalBw = result->flux[i].readMb + result->flux[i].writeMb;
         SMAP_LOGGER_INFO("UB business flux: numaId: %d, readMb: %uMB/s, writeMb: %uMB/s, total: %uMB/s",
-                         manager->ubBwMonitor.currentFluxMb.flux[i].numaId,
-                         manager->ubBwMonitor.currentFluxMb.flux[i].readMb,
-                         manager->ubBwMonitor.currentFluxMb.flux[i].writeMb, totalBw);
+                         result->flux[i].numaId, result->flux[i].readMb, result->flux[i].writeMb, totalBw);
     }
+    free(result);
+}
+
+int SnapshotUbFlux(struct ProcessManager *manager, struct UbFluxMbStatistic *out)
+{
+    if (manager == NULL || out == NULL) {
+        return -EINVAL;
+    }
+    (void)pthread_mutex_lock(&g_ubFluxLock);
+    int ret = manager->ubBwMonitor.currentFluxRet;
+    out->len = 0;
+    if (ret == 0) {
+        int len = manager->ubBwMonitor.currentFluxMb.len;
+        if (len < 0) {
+            len = 0;
+        } else if (len > SMAP_MAX_NUMNODES) {
+            len = SMAP_MAX_NUMNODES;
+        }
+        out->len = len;
+        for (int i = 0; i < len; i++) {
+            out->flux[i] = manager->ubBwMonitor.currentFluxMb.flux[i];
+        }
+    }
+    (void)pthread_mutex_unlock(&g_ubFluxLock);
+    return ret;
 }
 
 /* 扫描 sysfs 收集远端在线 nid，升序写入 out，返回数量 */

@@ -39,6 +39,8 @@ bool RemoteNidSetChanged(void);
 
 struct UbFluxMbStatistic;
 void GetUbFluxMb(void);
+/* 在锁内拷贝最近一次发布的 UB 带宽数据（len 与 flux[] 一致），返回发布时的查询结果码 */
+int SnapshotUbFlux(struct ProcessManager *manager, struct UbFluxMbStatistic *out);
 
 int ConfigUbWatch(uint32_t durationMs);
 
