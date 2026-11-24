@@ -1919,6 +1919,72 @@ TEST_F(ManageTest, TestApplyPendingGroupedPolicy)
     g_nrRemote = 0;
 }
 
+static ProcessAttr *g_restageAttr = nullptr;
+static int RestagePendingDuringApply(pid_t pid, uint64_t numaPages[SMAP_MAX_NUMNODES], bool onlyHuge)
+{
+    (void)pid;
+    (void)onlyHuge;
+    numaPages[4] = 2;
+    /* 模拟 apply 读 numa_maps 期间 IPC 线程重新暂存了新的 pending 策略 */
+    g_restageAttr->pendingSeq++;
+    return 0;
+}
+
+/* apply 期间被重新暂存的 pending 不得被旧快照的清除覆盖 */
+TEST_F(ManageTest, TestApplyPendingGroupedPolicyKeepsRestagedPending)
+{
+    ProcessAttr current = {};
+    GroupMigrationPolicy pending = {};
+    FillPolicyForManageTest(&pending);
+
+    current.pid = 1234;
+    current.pendingGroupPolicy.valid = true;
+    current.pendingGroupPolicy.nodeBitmap = BmFromWord(0x31);
+    current.pendingGroupPolicy.policy = pending;
+    g_restageAttr = &current;
+    g_processManager.nrLocalNuma = 4;
+    g_remoteNids[0] = 4;
+    g_nrRemote = 1;
+    MOCKER(GetPidNumaPagesFromNumaMaps).expects(once()).will(invoke(RestagePendingDuringApply));
+    MOCKER(AccessIoctlAddPid).expects(once()).will(returnValue(0));
+    MOCKER(SyncAllProcessConfig).stubs().will(returnValue(0));
+
+    int ret = ApplyPendingGroupedPolicy(&current);
+    EXPECT_EQ(0, ret);
+    EXPECT_TRUE(current.pendingGroupPolicy.valid);
+    EXPECT_EQ(0x31UL, current.numaAttr.numaNodes.bits[0]);
+    g_nrRemote = 0;
+    g_restageAttr = nullptr;
+    NumaBitmapFree(&current.numaAttr.numaNodes);
+    NumaBitmapFree(&current.pendingGroupPolicy.nodeBitmap);
+}
+
+/* 无空闲槽位（槽位仍处于 RESERVED/REMOVING）时不得计数、不得泄漏，返回 -ENOSPC */
+TEST_F(ManageTest, TestProcessAddGroupedManageNoFreeSlot)
+{
+    GroupMigrationPolicy policy = {};
+    FillPolicyForManageTest(&policy);
+
+    g_pageSizeHuge = PAGESIZE_2M;
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_RESERVED);
+    }
+    g_processManager.nr[VM_TYPE] = 0;
+    g_processManager.nr[PROCESS_TYPE] = 0;
+    MOCKER(DetectPidType).stubs().will(returnValue((int)VM_TYPE));
+    MOCKER(VMPreprocess).stubs().will(returnValue(0));
+    MOCKER(SyncAllProcessConfig).expects(never());
+
+    NumaBitmap bm = BmFromWord(0x11);
+    int ret = ProcessAddGroupedManage(1234, &bm, &policy);
+    EXPECT_EQ(-ENOSPC, ret);
+    EXPECT_EQ(0, g_processManager.nr[VM_TYPE]);
+    NumaBitmapFree(&bm);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+}
+
 TEST_F(ManageTest, TestProcessAddGroupedManageRejectsLimitAndPreprocessFailure)
 {
     GroupMigrationPolicy policy = {};
