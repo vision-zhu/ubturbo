@@ -723,6 +723,41 @@ TEST_F(SmapConfigTest, TestAssignProcessAttrIgnoreRemoteCapacityDefault)
     NumaBitmapFree(&bm);
 }
 
+extern "C" int RestoreProcessTargetConfig(ProcessTargetConfig *config, uint8_t migrateMode, int srcNid, int count,
+                                          const struct PersistRemoteTarget targets[]);
+extern "C" int WriteTargetConfigToPayload(struct PersistRemoteTarget payloadTargets[], int *payloadCount,
+                                          uint8_t *payloadMode, const ProcessTargetConfig *config);
+TEST_F(SmapConfigTest, TestPersistedRemoteNidBeyondCapRejected)
+{
+    uint32_t oldCap = g_numaCap;
+    g_numaCap = 64;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+
+    ProcessTargetConfig config;
+    struct PersistRemoteTarget targets[1] = {{ .nid = 500, .ratio = 10, .memSize = 0 }};
+    EXPECT_EQ(-EINVAL, RestoreProcessTargetConfig(&config, MIG_RATIO_MODE, NUMA_NO_NODE, 1, targets));
+    targets[0].nid = 64;
+    EXPECT_EQ(-EINVAL, RestoreProcessTargetConfig(&config, MIG_RATIO_MODE, NUMA_NO_NODE, 1, targets));
+    targets[0].nid = 63;
+    EXPECT_EQ(0, RestoreProcessTargetConfig(&config, MIG_RATIO_MODE, NUMA_NO_NODE, 1, targets));
+
+    ProcessTargetConfig active;
+    InitProcessTargetConfig(&active);
+    active.migrateMode = MIG_RATIO_MODE;
+    active.count = 1;
+    active.targets[0].remoteNid = 500;
+    active.targets[0].ratio = 10;
+    struct PersistRemoteTarget out[SMAP_MAX_NUMNODES] = {};
+    int count = 0;
+    uint8_t mode = 0;
+    EXPECT_EQ(-EINVAL, WriteTargetConfigToPayload(out, &count, &mode, &active));
+    active.targets[0].remoteNid = 63;
+    EXPECT_EQ(0, WriteTargetConfigToPayload(out, &count, &mode, &active));
+    EXPECT_EQ(63, out[0].nid);
+
+    g_numaCap = oldCap;
+}
+
 extern "C" size_t CalcNumaConfigLen(void);
 extern "C" bool IsProcessConfigValid(char *processBase, size_t totalLen);
 TEST_F(SmapConfigTest, TestIsProcessConfigValid)
