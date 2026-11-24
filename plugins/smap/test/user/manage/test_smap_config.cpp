@@ -1398,7 +1398,7 @@ TEST_F(SmapConfigTest, TestMapAndWriteProcessConfigZeroPayload)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" int ChangeProcessConfig(int fd);
+extern "C" int ChangeProcessConfig(int fd, struct ProcessPayload *payload, int nrPayload);
 TEST_F(SmapConfigTest, TestChangeProcessConfigExtendFile)
 {
     int ret;
@@ -1408,11 +1408,10 @@ TEST_F(SmapConfigTest, TestChangeProcessConfigExtendFile)
     struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER, .headerLen = CONFIG_HEADER_LEN, .totalLen = oldLen};
 
     MOCKER(ParseHeader).stubs().with(any(), outBoundP(&header, sizeof(header))).will(returnValue(0));
-    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(0));
     MOCKER(CalcConfigLen).stubs().will(returnValue(newLen));
     MOCKER(TruncateConfig).stubs().will(returnValue(0));
     MOCKER(MapAndWriteProcessConfig).stubs().will(returnValue(-ENOENT));
-    ret = ChangeProcessConfig(fd);
+    ret = ChangeProcessConfig(fd, nullptr, 0);
     EXPECT_EQ(-ENOENT, ret);
 }
 
@@ -1425,11 +1424,10 @@ TEST_F(SmapConfigTest, TestChangeProcessConfigShrinkFile)
     struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER, .headerLen = CONFIG_HEADER_LEN, .totalLen = oldLen};
 
     MOCKER(ParseHeader).stubs().with(any(), outBoundP(&header, sizeof(header))).will(returnValue(0));
-    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(0));
     MOCKER(CalcConfigLen).stubs().will(returnValue(newLen));
     MOCKER(TruncateConfig).stubs().will(returnValue(-EPERM));
     MOCKER(MapAndWriteProcessConfig).stubs().will(returnValue(0));
-    ret = ChangeProcessConfig(fd);
+    ret = ChangeProcessConfig(fd, nullptr, 0);
     EXPECT_EQ(0, ret);
 }
 
@@ -1437,14 +1435,8 @@ TEST_F(SmapConfigTest, TestChangeProcessConfig)
 {
     int fd;
     MOCKER(ParseHeader).stubs().will(returnValue(-EBADF));
-    int ret = ChangeProcessConfig(fd);
+    int ret = ChangeProcessConfig(fd, nullptr, 0);
     EXPECT_EQ(-EBADF, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(ParseHeader).stubs().will(returnValue(0));
-    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(-EINVAL));
-    ret = ChangeProcessConfig(fd);
-    EXPECT_EQ(-EINVAL, ret);
 }
 
 extern "C" char *JumpToNumaConfig(char *base);
@@ -1855,4 +1847,33 @@ TEST_F(SmapConfigTest, TestSyncAllProcessConfigTwo)
     MOCKER(close).stubs().will(returnValue(0));
     ret = SyncAllProcessConfig();
     EXPECT_EQ(-EBADF, ret);
+}
+
+extern "C" int SyncAllProcessConfigLocked(struct ProcessPayload *payload, int nrPayload);
+extern "C" uint64_t g_smapConfigSyncSeq;
+extern "C" uint64_t g_smapConfigWrittenSeq;
+TEST_F(SmapConfigTest, TestSyncAllProcessConfigBuildFail)
+{
+    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(-EINVAL));
+    MOCKER(SyncAllProcessConfigLocked).expects(never());
+    EXPECT_EQ(-EINVAL, SyncAllProcessConfig());
+}
+
+TEST_F(SmapConfigTest, TestSyncAllProcessConfigSkipsStaleSnapshot)
+{
+    uint64_t oldWritten = g_smapConfigWrittenSeq;
+    /* 模拟一个更新的快照已经落盘：本次领到的序号更小，不得覆盖 */
+    g_smapConfigWrittenSeq = g_smapConfigSyncSeq + 10;
+    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(0));
+    MOCKER(SyncAllProcessConfigLocked).expects(never());
+    EXPECT_EQ(0, SyncAllProcessConfig());
+    GlobalMockObject::verify();
+
+    /* 序号追上后正常落盘，并推进已落盘序号 */
+    g_smapConfigWrittenSeq = g_smapConfigSyncSeq;
+    MOCKER(BuildAllProcessPayload).stubs().will(returnValue(0));
+    MOCKER(SyncAllProcessConfigLocked).expects(once()).will(returnValue(0));
+    EXPECT_EQ(0, SyncAllProcessConfig());
+    EXPECT_EQ(g_smapConfigSyncSeq, g_smapConfigWrittenSeq);
+    g_smapConfigWrittenSeq = oldWritten > g_smapConfigWrittenSeq ? oldWritten : g_smapConfigWrittenSeq;
 }
