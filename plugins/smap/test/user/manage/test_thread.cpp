@@ -112,3 +112,29 @@ TEST_F(ThreadTest, TestThreadPoolSubmitRejectedAfterStop)
     ThreadPoolDestroy(pm);
     free(pm);
 }
+
+extern "C" struct ProcessManager g_processManager;
+TEST_F(ThreadTest, TestInitEventLoopRegisterFailureNotFatal)
+{
+    struct ProcessManager *pm = &g_processManager;
+    ProcessAttr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.pid = 0x7ffffff0; /* /proc/smap/<pid>/mem_freq 不存在，注册必然失败 */
+    attr.scanType = NORMAL_SCAN;
+    memset(pm->slots, 0, sizeof(pm->slots));
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        pm->slots[i].memFreqFd = -1;
+    }
+    pm->slots[0].pid = attr.pid;
+    pm->slots[0].attr = &attr;
+    EnvAtomicSet(&pm->slots[0].refs, 1);
+    EnvAtomicSet(&pm->slots[0].state, PID_SLOT_INUSE);
+
+    // 单个 pid 注册失败只告警，交由 EventLoopEnsureRegistered 重试，不得导致启动失败
+    EXPECT_EQ(0, InitEventLoop(pm));
+    EXPECT_TRUE(pm->eventLoop.inited);
+    EXPECT_EQ(-1, pm->slots[0].memFreqFd);
+    EXPECT_EQ(0, DestroyEventLoop(pm));
+    EXPECT_FALSE(pm->eventLoop.inited);
+    memset(pm->slots, 0, sizeof(pm->slots));
+}
