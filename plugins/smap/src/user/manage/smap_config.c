@@ -205,9 +205,20 @@ static inline bool IsRunModeValid(RunMode runMode)
     return runMode >= 0 && runMode < MAX_RUN_MODE;
 }
 
+/*
+ * IsConfigVersionSupported - 可恢复的持久化格式版本
+ *
+ * V3 是 1.2.x 起发布的格式。更早的 V1/V2（编译期定宽 NUMA 布局）无法可靠换算到运行期 cap 布局，
+ * 不做就地转换：由调用方把旧文件改名备份并告警后重建，绝不静默删除。
+ */
+static inline bool IsConfigVersionSupported(uint8_t ver)
+{
+    return ver == SMAP_CONFIG_VER_V3;
+}
+
 static bool IsConfigHeaderValid(struct SmapConfigHeader *header)
 {
-    if (header->ver != SMAP_CONFIG_VER) {
+    if (!IsConfigVersionSupported(header->ver)) {
         SMAP_LOGGER_ERROR("Wrong smap config header ver: %hd.", header->ver);
         return false;
     }
@@ -299,8 +310,9 @@ static int ConfigWriteFull(int fd, const char *buf, size_t len)
 /*
  * LoadConfigImage - read the whole smap config into memory and validate its header
  *
- * Returns 0 on success, -ENOENT if the file does not exist, -EINVAL if it is too short, too large or its header is
- * invalid (including totalLen beyond the file size), or another negative errno on I/O failure.
+ * Returns 0 on success, -ENOENT if the file does not exist, -EPROTONOSUPPORT if it was written in a format version
+ * this build cannot recover, -EINVAL if it is too short, too large or its header is invalid (including totalLen
+ * beyond the file size), or another negative errno on I/O failure.
  */
 static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
 {
@@ -339,6 +351,12 @@ static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
     }
 
     ReadHeader(buf, &header);
+    if (!IsConfigVersionSupported(header.ver)) {
+        SMAP_LOGGER_ERROR("Unsupported smap config version %u, current version %u.", (unsigned int)header.ver,
+                          (unsigned int)SMAP_CONFIG_VER);
+        free(buf);
+        return -EPROTONOSUPPORT;
+    }
     if (!IsConfigHeaderValid(&header) || header.totalLen > size) {
         SMAP_LOGGER_ERROR("Wrong smap config header, total len %u, file size %zu.", header.totalLen, size);
         free(buf);
@@ -1063,6 +1081,37 @@ static int ChangeOneNumaConfig(struct SmapConfigImage *img, struct NumaPayload *
     return 0;
 }
 
+/* IsConfigUnusable - 文件存在但内容不可用（损坏或版本不支持），需要备份后重建 */
+static inline bool IsConfigUnusable(int ret)
+{
+    return ret == -EINVAL || ret == -EPROTONOSUPPORT;
+}
+
+/*
+ * BackupConfig - keep an unusable smap config as "<path>.bak" instead of deleting it
+ *
+ * The previous backup is overwritten. The caller recreates the config afterwards, so the managed processes recorded
+ * in the backup are not recovered automatically; the backup allows manual inspection or downgrade.
+ */
+static void BackupConfig(const char *path, int reason)
+{
+    char bakPath[SMAP_CONFIG_PATH_MAX];
+
+    if (snprintf_s(bakPath, sizeof(bakPath), sizeof(bakPath) - 1, "%s%s", path, SMAP_CONFIG_BAK_SUFFIX) < 0) {
+        SMAP_LOGGER_ERROR("Build smap config backup path failed.");
+        return;
+    }
+    if (rename(path, bakPath) == NORMAL_ERR) {
+        if (errno != ENOENT) {
+            SMAP_LOGGER_ERROR("Backup unusable smap config (%d) failed: %d.", reason, -errno);
+        }
+        return;
+    }
+    SMAP_LOGGER_WARNING("Smap config is unusable (%d), saved as %s and recreated; processes recorded in it are not "
+                        "recovered.",
+                        reason, bakPath);
+}
+
 /*
  * LoadOrInitConfigImage - load the current smap config, or build one from the in-memory state
  *
@@ -1075,12 +1124,12 @@ static int LoadOrInitConfigImage(struct SmapConfigImage *img)
     if (ret == 0) {
         return 0;
     }
-    if (ret != -ENOENT && ret != -EINVAL) {
+    if (ret != -ENOENT && !IsConfigUnusable(ret)) {
         SMAP_LOGGER_ERROR("Load smap config failed: %d.", ret);
         return ret;
     }
-    if (ret == -EINVAL) {
-        SMAP_LOGGER_WARNING("Smap config is corrupted, rebuild it from memory.");
+    if (IsConfigUnusable(ret)) {
+        BackupConfig(SmapConfigPath(), ret);
     }
     ret = BuildInitConfigImage(img);
     if (ret) {
@@ -1100,9 +1149,12 @@ static int RecoverFromConfigLocked(void)
             SMAP_LOGGER_INFO("Read config done.");
             return 0;
         }
-        // Create a new smap config if parse is failed
+        // Keep the old config as a backup and create a new one if parse is failed
         SMAP_LOGGER_ERROR("Parse config error: %d.", ret);
-    } else if (ret != -ENOENT && ret != -EINVAL) {
+        BackupConfig(SmapConfigPath(), ret);
+    } else if (IsConfigUnusable(ret)) {
+        BackupConfig(SmapConfigPath(), ret);
+    } else if (ret != -ENOENT) {
         SMAP_LOGGER_ERROR("Read config error: %d.", ret);
         return ret;
     }
