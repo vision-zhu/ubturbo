@@ -14,6 +14,7 @@
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <sys/time.h>
+#include <limits.h>
 #include <math.h>
 #include "manage/access_ioctl.h"
 #include "smap_user_log.h"
@@ -834,6 +835,10 @@ static uint64_t GetMigListSuccessPages(const struct MigList *list)
 
 static void RefreshPairAccountMask(ProcessAttr *process, int localNid, int remoteNid)
 {
+    /* 本地掩码为 uint32_t；初始化已拒绝超过 32 个本地节点，此处兜底防止移位越界 */
+    if (localNid < 0 || localNid >= (int)(sizeof(uint32_t) * CHAR_BIT)) {
+        return;
+    }
     uint32_t localBit = 1U << localNid;
     if (NM_AT(process->strategyAttr.remoteNrPagesAfterMigrate, localNid, remoteNid) > 0) {
         process->managedLocalState.accountLocalMask[remoteNid] |= localBit;
