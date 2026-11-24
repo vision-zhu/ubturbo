@@ -944,6 +944,33 @@ TEST_F(SmapConfigTest, TestWriteProcessConfig)
     NumaBitmapFree(&np[1].numaNodes);
 }
 
+TEST_F(SmapConfigTest, TestWriteProcessConfigClearsStaleBitmap)
+{
+    struct PayloadHeader header = {};
+    struct ProcessPayload np[1] = {};
+    np[0].pid = 1027;
+
+    uint32_t nrWords = NumaWordsForCap();
+    size_t stride = CONFIG_PROC_HEADER_LEN + (size_t)nrWords * sizeof(unsigned long);
+    char *payload = (char *)malloc(stride);
+    ASSERT_NE(nullptr, payload);
+    memset(payload, 0xff, stride);
+
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(payload));
+    EXPECT_EQ(0, WriteProcessConfig((char *)&header, np, 1));
+
+    struct ProcessPayloadHeader *h = (struct ProcessPayloadHeader *)payload;
+    EXPECT_EQ(np[0].pid, h->pid);
+    for (size_t i = 0; i < sizeof(h->reserved); i++) {
+        EXPECT_EQ(0, h->reserved[i]);
+    }
+    unsigned long *w = (unsigned long *)(payload + CONFIG_PROC_HEADER_LEN);
+    for (uint32_t i = 0; i < nrWords; i++) {
+        EXPECT_EQ(0UL, w[i]);
+    }
+    free(payload);
+}
+
 extern "C" int BuildAllProcessPayload(struct ProcessPayload **payload, int *len);
 TEST_F(SmapConfigTest, TestBuildAllProcessPayload)
 {
