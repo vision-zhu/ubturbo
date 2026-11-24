@@ -2089,10 +2089,10 @@ static bool IsPidAnyRemoteNodeForbidden(ProcessAttr *attr)
     return false;
 }
 
-/* 新快照和账本均显示远端为空时自动移除；成功返回 true。 */
-static bool SmapAutoRemovePidIfRemoteEmpty(ProcessAttr *attr)
+/* 须持 attrLock（attr 未注册进槽表的单测除外）：新快照和账本是否均显示远端为空且允许自动移除 */
+static bool IsAutoRemoveReadyLocked(const ProcessAttr *attr)
 {
-    if (!attr || attr->state != PROC_IDLE || !attr->autoRemoveWhenRemoteEmpty || attr->syncWaitRemoteEmpty ||
+    if (attr->state != PROC_IDLE || !attr->autoRemoveWhenRemoteEmpty || attr->syncWaitRemoteEmpty ||
         attr->groupPolicy.enabled || attr->scanType != NORMAL_SCAN) {
         return false;
     }
@@ -2113,21 +2113,57 @@ static bool SmapAutoRemovePidIfRemoteEmpty(ProcessAttr *attr)
             accountSum += NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, l, r);
         }
     }
-    if (remoteSum != 0 || accountSum != 0) {
-        return false;
-    }
+    return remoteSum == 0 && accountSum == 0;
+}
 
-    SMAP_LOGGER_INFO("pid %d remote pages empty (%llu snapshot pages), auto remove from per-pid flow.", attr->pid,
-                     attr->walkPage.nrPage);
-
-    /* 先注销 mem_freq 监听，避免内核移除后 HUP 事件反复触发。 */
-    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+static bool IsAutoRemoveReady(struct PidSlot *slot, const ProcessAttr *attr)
+{
     if (slot) {
         EnvMutexLock(&slot->attrLock);
-        EventLoopUnregisterSlotLocked(slot);
-        EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
     }
+    bool ready = (!slot || EnvAtomicRead(&slot->state) == PID_SLOT_INUSE) && IsAutoRemoveReadyLocked(attr);
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+    return ready;
+}
+
+/*
+ * 新快照和账本均显示远端为空时自动移除；成功返回 true。调用方（worker）持有槽位引用。
+ * 移除改变纳管集合与内核跟踪，须与纳管/移除接口串行：trylock g_manageLock（接口执行中则推迟到
+ * 下一周期，worker 不阻塞），并在锁内按 attrLock 复核条件，避免与 migrate_out 的
+ * Prepare→Track→Publish 交错（移除后又被 Track 重新加入内核跟踪、Publish 写入已摘除的 attr）。
+ */
+static bool SmapAutoRemovePidIfRemoteEmpty(ProcessAttr *attr)
+{
+    if (!attr) {
+        return false;
+    }
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr);
+    if (!IsAutoRemoveReady(slot, attr)) {
+        return false;
+    }
+    if (!SmapManageTryLock()) {
+        SMAP_LOGGER_INFO("Manage interface busy, defer auto remove of pid %d.", attr->pid);
+        return false;
+    }
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    bool ready = (!slot || EnvAtomicRead(&slot->state) == PID_SLOT_INUSE) && IsAutoRemoveReadyLocked(attr);
+    if (ready && slot) {
+        /* 先注销 mem_freq 监听，避免内核移除后 HUP 事件反复触发。 */
+        EventLoopUnregisterSlotLocked(slot);
+    }
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+    if (!ready) {
+        SmapManageUnlock();
+        return false;
+    }
+    SMAP_LOGGER_INFO("pid %d remote pages empty (%llu snapshot pages), auto remove from per-pid flow.", attr->pid,
+                     attr->walkPage.nrPage);
 
     struct RemoveMsg msg = { 0 };
     msg.count = 1;
@@ -2136,10 +2172,12 @@ static bool SmapAutoRemovePidIfRemoteEmpty(ProcessAttr *attr)
 
     int ret = IoctlRemoveProcess(&msg);
     if (ret) {
+        SmapManageUnlock();
         SMAP_LOGGER_WARNING("per-pid auto remove ioctl for pid %d failed: %d.", attr->pid, ret);
         return false;
     }
     ClearManagedProcess(1, &msg.payload[0]);
+    SmapManageUnlock();
     return true;
 }
 

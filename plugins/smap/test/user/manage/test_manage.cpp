@@ -2527,6 +2527,63 @@ TEST_F(ManageTest, TestPartialRemoveDoesNotWaitWhenMigrating)
     PidSlotDestroy(&g_processManager);
 }
 
+/* migrate_out Prepare 之后 pid 被移除（槽位 REMOVING）：Publish 不得写入已摘除的 attr 并报成功 */
+TEST_F(ManageTest, TestPublishCandidateRejectsRemovedSlot)
+{
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    ProcessAttr *active = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, active);
+    active->pid = 321;
+    active->scanType = STATISTIC_SCAN;
+    active->targetConfig.count = 1;
+    int idx = PidSlotAdd(&g_processManager, active);
+    ASSERT_GE(idx, 0);
+    struct PidSlot *slot = &g_processManager.slots[idx];
+    EnvAtomicAdd(&slot->refs, 2); /* Prepare 持有的槽位引用与 active 引用 */
+    ProcessManageCandidate candidate = {};
+    candidate.active = active;
+    candidate.slot = slot;
+    candidate.prepared = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, candidate.prepared);
+    candidate.prepared->pid = 321;
+    EnvAtomicSet(&slot->state, PID_SLOT_REMOVING);
+    MOCKER(SyncAllProcessConfig).expects(never());
+
+    EXPECT_EQ(-ESRCH, PublishProcessManageCandidate(&candidate));
+    EXPECT_EQ(1U, active->targetConfig.count);
+    EXPECT_EQ(1, EnvAtomicRead(&slot->refs));
+    GlobalMockObject::verify();
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    g_processManager.nr[active->type] = 0;
+    free(active);
+}
+
+/* worker 远端清空自动移除与纳管/移除接口串行：接口持有 g_manageLock 时推迟到下一周期 */
+extern "C" bool SmapAutoRemovePidIfRemoteEmpty(ProcessAttr *attr);
+TEST_F(ManageTest, TestAutoRemoveDefersWhenManageBusy)
+{
+    ProcessAttr attr = {};
+    attr.pid = 321;
+    attr.scanType = NORMAL_SCAN;
+    attr.state = PROC_IDLE;
+    attr.autoRemoveWhenRemoteEmpty = true;
+    attr.walkPage.nrPage = 10;
+    g_processManager.nrLocalNuma = 4;
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+
+    MOCKER(IoctlRemoveProcess).expects(never());
+    EnvMutexLock(&g_manageLock);
+    EXPECT_FALSE(SmapAutoRemovePidIfRemoteEmpty(&attr));
+    EnvMutexUnlock(&g_manageLock);
+    GlobalMockObject::verify();
+
+    MOCKER(IoctlRemoveProcess).expects(once()).will(returnValue(0));
+    MOCKER(ClearManagedProcess).expects(once()).will(returnValue(0));
+    EXPECT_TRUE(SmapAutoRemovePidIfRemoteEmpty(&attr));
+    GlobalMockObject::verify();
+    FreeProcessAttrArrays(&attr);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

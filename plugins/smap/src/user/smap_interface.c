@@ -1270,6 +1270,7 @@ static int PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int c
             continue;
         }
         bool isNew = candidates[i].isNew;
+        bool tracked = !candidates[i].isPending;
         bool registerEvent = isNew && prepared->scanType == NORMAL_SCAN;
         pid_t pid = prepared->pid;
 
@@ -1279,7 +1280,8 @@ static int PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int c
             if (firstError == 0) {
                 firstError = ret;
             }
-            if (isNew) {
+            /* -ESRCH：已纳管 pid 在 Prepare 之后被移除（槽位不再 INUSE），本次 Track 重新加入的跟踪同样回滚 */
+            if (isNew || (ret == -ESRCH && tracked)) {
                 /* 新 pid 已由 TrackMigrateOutCandidates 加入内核跟踪，用户态未纳管则回滚 */
                 struct AccessRemovePidPayload payload = { .pid = pid };
                 int rmRet = AccessIoctlRemovePid(1, &payload);
@@ -1771,18 +1773,6 @@ int ubturbo_smap_remove(struct RemoveMsg *msg, int pageType)
     SMAP_API_CALL(RemoveImplManaged(msg, pageType));
 }
 
-static bool HasRemotePages(ProcessAttr *attr)
-{
-    int nid;
-    for_each_remote_nid(nid)
-    {
-        if (attr->walkPage.nrPages[nid] != 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool IsMigrateBackSourceNid(const struct MigrateBackMsg *msg, int nid)
 {
     if (!msg) {
@@ -1831,99 +1821,6 @@ static void MarkAutoRemoveByMigrateBack(struct MigrateBackMsg *msg)
         }
     }
     PidSlotReleaseRefs(all, n);
-}
-
-static bool IsAutoRemoveCandidate(ProcessAttr *attr)
-{
-    if (!attr || !attr->autoRemoveWhenRemoteEmpty || attr->syncWaitRemoteEmpty || attr->groupPolicy.enabled ||
-        attr->scanType != NORMAL_SCAN || attr->state == PROC_MOVE) {
-        return false;
-    }
-    if (attr->walkPage.nrPage == 0) {
-        SMAP_LOGGER_INFO("Pid %d page snapshot is empty, skip auto remove.", attr->pid);
-        return false;
-    }
-    return true;
-}
-
-static bool IsPidAlreadyCollected(pid_t *pids, int count, pid_t pid)
-{
-    for (int i = 0; i < count; i++) {
-        if (pids[i] == pid) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static int CollectRemoteEmptyAutoRemovePids(pid_t *pids, int maxCount)
-{
-    struct ProcessManager *manager = GetProcessManager();
-    int count = 0;
-
-    struct PidSlot *all[MAX_PID_SLOTS];
-    size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
-    for (size_t k = 0; k < n && count < maxCount; k++) {
-        ProcessAttr *attr = all[k]->attr;
-        if (!IsAutoRemoveCandidate(attr) || HasRemotePages(attr)) {
-            continue;
-        }
-        if (IsPidAlreadyCollected(pids, count, attr->pid)) {
-            continue;
-        }
-        pids[count++] = attr->pid;
-    }
-    PidSlotReleaseRefs(all, n);
-    return count;
-}
-
-static void RemoveAutoRemovePids(pid_t *pids, int count)
-{
-    struct ProcessManager *manager = GetProcessManager();
-
-    for (int offset = 0; offset < count;) {
-        struct RemoveMsg removeMsg = { 0 };
-        int remain = count - offset;
-        int batch = remain < MAX_NR_REMOVE ? remain : MAX_NR_REMOVE;
-
-        for (int i = 0; i < batch; i++) {
-            ProcessAttr *attr = GetProcessAttr(pids[offset + i]);
-            if (!IsAutoRemoveCandidate(attr) || HasRemotePages(attr)) {
-                PutProcessAttr(attr);
-                continue;
-            }
-            removeMsg.payload[removeMsg.count].pid = pids[offset + i];
-            removeMsg.payload[removeMsg.count].count = 0;
-            removeMsg.count++;
-            PutProcessAttr(attr);
-        }
-
-        if (removeMsg.count > 0) {
-            int ret = IoctlRemoveProcess(&removeMsg);
-            if (ret) {
-                SMAP_LOGGER_WARNING("Auto remove remote-empty pids failed: %d.", ret);
-            } else {
-                ClearManagedProcess(removeMsg.count, removeMsg.payload);
-            }
-        }
-        offset += batch;
-    }
-}
-
-void SmapAutoRemoveRemoteEmptyProcessesWithFreshData(void)
-{
-    int maxCount = GetCurrentMaxNrPid();
-    pid_t *pids = calloc(maxCount, sizeof(pid_t));
-    if (!pids) {
-        SMAP_LOGGER_ERROR("Calloc auto remove pid array failed.");
-        return;
-    }
-
-    int count = CollectRemoteEmptyAutoRemovePids(pids, maxCount);
-    if (count > 0) {
-        RemoveAutoRemovePids(pids, count);
-    }
-    free(pids);
 }
 
 static int NodeEnableImpl(struct EnableNodeMsg *msg)
