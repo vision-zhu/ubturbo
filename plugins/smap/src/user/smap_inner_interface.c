@@ -48,21 +48,26 @@ static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n; k++) {
         ProcessAttr *current = all[k]->attr;
+        /* 位图与比例矩阵由扫描/迁移线程持 attrLock 更新，读取同样持锁保证一致 */
+        EnvMutexLock(&all[k]->attrLock);
         int l1Node = GetAttrL1(current);
         int l2Node = GetAttrL2(current);
 
         if (l1Node < 0) {
+            EnvMutexUnlock(&all[k]->attrLock);
             SMAP_LOGGER_ERROR("SmapQueryVmMemRatio pid %d L1 is invalid.", current->pid);
             ret = -EINVAL;
             PidSlotReleaseRefs(all, n);
             break;
         }
         if (current->type != VM_TYPE) {
+            EnvMutexUnlock(&all[k]->attrLock);
             continue;
         }
         /* 兜底：VM 仅 2M 模式准入（上限 MAX_2M_PROCESSES_CNT），但恢复路径不经过准入校验，
          * 持久化残留可突破该不变式，此处对齐数组容量防止越界写 */
         if (vrMsg->nrVm >= MAX_2M_PROCESSES_CNT) {
+            EnvMutexUnlock(&all[k]->attrLock);
             SMAP_LOGGER_ERROR("SmapQueryVmMemRatio vm count exceeds %d, truncate.", MAX_2M_PROCESSES_CNT);
             break;
         }
@@ -72,6 +77,7 @@ static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
             vrMsg->vr[vrMsg->nrVm].ratio -= NM_AT(current->strategyAttr.l3RemoteMemRatio, l1Node, l2Node);
         }
         vrMsg->nrVm++;
+        EnvMutexUnlock(&all[k]->attrLock);
     }
 
     if (ret == 0) {

@@ -5310,17 +5310,19 @@ TEST_F(InterfaceTest, TestQueryVMFreqFromUserZeroActcLen2)
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
 }
 
-extern "C" void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable);
+extern "C" void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable, ProcessAttr *held[MAX_NR_MIGOUT]);
 TEST_F(InterfaceTest, TestSetSyncWaitRemoteEmptyNull)
 {
-    SetSyncWaitRemoteEmpty(nullptr, true);
+    ProcessAttr *held[MAX_NR_MIGOUT] = {nullptr};
+    SetSyncWaitRemoteEmpty(nullptr, true, held);
 }
 
 TEST_F(InterfaceTest, TestSetSyncWaitRemoteEmptyInvalidCount)
 {
     struct MigrateOutMsg msg = {};
+    ProcessAttr *held[MAX_NR_MIGOUT] = {nullptr};
     msg.count = 0;
-    SetSyncWaitRemoteEmpty(&msg, true);
+    SetSyncWaitRemoteEmpty(&msg, true, held);
 }
 
 TEST_F(InterfaceTest, TestSetSyncWaitRemoteEmptyResetsSnapshotState)
@@ -5337,15 +5339,46 @@ TEST_F(InterfaceTest, TestSetSyncWaitRemoteEmptyResetsSnapshotState)
     msg.payload[0].inner[0].memSize = 0;
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
     PidSlotAdd(&g_processManager, &attr);
+    ProcessAttr *held[MAX_NR_MIGOUT] = {nullptr};
 
-    SetSyncWaitRemoteEmpty(&msg, true);
+    SetSyncWaitRemoteEmpty(&msg, true, held);
     EXPECT_TRUE(attr.syncWaitRemoteEmpty);
     EXPECT_FALSE(attr.syncWaitRemoteEmptySnapshotValid);
+    /* 同一调用重复 enable（迁出后再覆盖新纳管 pid）不重复计数 */
+    SetSyncWaitRemoteEmpty(&msg, true, held);
+    EXPECT_EQ(1U, attr.syncWaitRemoteEmptyRefs);
 
     attr.syncWaitRemoteEmptySnapshotValid = true;
-    SetSyncWaitRemoteEmpty(&msg, false);
+    SetSyncWaitRemoteEmpty(&msg, false, held);
     EXPECT_FALSE(attr.syncWaitRemoteEmpty);
     EXPECT_FALSE(attr.syncWaitRemoteEmptySnapshotValid);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+}
+
+TEST_F(InterfaceTest, TestSetSyncWaitRemoteEmptyConcurrentCallsKeepProtection)
+{
+    struct MigrateOutMsg msg = {};
+    ProcessAttr attr = {};
+    attr.pid = 1235;
+    attr.scanType = NORMAL_SCAN;
+    msg.count = 1;
+    msg.payload[0].pid = attr.pid;
+    msg.payload[0].count = 1;
+    msg.payload[0].inner[0].migrateMode = MIG_MEMSIZE_MODE;
+    msg.payload[0].inner[0].memSize = 0;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    PidSlotAdd(&g_processManager, &attr);
+    ProcessAttr *heldA[MAX_NR_MIGOUT] = {nullptr};
+    ProcessAttr *heldB[MAX_NR_MIGOUT] = {nullptr};
+
+    /* 两个 migrate_out_sync 同时保护同一 pid：先结束的不得解除另一个仍需要的保护 */
+    SetSyncWaitRemoteEmpty(&msg, true, heldA);
+    SetSyncWaitRemoteEmpty(&msg, true, heldB);
+    SetSyncWaitRemoteEmpty(&msg, false, heldA);
+    EXPECT_TRUE(attr.syncWaitRemoteEmpty);
+    SetSyncWaitRemoteEmpty(&msg, false, heldB);
+    EXPECT_FALSE(attr.syncWaitRemoteEmpty);
+    EXPECT_EQ(0U, attr.syncWaitRemoteEmptyRefs);
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
 }
 

@@ -412,6 +412,8 @@ struct ProcessAttribute {
     bool autoRemoveWhenRemoteEmpty; // 上层将远端目标调为0后，远端页清空时自动移除纳管
     bool syncWaitRemoteEmpty; // 同步迁移等待远端页清空时，临时保护进程不被自动移除
     bool syncWaitRemoteEmptySnapshotValid; // 零目标发布后是否已完成新一轮页面快照和账本校准
+    uint32_t
+        syncWaitRemoteEmptyRefs; // 持有同步等待保护的 migrate_out_sync 调用数，attrLock 保护；>0 时 syncWaitRemoteEmpty 为真
     /* Runtime-only compatibility mode for migrate_out_sync targets. */
     bool ignoreRemoteCapacity;
     bool pendingIgnoreRemoteCapacity;

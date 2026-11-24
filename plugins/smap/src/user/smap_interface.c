@@ -1706,9 +1706,14 @@ static void MarkAutoRemoveByMigrateBack(struct MigrateBackMsg *msg)
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n; k++) {
         ProcessAttr *attr = all[k]->attr;
-        if (!attr->groupPolicy.enabled && attr->scanType == NORMAL_SCAN &&
-            IsMigrateBackAutoRemoveCandidate(attr, msg)) {
+        EnvMutexLock(&all[k]->attrLock);
+        bool mark = !attr->groupPolicy.enabled && attr->scanType == NORMAL_SCAN &&
+                    IsMigrateBackAutoRemoveCandidate(attr, msg);
+        if (mark) {
             attr->autoRemoveWhenRemoteEmpty = true;
+        }
+        EnvMutexUnlock(&all[k]->attrLock);
+        if (mark) {
             SMAP_LOGGER_INFO("Pid %d will be auto removed after migrate back clears remote pages.", attr->pid);
         }
     }
@@ -3067,11 +3072,16 @@ static bool IsMigrateOutPayloadRemoteTargetZero(const struct MigrateOutPayload *
     return true;
 }
 
-static void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable)
+/*
+ * 同步迁出的「远端清空前不自动移除」保护按调用引用计数：并发的多个 migrate_out_sync 作用于
+ * 同一 pid 时，先结束的调用只归还自己的引用，不会提前解除其他调用仍需要的保护。
+ * held[i] 记录本次调用已为 payload[i] 持有保护的 attr（未持有为 NULL）：enable 只为尚未持有
+ * 的 pid 加引用（可重复调用以覆盖迁出后新纳管的 pid），disable 只归还本调用持有且仍为同一
+ * attr 的引用。读写均持 attrLock，与扫描线程的快照标记及发布路径串行。
+ */
+static void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable, ProcessAttr *held[MAX_NR_MIGOUT])
 {
-    struct ProcessManager *manager = GetProcessManager();
-
-    if (!msg) {
+    if (!msg || !held) {
         return;
     }
     if (msg->count <= 0 || msg->count > MAX_NR_MIGOUT) {
@@ -3079,18 +3089,52 @@ static void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable)
     }
 
     for (int i = 0; i < msg->count; i++) {
-        if (!IsMigrateOutPayloadRemoteTargetZero(&msg->payload[i])) {
+        if (enable ? held[i] != NULL : held[i] == NULL) {
+            continue;
+        }
+        if (enable && !IsMigrateOutPayloadRemoteTargetZero(&msg->payload[i])) {
             continue;
         }
 
         ProcessAttr *attr = GetProcessAttr(msg->payload[i].pid);
-        if (!attr || attr->groupPolicy.enabled || attr->scanType != NORMAL_SCAN) {
+        if (!attr || (!enable && attr != held[i])) {
+            /* 期间被移除（或重新纳管为新对象）：保护随旧对象消失，无需归还 */
+            held[i] = NULL;
             PutProcessAttr(attr);
             continue;
         }
-        attr->syncWaitRemoteEmpty = enable;
-        attr->syncWaitRemoteEmptySnapshotValid = false;
-        SMAP_LOGGER_INFO("Pid %d sync wait remote empty protection %s.", attr->pid, enable ? "enabled" : "disabled");
+        struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+        if (slot) {
+            EnvMutexLock(&slot->attrLock);
+        }
+        bool touched = false;
+        if (enable && !attr->groupPolicy.enabled && attr->scanType == NORMAL_SCAN) {
+            attr->syncWaitRemoteEmptyRefs++;
+            held[i] = attr;
+            touched = true;
+        } else if (!enable) {
+            if (attr->syncWaitRemoteEmptyRefs > 0) {
+                attr->syncWaitRemoteEmptyRefs--;
+            }
+            held[i] = NULL;
+            touched = true;
+        }
+        if (touched) {
+            attr->syncWaitRemoteEmpty = attr->syncWaitRemoteEmptyRefs > 0;
+            /* 新加保护需等新一轮快照；最后一个持有者解除时复位快照标记 */
+            if (enable || !attr->syncWaitRemoteEmpty) {
+                attr->syncWaitRemoteEmptySnapshotValid = false;
+            }
+        }
+        uint32_t refs = attr->syncWaitRemoteEmptyRefs;
+        if (slot) {
+            EnvMutexUnlock(&slot->attrLock);
+            PidSlotReleaseRefs(&slot, 1);
+        }
+        if (touched) {
+            SMAP_LOGGER_INFO("Pid %d sync wait remote empty protection %s, holders %u.", attr->pid,
+                             enable ? "enabled" : "released", refs);
+        }
         PutProcessAttr(attr);
     }
 }
@@ -3136,6 +3180,7 @@ static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t 
     bool allPidSuccess = true;
     int invalidPidNum;
     bool syncWaitProtected = false;
+    ProcessAttr *syncWaitHeld[MAX_NR_MIGOUT] = { NULL };
 
     ret = CheckMigOutSyncMsg(msg, pageType, maxWaitTime);
     if (ret) {
@@ -3144,7 +3189,7 @@ static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t 
 
     /* 迁移前预保护：已纳管零目标 pid 在迁移期间免于被自动移除；
      * 未纳管 pid 此时 GetProcessAttr 返回 NULL，天然跳过，迁移后再统一保护。 */
-    SetSyncWaitRemoteEmpty(msg, true);
+    SetSyncWaitRemoteEmpty(msg, true, syncWaitHeld);
     syncWaitProtected = true;
 
     ret = MigrateOutWithCapacityPolicy(msg, pageType, true);
@@ -3155,7 +3200,7 @@ static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t 
     SMAP_LOGGER_INFO("Smap migrate out done.");
 
     /* 迁移完成后为（含新纳管的）零目标 pid 建立保护，直到等待结束。 */
-    SetSyncWaitRemoteEmpty(msg, true);
+    SetSyncWaitRemoteEmpty(msg, true, syncWaitHeld);
 
     while (maxWaitTime == 0 || waitTime < maxWaitTime) {
         waitTime += WAIT_TIME;
@@ -3192,7 +3237,7 @@ static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t 
 
 out:
     if (syncWaitProtected) {
-        SetSyncWaitRemoteEmpty(msg, false);
+        SetSyncWaitRemoteEmpty(msg, false, syncWaitHeld);
     }
     return ret;
 }
@@ -3605,11 +3650,14 @@ static int ProcessConfigQueryImpl(int nid, struct OldProcessPayload *result, int
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n; k++) {
         ProcessAttr *attr = all[k]->attr;
+        EnvMutexLock(&all[k]->attrLock);
         if (!InAttrL2(attr, nid)) {
+            EnvMutexUnlock(&all[k]->attrLock);
             SMAP_LOGGER_INFO("Skip pid %d because L2 node != %d.", attr->pid, nid);
             continue;
         }
         ret = AssignOldProcessPayload(&result[i], attr, nid);
+        EnvMutexUnlock(&all[k]->attrLock);
         if (ret) {
             SMAP_LOGGER_ERROR("Smap pid %d config is invalid.", attr->pid);
             break;
@@ -3666,9 +3714,11 @@ static int RemoteNumaFreqQueryImpl(uint16_t *numa, uint64_t *freq, uint16_t leng
     for (i = 0; i < length; i++) {
         for (size_t k = 0; k < n; k++) {
             ProcessAttr *current = all[k]->attr;
+            EnvMutexLock(&all[k]->attrLock);
             if (InAttrL2(current, numa[i])) {
                 freq[i] += current->scanAttr.actCount[numa[i]].freqSum;
             }
+            EnvMutexUnlock(&all[k]->attrLock);
         }
     }
     PidSlotReleaseRefs(all, n);
