@@ -524,6 +524,17 @@ TEST_F(MigrationTest, TestBuildMigrationMsgDefersWholePairAndRotates)
     g_numaCap = oldCap;
 }
 
+extern "C" void RefreshPairAccountMask(ProcessAttr *process, int localNid, int remoteNid);
+TEST_F(MigrationTest, TestRefreshPairAccountMaskIgnoresLocalNidBeyondMaskWidth)
+{
+    ProcessAttr process = {};
+    process.managedLocalState.accountLocalMask[40] = 0x5;
+    process.managedLocalState.managedLocalMask = 0x5;
+    RefreshPairAccountMask(&process, 32, 40);
+    EXPECT_EQ(0x5U, process.managedLocalState.accountLocalMask[40]);
+    EXPECT_EQ(0x5U, process.managedLocalState.managedLocalMask);
+}
+
 TEST_F(MigrationTest, TestBuildMigrationMsgSuccess)
 {
     int ret;
