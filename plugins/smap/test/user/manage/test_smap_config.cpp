@@ -4,9 +4,13 @@
  */
 
 #include <fcntl.h>
-#include <sys/mman.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
 
@@ -147,7 +151,7 @@ TEST_F(SmapConfigTest, TestGetProcessConfigLen)
     EXPECT_EQ(header.len + PAYLOAD_HEADER_LEN, ret);
 }
 
-extern "C" size_t CalcConfigLen(int nrProcess);
+extern "C" size_t CalcConfigLen(size_t processPayloadBytes);
 TEST_F(SmapConfigTest, TestCalcConfigLen)
 {
     int ret;
@@ -194,8 +198,6 @@ TEST_F(SmapConfigTest, TestJumpToProcessConfig)
     EXPECT_EQ(&addr + numaConfigLen, ret);
 }
 
-extern "C" int RemoveConfig(void);
-extern "C" int OpenConfig(void);
 extern "C" char *JumpToProcessPayload(char *processBase);
 TEST_F(SmapConfigTest, TestJumpToProcessPayload)
 {
@@ -204,118 +206,6 @@ TEST_F(SmapConfigTest, TestJumpToProcessPayload)
 
     ret = JumpToProcessPayload(&addr);
     EXPECT_EQ(&addr + PAYLOAD_HEADER_LEN, ret);
-}
-
-extern "C" bool DoesConfigExist(void);
-TEST_F(SmapConfigTest, TestDoesConfigExist)
-{
-    bool ret;
-
-    MOCKER(access).stubs().will(returnValue(NORMAL_ERR));
-    ret = DoesConfigExist();
-    EXPECT_FALSE(ret);
-
-    GlobalMockObject::verify();
-    MOCKER(access).stubs().will(returnValue(0));
-    ret = DoesConfigExist();
-    EXPECT_TRUE(ret);
-}
-
-extern "C" int RemoveConfig(void);
-TEST_F(SmapConfigTest, TestRemoveConfig)
-{
-    int ret;
-
-    MOCKER(unlink).stubs().will(returnValue(NORMAL_ERR));
-    errno = EINVAL;
-    ret = RemoveConfig();
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(unlink).stubs().will(returnValue(NORMAL_ERR));
-    errno = ENOENT;
-    ret = RemoveConfig();
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int OpenConfig(void);
-TEST_F(SmapConfigTest, TestOpenConfig)
-{
-    int ret;
-
-    MOCKER(reinterpret_cast<int (*)(const char *, int)>(open)).stubs().will(returnValue(-1));
-    errno = EINVAL;
-    ret = OpenConfig();
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(reinterpret_cast<int (*)(const char *, int)>(open)).stubs().will(returnValue(0));
-    ret = OpenConfig();
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int RemoveAndOpenConfig(bool remove);
-TEST_F(SmapConfigTest, TestRemoveAndOpenConfig)
-{
-    int ret;
-
-    MOCKER(RemoveConfig).expects(once()).will(returnValue(0));
-    MOCKER(OpenConfig).stubs().will(returnValue(0));
-    ret = RemoveAndOpenConfig(true);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SmapConfigTest, TestRemoveAndOpenConfigTwo)
-{
-    int ret;
-
-    MOCKER(RemoveConfig).stubs().will(returnValue(-EINVAL));
-    ret = RemoveAndOpenConfig(true);
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(RemoveConfig).stubs().will(returnValue(0));
-    MOCKER(OpenConfig).stubs().will(returnValue(-ENOENT));
-    ret = RemoveAndOpenConfig(true);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-extern "C" int TruncateConfig(int fd, size_t len);
-TEST_F(SmapConfigTest, TestTruncateConfig)
-{
-    int ret;
-    int fd;
-    size_t len;
-
-    MOCKER(ftruncate).stubs().will(returnValue(NORMAL_ERR));
-    errno = EINVAL;
-    ret = TruncateConfig(fd, len);
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(ftruncate).stubs().will(returnValue(0));
-    ret = TruncateConfig(fd, len);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" char *MapConfig(int fd, size_t len, int prot, int flags);
-TEST_F(SmapConfigTest, TestMapConfig)
-{
-    char *ret;
-    char addr;
-    int fd;
-    size_t len;
-    int prot;
-    int flags;
-
-    MOCKER(mmap).stubs().will(returnValue(MAP_FAILED));
-    ret = MapConfig(fd, len, prot, flags);
-    EXPECT_EQ(nullptr, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(mmap).stubs().will(returnValue(reinterpret_cast<void *>(&addr)));
-    ret = MapConfig(fd, len, prot, flags);
-    EXPECT_EQ(&addr, ret);
 }
 
 extern "C" void WriteRunMode(char *addr, RunMode mode);
@@ -377,49 +267,7 @@ TEST_F(SmapConfigTest, TestWriteNumaConfig)
     manager.remoteNumaInfo.privateUsedInfo = nullptr;
 }
 
-extern "C" void UnmapConfig(char *addr, size_t len);
 extern "C" void WriteEmptyProcessConfigs(char *base);
-extern "C" int InitSmapConfig(int fd);
-TEST_F(SmapConfigTest, TestInitSmapConfigErrOne)
-{
-    int ret;
-    int fd;
-    char addr;
-
-    MOCKER(TruncateConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    ret = InitSmapConfig(fd);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestInitSmapConfigErrTwo)
-{
-    int ret;
-    int fd;
-    char addr;
-
-    MOCKER(TruncateConfig).stubs().will(returnValue(0));
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = InitSmapConfig(fd);
-    EXPECT_EQ(-EBADF, ret);
-}
-
-TEST_F(SmapConfigTest, TestInitSmapConfig)
-{
-    int ret;
-    int fd;
-    char addr;
-
-    MOCKER(TruncateConfig).stubs().will(returnValue(0));
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(WriteHeader).stubs().will(ignoreReturnValue());
-    MOCKER(WriteNumaConfig).stubs().will(ignoreReturnValue());
-    MOCKER(WriteEmptyProcessConfigs).stubs().will(ignoreReturnValue());
-    MOCKER(UnmapConfig).stubs().will(ignoreReturnValue());
-    ret = InitSmapConfig(fd);
-    EXPECT_EQ(0, ret);
-}
-
 extern "C" bool IsConfigHeaderValid(struct SmapConfigHeader *header);
 TEST_F(SmapConfigTest, TestIsConfigHeaderValid)
 {
@@ -473,27 +321,6 @@ TEST_F(SmapConfigTest, TestReadHeader)
     EXPECT_EQ(src.runMode, dest.runMode);
     EXPECT_EQ(src.headerLen, dest.headerLen);
     EXPECT_EQ(src.totalLen, dest.totalLen);
-}
-
-extern "C" int ParseHeader(int fd, struct SmapConfigHeader *header);
-TEST_F(SmapConfigTest, TestParseHeader)
-{
-    int ret;
-    int fd;
-    struct SmapConfigHeader header;
-    char addr;
-
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = ParseHeader(fd, &header);
-    EXPECT_EQ(-EBADF, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(ReadHeader).stubs().will(ignoreReturnValue());
-    MOCKER(IsConfigHeaderValid).stubs().will(returnValue(true));
-    MOCKER(UnmapConfig).expects(once());
-    ret = ParseHeader(fd, &header);
-    EXPECT_EQ(0, ret);
 }
 
 extern "C" bool IsRunModeValid(RunMode runMode);
@@ -1347,322 +1174,8 @@ TEST_F(SmapConfigTest, TestBuildAllProcessPayloadSkipsGroupedProcess)
     EXPECT_EQ(0, len);
 }
 
-extern "C" int MapAndWriteProcessConfig(int fd, size_t mapLen, struct ProcessPayload *payload, int nrPayload);
-TEST_F(SmapConfigTest, TestMapAndWriteProcessConfig)
-{
-    int ret;
-    int fd;
-    int nrPayload = 1;
-    char addr;
-    char processBase;
-    size_t mapLen;
-    struct ProcessPayload payload = {};
-
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = MapAndWriteProcessConfig(fd, mapLen, &payload, nrPayload);
-    EXPECT_EQ(-EBADF, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(JumpToProcessConfig).stubs().will(returnValue(&processBase));
-    MOCKER(WriteProcessConfig).stubs().will(returnValue(-EINVAL));
-    ret = MapAndWriteProcessConfig(fd, mapLen, &payload, nrPayload);
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(JumpToProcessConfig).stubs().will(returnValue(&processBase));
-    MOCKER(WriteProcessConfig).stubs().will(returnValue(0));
-    MOCKER(WriteHeader).stubs().will(ignoreReturnValue());
-    MOCKER(UnmapConfig).stubs().will(ignoreReturnValue());
-    ret = MapAndWriteProcessConfig(fd, mapLen, &payload, nrPayload);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SmapConfigTest, TestMapAndWriteProcessConfigZeroPayload)
-{
-    int ret;
-    int fd;
-    int nrPayload = 0;
-    char addr;
-    char processBase;
-    size_t mapLen;
-    struct ProcessPayload payload = {};
-
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(JumpToProcessConfig).stubs().will(returnValue(&processBase));
-    MOCKER(WriteProcessConfig).stubs().will(returnValue(0));
-    MOCKER(WriteHeader).stubs().will(ignoreReturnValue());
-    MOCKER(UnmapConfig).stubs().will(ignoreReturnValue());
-    ret = MapAndWriteProcessConfig(fd, mapLen, &payload, nrPayload);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int ChangeProcessConfig(int fd, struct ProcessPayload *payload, int nrPayload);
-TEST_F(SmapConfigTest, TestChangeProcessConfigExtendFile)
-{
-    int ret;
-    int fd;
-    size_t oldLen = 30;
-    size_t newLen = 48;
-    struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER, .headerLen = CONFIG_HEADER_LEN, .totalLen = oldLen};
-
-    MOCKER(ParseHeader).stubs().with(any(), outBoundP(&header, sizeof(header))).will(returnValue(0));
-    MOCKER(CalcConfigLen).stubs().will(returnValue(newLen));
-    MOCKER(TruncateConfig).stubs().will(returnValue(0));
-    MOCKER(MapAndWriteProcessConfig).stubs().will(returnValue(-ENOENT));
-    ret = ChangeProcessConfig(fd, nullptr, 0);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestChangeProcessConfigShrinkFile)
-{
-    int ret;
-    int fd;
-    size_t oldLen = 30;
-    size_t newLen = 20;
-    struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER, .headerLen = CONFIG_HEADER_LEN, .totalLen = oldLen};
-
-    MOCKER(ParseHeader).stubs().with(any(), outBoundP(&header, sizeof(header))).will(returnValue(0));
-    MOCKER(CalcConfigLen).stubs().will(returnValue(newLen));
-    MOCKER(TruncateConfig).stubs().will(returnValue(-EPERM));
-    MOCKER(MapAndWriteProcessConfig).stubs().will(returnValue(0));
-    ret = ChangeProcessConfig(fd, nullptr, 0);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SmapConfigTest, TestChangeProcessConfig)
-{
-    int fd;
-    MOCKER(ParseHeader).stubs().will(returnValue(-EBADF));
-    int ret = ChangeProcessConfig(fd, nullptr, 0);
-    EXPECT_EQ(-EBADF, ret);
-}
-
 extern "C" char *JumpToNumaConfig(char *base);
-extern "C" int ParseConfig(int fd, struct SmapConfigHeader *header);
-TEST_F(SmapConfigTest, TestParseConfigOne)
-{
-    int ret;
-    int fd;
-    char base;
-    char numaBase;
-    struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER_V1};
-
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(-EBADF, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(reinterpret_cast<char *>(&base)));
-    MOCKER(IsRunModeValid).stubs().will(returnValue(true));
-    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(reinterpret_cast<char *>(&numaBase)));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(true));
-    MOCKER(RecoverNumaConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(UnmapConfig).expects(once());
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
 extern "C" char *JumpToProcessConfig(char *base);
-TEST_F(SmapConfigTest, TestParseConfigTwo)
-{
-    int ret;
-    int fd;
-    char base;
-    char numaBase;
-    char processBase;
-    struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER_V1};
-
-    MOCKER(MapConfig).stubs().will(returnValue(reinterpret_cast<char *>(&base)));
-    MOCKER(IsRunModeValid).stubs().will(returnValue(true));
-    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(reinterpret_cast<char *>(&numaBase)));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(true));
-    MOCKER(RecoverNumaConfig).stubs().will(returnValue(0));
-    MOCKER(HasProcessConfig).stubs().will(returnValue(false));
-    MOCKER(RecoverProcessConfig).expects(never());
-    MOCKER(UnmapConfig).expects(once());
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(0, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(reinterpret_cast<char *>(&base)));
-    MOCKER(IsRunModeValid).stubs().will(returnValue(true));
-    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(reinterpret_cast<char *>(&numaBase)));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(true));
-    MOCKER(RecoverNumaConfig).stubs().will(returnValue(0));
-    MOCKER(HasProcessConfig).stubs().will(returnValue(true));
-    MOCKER(JumpToProcessConfig).stubs().will(returnValue(reinterpret_cast<char *>(&processBase)));
-    MOCKER(IsProcessConfigValid).stubs().will(returnValue(true));
-    MOCKER(HasProcessConfig).stubs().will(returnValue(true));
-    MOCKER(RecoverProcessConfig).stubs().will(returnValue(-EPERM));
-    MOCKER(UnmapConfig).expects(once());
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(-EPERM, ret);
-}
-
-TEST_F(SmapConfigTest, TestParseConfigThree)
-{
-    int ret;
-    int fd;
-    char base;
-    char numaBase;
-    struct SmapConfigHeader header = {.ver = SMAP_CONFIG_VER_V1};
-    MOCKER(MapConfig).stubs().will(returnValue(reinterpret_cast<char *>(&base)));
-    MOCKER(IsRunModeValid).stubs().will(returnValue(false));
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(-EINVAL, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(reinterpret_cast<char *>(&base)));
-    MOCKER(IsRunModeValid).stubs().will(returnValue(true));
-    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(reinterpret_cast<char *>(&numaBase)));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(false));
-    ret = ParseConfig(fd, &header);
-    EXPECT_EQ(-EINVAL, ret);
-}
-
-extern "C" int ReadConfig(int fd);
-TEST_F(SmapConfigTest, TestReadConfig)
-{
-    int ret;
-    int fd;
-
-    MOCKER(ParseHeader).stubs().will(returnValue(-ENOENT));
-    MOCKER(ParseConfig).expects(never());
-    ret = ReadConfig(fd);
-    EXPECT_EQ(-ENOENT, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(ParseHeader).stubs().will(returnValue(0));
-    MOCKER(ParseConfig).stubs().will(returnValue(-EPERM));
-    ret = ReadConfig(fd);
-    EXPECT_EQ(-EPERM, ret);
-}
-
-extern "C" int ChangeRunMode(int fd, RunMode runMode);
-TEST_F(SmapConfigTest, TestChangeRunMode)
-{
-    int ret;
-    int fd;
-    char addr;
-    RunMode runMode;
-
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = ChangeRunMode(fd, runMode);
-    EXPECT_EQ(-EBADF, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(MapConfig).stubs().will(returnValue(&addr));
-    MOCKER(WriteRunMode).stubs().will(ignoreReturnValue());
-    MOCKER(UnmapConfig).stubs().will(ignoreReturnValue());
-    ret = ChangeRunMode(fd, runMode);
-    EXPECT_EQ(0, ret);
-}
-
-extern "C" int ChangeOneNumaConfig(int fd, struct NumaPayload *payload);
-TEST_F(SmapConfigTest, TestChangeOneNumaConfig)
-{
-    int ret;
-    int fd;
-    struct NumaPayload payload;
-
-    MOCKER(ParseHeader).stubs().will(returnValue(-ENOENT));
-    MOCKER(MapConfig).expects(never());
-    ret = ChangeOneNumaConfig(fd, &payload);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestChangeOneNumaConfigTwo)
-{
-    int ret;
-    int fd;
-    struct NumaPayload payload;
-
-    MOCKER(ParseHeader).stubs().will(returnValue(0));
-    MOCKER(MapConfig).stubs().will(returnValue(static_cast<char *>(nullptr)));
-    ret = ChangeOneNumaConfig(fd, &payload);
-    EXPECT_EQ(-EBADF, ret);
-
-    char *addr = (char *)malloc(sizeof(char));
-    char *numaBase = (char *)malloc(sizeof(char));
-    GlobalMockObject::verify();
-    MOCKER(ParseHeader).stubs().will(returnValue(0));
-    MOCKER(MapConfig).stubs().will(returnValue(addr));
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(numaBase));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(false));
-    ret = ChangeOneNumaConfig(fd, &payload);
-    EXPECT_EQ(-EINVAL, ret);
-    free(addr);
-    free(numaBase);
-}
-
-TEST_F(SmapConfigTest, TestChangeOneNumaConfigThree)
-{
-    int ret;
-    int fd;
-    struct NumaPayload payload;
-
-    char *addr = (char *)malloc(sizeof(char));
-    char *numaBase = (char *)malloc(sizeof(char));
-    MOCKER(ParseHeader).stubs().will(returnValue(0));
-    MOCKER(MapConfig).stubs().will(returnValue(addr));
-    MOCKER(JumpToNumaConfig).stubs().will(returnValue(numaBase));
-    MOCKER(IsNumaConfigValid).stubs().will(returnValue(true));
-    MOCKER(WriteOneNumaConfig).stubs().will(ignoreReturnValue());
-    MOCKER(UnmapConfig).stubs().will(ignoreReturnValue());
-    ret = ChangeOneNumaConfig(fd, &payload);
-    EXPECT_EQ(0, ret);
-    free(addr);
-    free(numaBase);
-}
-
-extern "C" bool DoesConfigExist(void);
-extern "C" int RemoveAndOpenConfig(bool remove);
-TEST_F(SmapConfigTest, TestRecoverFromConfig)
-{
-    int ret;
-    int fd = 1;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(ReadConfig).expects(never());
-    MOCKER(InitSmapConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = RecoverFromConfig();
-    EXPECT_EQ(-ENOENT, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(DoesConfigExist).stubs().will(returnValue(true));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(ReadConfig).stubs().will(returnValue(0));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = RecoverFromConfig();
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SmapConfigTest, TestRecoverFromConfigTwo)
-{
-    int ret;
-    int fd = 1;
-    MOCKER(DoesConfigExist).stubs().will(returnValue(true));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(-1));
-    ret = RecoverFromConfig();
-    EXPECT_EQ(-1, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(DoesConfigExist).stubs().will(returnValue(true));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd)).then(returnValue(-ENOENT));
-    MOCKER(ReadConfig).stubs().will(returnValue(1));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = RecoverFromConfig();
-    EXPECT_EQ(-ENOENT, ret);
-}
-
 TEST_F(SmapConfigTest, TestSyncRunModeInvalidRunMode)
 {
     int ret;
@@ -1675,46 +1188,6 @@ TEST_F(SmapConfigTest, TestSyncRunModeInvalidRunMode)
     runMode = MAX_RUN_MODE;
     ret = SyncRunMode((RunMode)runMode);
     EXPECT_EQ(-EINVAL, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncRunMode)
-{
-    int ret;
-    int fd = 1;
-    RunMode runMode = MEM_POOL_MODE;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(0));
-    MOCKER(ChangeRunMode).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = SyncRunMode(runMode);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncRunModeTwo)
-{
-    int ret;
-    RunMode runMode = MEM_POOL_MODE;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(-ENOENT));
-    ret = SyncRunMode(runMode);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncRunModeThree)
-{
-    int ret;
-    int fd = 1;
-    RunMode runMode = MEM_POOL_MODE;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).stubs().will(returnValue(0));
-    ret = SyncRunMode(runMode);
-    EXPECT_EQ(-ENOENT, ret);
 }
 
 TEST_F(SmapConfigTest, TestSyncOneNumaConfigInvalidLocal)
@@ -1747,108 +1220,6 @@ TEST_F(SmapConfigTest, TestSyncOneNumaConfigInvalidRemote)
     EXPECT_EQ(-EINVAL, ret);
 }
 
-TEST_F(SmapConfigTest, TestSyncOneNumaConfig)
-{
-    int ret;
-    int fd = 1;
-    int nrLocal = 2;
-    int local = 1;
-    int remote = 6;
-    size_t size = 256;
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocal));
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(0));
-    MOCKER(ChangeOneNumaConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = SyncOneNumaConfig(local, remote, size);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncOneNumaConfigTwo)
-{
-    int ret;
-    int nrLocal = 2;
-    int local = 1;
-    int remote = 6;
-    size_t size = 256;
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocal));
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(-ENOENT));
-    ret = SyncOneNumaConfig(local, remote, size);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncOneNumaConfigSuccess)
-{
-    int ret;
-    int fd = 1;
-    int nrLocal = 2;
-    int local = 1;
-    int remote = 6;
-    size_t size = 256;
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocal));
-    MOCKER(DoesConfigExist).stubs().will(returnValue(true));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(ChangeOneNumaConfig).stubs().will(returnValue(0));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = SyncOneNumaConfig(local, remote, size);
-    EXPECT_EQ(0, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncOneNumaConfigThree)
-{
-    int ret;
-    int nrLocal = 2;
-    int local = 1;
-    int remote = 6;
-    size_t size = 256;
-
-    MOCKER(GetNrLocalNuma).stubs().will(returnValue(nrLocal));
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(0));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).stubs().will(returnValue(0));
-    ret = SyncOneNumaConfig(local, remote, size);
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncAllProcessConfig)
-{
-    int ret;
-    int fd = 1;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(0));
-    MOCKER(ChangeProcessConfig).stubs().will(returnValue(-ENOENT));
-    MOCKER(close).expects(once()).will(returnValue(0));
-    ret = SyncAllProcessConfig();
-    EXPECT_EQ(-ENOENT, ret);
-}
-
-TEST_F(SmapConfigTest, TestSyncAllProcessConfigTwo)
-{
-    int ret;
-    int fd = 1;
-
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(-ENOENT));
-    ret = SyncAllProcessConfig();
-    EXPECT_EQ(-ENOENT, ret);
-
-    GlobalMockObject::verify();
-    MOCKER(DoesConfigExist).stubs().will(returnValue(false));
-    MOCKER(RemoveAndOpenConfig).stubs().will(returnValue(fd));
-    MOCKER(InitSmapConfig).stubs().will(returnValue(-EBADF));
-    MOCKER(close).stubs().will(returnValue(0));
-    ret = SyncAllProcessConfig();
-    EXPECT_EQ(-EBADF, ret);
-}
-
 extern "C" int SyncAllProcessConfigLocked(struct ProcessPayload *payload, int nrPayload);
 extern "C" uint64_t g_smapConfigSyncSeq;
 extern "C" uint64_t g_smapConfigWrittenSeq;
@@ -1876,4 +1247,343 @@ TEST_F(SmapConfigTest, TestSyncAllProcessConfigSkipsStaleSnapshot)
     EXPECT_EQ(0, SyncAllProcessConfig());
     EXPECT_EQ(g_smapConfigSyncSeq, g_smapConfigWrittenSeq);
     g_smapConfigWrittenSeq = oldWritten > g_smapConfigWrittenSeq ? oldWritten : g_smapConfigWrittenSeq;
+}
+
+/* ---------------- 配置文件映像读写（真实文件 I/O，落在临时目录） ---------------- */
+extern "C" const char *SmapConfigPath(void);
+extern "C" int LoadConfigImage(const char *path, struct SmapConfigImage *img);
+extern "C" int StoreConfigImage(const char *path, const struct SmapConfigImage *img);
+extern "C" int BuildInitConfigImage(struct SmapConfigImage *img);
+extern "C" void FreeConfigImage(struct SmapConfigImage *img);
+extern "C" int ConfigWriteFull(int fd, const char *buf, size_t len);
+extern "C" int ChangeProcessConfig(struct SmapConfigImage *img, struct ProcessPayload *payload, int nrPayload);
+extern "C" int ParseConfig(const struct SmapConfigImage *img);
+extern "C" int ChangeOneNumaConfig(struct SmapConfigImage *img, struct NumaPayload *payload);
+extern "C" int SyncRunModeLocked(RunMode runMode);
+extern "C" int SyncOneNumaConfigLocked(int local, int remote, size_t size);
+extern "C" int RecoverFromConfigLocked(void);
+extern "C" void WriteNumaConfig(char *base);
+extern "C" void RecoverRunMode(RunMode runMode);
+extern "C" int RecoverNumaConfig(char *numaBase);
+extern "C" int RecoverProcessConfig(char *processBase);
+
+/* WriteNumaConfig 依赖 remoteNumaInfo 二维数组；这里只写出合法的 NUMA 配置长度，载荷保持为 0 */
+static void FakeWriteNumaConfig(char *base)
+{
+    reinterpret_cast<struct PayloadHeader *>(base)->len = (uint32_t)CalcNumaPayloadLen();
+}
+
+class SmapConfigFileTest : public ::testing::Test {
+protected:
+    char dir[64] = {};
+    std::string path;
+
+    void SetUp() override
+    {
+        ASSERT_EQ(EOK, strcpy_s(dir, sizeof(dir), "/tmp/smap_cfg_ut_XXXXXX"));
+        ASSERT_NE(nullptr, mkdtemp(dir));
+        path = std::string(dir) + "/smap_config";
+        MOCKER(SmapConfigPath).stubs().will(returnValue(static_cast<const char *>(path.c_str())));
+        MOCKER(GetNrLocalNuma).stubs().will(returnValue(1));
+        MOCKER(WriteNumaConfig).stubs().will(invoke(FakeWriteNumaConfig));
+    }
+
+    void TearDown() override
+    {
+        GlobalMockObject::verify();
+        DIR *d = opendir(dir);
+        if (d != nullptr) {
+            struct dirent *e;
+            while ((e = readdir(d)) != nullptr) {
+                if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
+                    (void)unlink((std::string(dir) + "/" + e->d_name).c_str());
+                }
+            }
+            closedir(d);
+        }
+        (void)rmdir(dir);
+    }
+
+    int CountFiles()
+    {
+        int n = 0;
+        DIR *d = opendir(dir);
+        if (d == nullptr) {
+            return -1;
+        }
+        struct dirent *e;
+        while ((e = readdir(d)) != nullptr) {
+            if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) {
+                n++;
+            }
+        }
+        closedir(d);
+        return n;
+    }
+
+    void WriteRaw(const void *data, size_t len)
+    {
+        int fd = open(path.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0600);
+        ASSERT_GE(fd, 0);
+        if (len > 0) {
+            ASSERT_EQ((ssize_t)len, write(fd, data, len));
+        }
+        close(fd);
+    }
+
+    std::vector<char> ReadRaw()
+    {
+        std::vector<char> out;
+        int fd = open(path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            return out;
+        }
+        char buf[4096];
+        ssize_t n;
+        while ((n = read(fd, buf, sizeof(buf))) > 0) {
+            out.insert(out.end(), buf, buf + n);
+        }
+        close(fd);
+        return out;
+    }
+
+    void StoreInit(RunMode mode)
+    {
+        struct SmapConfigImage img = {};
+        ASSERT_EQ(0, BuildInitConfigImage(&img));
+        reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode = mode;
+        ASSERT_EQ(0, StoreConfigImage(path.c_str(), &img));
+        FreeConfigImage(&img);
+    }
+};
+
+TEST_F(SmapConfigFileTest, LoadMissingFile)
+{
+    struct SmapConfigImage img = {};
+    EXPECT_EQ(-ENOENT, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(nullptr, img.data);
+}
+
+TEST_F(SmapConfigFileTest, LoadEmptyOrShortFileIsInvalidNotFatal)
+{
+    /* 0 字节/短文件：旧实现 mmap 后读头部会 SIGBUS，现在应返回 -EINVAL */
+    struct SmapConfigImage img = {};
+    WriteRaw("", 0);
+    EXPECT_EQ(-EINVAL, LoadConfigImage(path.c_str(), &img));
+    WriteRaw("abcd", 4);
+    EXPECT_EQ(-EINVAL, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(nullptr, img.data);
+}
+
+TEST_F(SmapConfigFileTest, LoadRejectsTotalLenBeyondFileSize)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->totalLen = (uint32_t)img.len + 64;
+    WriteRaw(img.data, img.len);
+    FreeConfigImage(&img);
+
+    EXPECT_EQ(-EINVAL, LoadConfigImage(path.c_str(), &img));
+}
+
+TEST_F(SmapConfigFileTest, LoadAcceptsTrailingBytesFromLegacyShrinkFailure)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    std::vector<char> raw(img.data, img.data + img.len);
+    raw.resize(raw.size() + 32, 0x5a);
+    size_t len = img.len;
+    FreeConfigImage(&img);
+    WriteRaw(raw.data(), raw.size());
+
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(len, img.len);
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, StoreAndLoadRoundTrip)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    EXPECT_EQ(CalcConfigLen(0), img.len);
+    ASSERT_EQ(0, StoreConfigImage(path.c_str(), &img));
+
+    /* 临时文件已被 rename，目录中只有配置文件本身，权限 0600 */
+    EXPECT_EQ(1, CountFiles());
+    struct stat st;
+    ASSERT_EQ(0, stat(path.c_str(), &st));
+    EXPECT_EQ(0600U, st.st_mode & 0777U);
+    EXPECT_EQ((off_t)img.len, st.st_size);
+
+    struct SmapConfigImage loaded = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &loaded));
+    ASSERT_EQ(img.len, loaded.len);
+    EXPECT_EQ(0, memcmp(img.data, loaded.data, img.len));
+    FreeConfigImage(&img);
+    FreeConfigImage(&loaded);
+}
+
+TEST_F(SmapConfigFileTest, StoreFailureKeepsOldFile)
+{
+    StoreInit(WATERLINE_MODE);
+    std::vector<char> before = ReadRaw();
+
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode = MEM_POOL_MODE;
+    /* tmpfs 写满：返回 -ENOSPC，原文件保持不变，临时文件被清理 */
+    MOCKER(ConfigWriteFull).stubs().will(returnValue(-ENOSPC));
+    EXPECT_EQ(-ENOSPC, StoreConfigImage(path.c_str(), &img));
+    FreeConfigImage(&img);
+
+    EXPECT_EQ(before, ReadRaw());
+    EXPECT_EQ(1, CountFiles());
+}
+
+TEST_F(SmapConfigFileTest, SyncRunModeCreatesAndUpdatesFile)
+{
+    ASSERT_EQ(0, SyncRunModeLocked(MEM_POOL_MODE));
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(MEM_POOL_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
+    FreeConfigImage(&img);
+
+    ASSERT_EQ(0, SyncRunModeLocked(WATERLINE_MODE));
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(WATERLINE_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, SyncRunModeRebuildsCorruptedFile)
+{
+    WriteRaw("", 0);
+    ASSERT_EQ(0, SyncRunModeLocked(MEM_POOL_MODE));
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(CalcConfigLen(0), img.len);
+    EXPECT_EQ(MEM_POOL_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, SyncOneNumaConfigWritesPayload)
+{
+    ASSERT_EQ(0, SyncOneNumaConfigLocked(0, 3, 256));
+    ASSERT_EQ(0, SyncOneNumaConfigLocked(-1, 2, 128));
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    struct NumaPayload *np = reinterpret_cast<struct NumaPayload *>(JumpToNumaPayload(JumpToNumaConfig(img.data)));
+    EXPECT_EQ(256U, np[3].size);
+    /* 共享区紧跟 nrLocalNuma(1) 行私有区 */
+    EXPECT_EQ(128U, np[SMAP_MAX_NUMNODES + 2].size);
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, SyncAllProcessConfigGrowsAndShrinksFile)
+{
+    struct ProcessPayload p[1] = {};
+    p[0].pid = 4321;
+    p[0].type = VM_TYPE;
+    p[0].srcNid = NUMA_NO_NODE;
+    ASSERT_EQ(0, SyncAllProcessConfigLocked(p, 1));
+
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    size_t stride = CONFIG_PROC_HEADER_LEN + (size_t)NumaWordsForCap() * sizeof(unsigned long);
+    EXPECT_EQ(CalcConfigLen(stride), img.len);
+    char *processBase = JumpToProcessConfig(img.data);
+    EXPECT_EQ((uint32_t)stride, reinterpret_cast<struct PayloadHeader *>(processBase)->len);
+    EXPECT_EQ(4321, reinterpret_cast<struct ProcessPayloadHeader *>(JumpToProcessPayload(processBase))->pid);
+    FreeConfigImage(&img);
+
+    ASSERT_EQ(0, SyncAllProcessConfigLocked(nullptr, 0));
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(CalcConfigLen(0), img.len);
+    FreeConfigImage(&img);
+    struct stat st;
+    ASSERT_EQ(0, stat(path.c_str(), &st));
+    EXPECT_EQ((off_t)CalcConfigLen(0), st.st_size);
+    EXPECT_EQ(1, CountFiles());
+}
+
+TEST_F(SmapConfigFileTest, ChangeOnInvalidImage)
+{
+    char shortBuf[4] = {};
+    struct SmapConfigImage img = { shortBuf, sizeof(shortBuf) };
+    EXPECT_EQ(-EINVAL, ChangeProcessConfig(&img, nullptr, 0));
+
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct PayloadHeader *>(JumpToNumaConfig(img.data))->len = 1;
+    struct NumaPayload np = { 0, 3, 1 };
+    EXPECT_EQ(-EINVAL, ChangeOneNumaConfig(&img, &np));
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, ParseConfigPaths)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode = MAX_RUN_MODE;
+    EXPECT_EQ(-EINVAL, ParseConfig(&img));
+
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode = WATERLINE_MODE;
+    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
+    MOCKER(RecoverNumaConfig).stubs().will(returnValue(-ENOENT));
+    EXPECT_EQ(-ENOENT, ParseConfig(&img));
+    GlobalMockObject::verify();
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(1));
+    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
+    MOCKER(RecoverNumaConfig).stubs().will(returnValue(0));
+    MOCKER(RecoverProcessConfig).expects(once()).will(returnValue(0));
+    EXPECT_EQ(0, ParseConfig(&img));
+    GlobalMockObject::verify();
+
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(1));
+    MOCKER(RecoverRunMode).stubs().will(ignoreReturnValue());
+    MOCKER(RecoverNumaConfig).stubs().will(returnValue(0));
+    MOCKER(RecoverProcessConfig).stubs().will(returnValue(-EPERM));
+    EXPECT_EQ(-EPERM, ParseConfig(&img));
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, RecoverCreatesMissingFile)
+{
+    MOCKER(ParseConfig).expects(never());
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(CalcConfigLen(0), img.len);
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, RecoverRebuildsEmptyFile)
+{
+    WriteRaw("", 0);
+    MOCKER(ParseConfig).expects(never());
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    FreeConfigImage(&img);
+}
+
+TEST_F(SmapConfigFileTest, RecoverParsesValidFileWithoutRewriting)
+{
+    StoreInit(MEM_POOL_MODE);
+    std::vector<char> before = ReadRaw();
+    MOCKER(ParseConfig).expects(once()).will(returnValue(0));
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    EXPECT_EQ(before, ReadRaw());
+}
+
+TEST_F(SmapConfigFileTest, RecoverRebuildsWhenParseFails)
+{
+    StoreInit(MEM_POOL_MODE);
+    MOCKER(ParseConfig).expects(once()).will(returnValue(-EINVAL));
+    MOCKER(GetRunMode).stubs().will(returnValue(WATERLINE_MODE));
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(WATERLINE_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
+    FreeConfigImage(&img);
 }
