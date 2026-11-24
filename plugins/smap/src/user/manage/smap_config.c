@@ -39,6 +39,8 @@ static pthread_mutex_t g_smapConfigLock = PTHREAD_MUTEX_INITIALIZER;
 /* SyncAllProcessConfig 快照序号（原子递增）与已落盘的最大序号（g_smapConfigLock 保护） */
 static uint64_t g_smapConfigSyncSeq = 0;
 static uint64_t g_smapConfigWrittenSeq = 0;
+/* 选定的配置文件路径（首次使用时确定，g_smapConfigLock 保护） */
+static const char *g_smapConfigPath = NULL;
 
 /*
  * Functions to calculate config/payload length
@@ -254,10 +256,65 @@ static void FreeConfigImage(struct SmapConfigImage *img)
     img->len = 0;
 }
 
-/* SmapConfigPath - 配置文件路径 */
+/* SmapConfigLegacyPath - 旧版本使用的配置位置（全局可写的 /dev/shm） */
+static const char *SmapConfigLegacyPath(void)
+{
+    return SMAP_CONFIG_LEGACY_PATH;
+}
+
+/*
+ * PrepareConfigDir - make sure @dir exists, is a real directory owned by the effective user and is not writable by
+ * group/others (no symlink is followed)
+ */
+static int PrepareConfigDir(const char *dir)
+{
+    struct stat st;
+    int ret = 0;
+
+    if (mkdir(dir, SMAP_CONFIG_DIR_MODE) == NORMAL_ERR && errno != EEXIST) {
+        return -errno;
+    }
+    int fd = open(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd == NORMAL_ERR) {
+        return -errno;
+    }
+    if (fstat(fd, &st) == NORMAL_ERR) {
+        ret = -errno;
+    } else if (!S_ISDIR(st.st_mode) || st.st_uid != geteuid() || (st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        SMAP_LOGGER_ERROR("Untrusted smap config dir %s, uid %u, mode 0%o.", dir, (unsigned int)st.st_uid,
+                          (unsigned int)st.st_mode);
+        ret = -EPERM;
+    }
+    (void)close(fd);
+    return ret;
+}
+
+/*
+ * SmapConfigPath - smap config location, decided once per process (caller holds g_smapConfigLock)
+ *
+ * Prefer the private directory; fall back to the legacy /dev/shm location (with the per-file ownership checks done in
+ * LoadConfigImage) when the directory cannot be prepared, e.g. tmpfiles.d entry not installed and no permission to
+ * create it.
+ */
 static const char *SmapConfigPath(void)
 {
-    return SMAP_CONFIG_PATH;
+    if (g_smapConfigPath == NULL) {
+        int ret = PrepareConfigDir(SMAP_CONFIG_DIR);
+        if (ret == 0) {
+            g_smapConfigPath = SMAP_CONFIG_PATH;
+        } else {
+            SMAP_LOGGER_WARNING("Smap config dir %s unavailable: %d, fall back to %s.", SMAP_CONFIG_DIR, ret,
+                                SmapConfigLegacyPath());
+            g_smapConfigPath = SmapConfigLegacyPath();
+        }
+    }
+    return g_smapConfigPath;
+}
+
+/* IsConfigFileTrusted - 只信任本进程有效用户拥有、组/其他用户无任何权限的普通文件 */
+static bool IsConfigFileTrusted(const struct stat *st)
+{
+    return S_ISREG(st->st_mode) && st->st_uid == geteuid() && (st->st_mode & (S_IRWXG | S_IRWXO)) == 0;
 }
 
 /* ConfigMaxLen - 合法配置文件大小上界：头部 + NUMA 配置 + 槽位上限条最大宽度的进程记录 */
@@ -312,7 +369,8 @@ static int ConfigWriteFull(int fd, const char *buf, size_t len)
  *
  * Returns 0 on success, -ENOENT if the file does not exist, -EPROTONOSUPPORT if it was written in a format version
  * this build cannot recover, -EINVAL if it is too short, too large or its header is invalid (including totalLen
- * beyond the file size), or another negative errno on I/O failure.
+ * beyond the file size), -EPERM if it is a symlink or not a private regular file of the effective user, or another
+ * negative errno on I/O failure.
  */
 static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
 {
@@ -320,16 +378,29 @@ static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
     struct SmapConfigHeader header;
     int ret;
 
-    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    /* 不跟随符号链接；O_NONBLOCK 避免被替换成 FIFO 时阻塞 */
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     if (fd == NORMAL_ERR) {
-        return -errno;
+        ret = -errno;
+        if (ret == -ELOOP) {
+            SMAP_LOGGER_ERROR("Smap config %s is a symlink, refuse to use it.", path);
+            return -EPERM;
+        }
+        return ret;
     }
     if (fstat(fd, &st) == NORMAL_ERR) {
         ret = -errno;
         (void)close(fd);
         return ret;
     }
-    if (!S_ISREG(st.st_mode) || st.st_size < (off_t)CONFIG_HEADER_LEN || (size_t)st.st_size > ConfigMaxLen()) {
+    if (!IsConfigFileTrusted(&st)) {
+        /* 非本用户创建或权限过宽：可能被他人预置/篡改，拒绝使用 */
+        SMAP_LOGGER_ERROR("Untrusted smap config %s, uid %u, mode 0%o.", path, (unsigned int)st.st_uid,
+                          (unsigned int)st.st_mode);
+        (void)close(fd);
+        return -EPERM;
+    }
+    if (st.st_size < (off_t)CONFIG_HEADER_LEN || (size_t)st.st_size > ConfigMaxLen()) {
         SMAP_LOGGER_ERROR("Invalid smap config file, mode 0%o, size %lld.", (unsigned int)st.st_mode,
                           (long long)st.st_size);
         (void)close(fd);
@@ -1138,22 +1209,71 @@ static int LoadOrInitConfigImage(struct SmapConfigImage *img)
     return ret;
 }
 
+/*
+ * LoadLegacyConfigImage - load the config left at the legacy location by an older release (upgrade path)
+ *
+ * Returns 0 if a trusted, usable legacy config was loaded, -ENOENT otherwise (an unusable or untrusted legacy file is
+ * left untouched and ignored).
+ */
+static int LoadLegacyConfigImage(const char *path, struct SmapConfigImage *img)
+{
+    const char *legacyPath = SmapConfigLegacyPath();
+    if (strcmp(path, legacyPath) == 0) {
+        return -ENOENT;
+    }
+    int ret = LoadConfigImage(legacyPath, img);
+    if (ret == 0) {
+        SMAP_LOGGER_INFO("Migrate smap config from legacy %s to %s.", legacyPath, path);
+        return 0;
+    }
+    if (ret != -ENOENT) {
+        SMAP_LOGGER_WARNING("Ignore legacy smap config %s: %d.", legacyPath, ret);
+    }
+    return -ENOENT;
+}
+
+/* FinishLegacyMigration - persist the migrated config at the new location, then drop the legacy file */
+static void FinishLegacyMigration(const char *path, const struct SmapConfigImage *img)
+{
+    int ret = StoreConfigImage(path, img);
+    if (ret) {
+        /* 保留旧文件；后续 SyncAllProcessConfig 会按内存状态在新位置重建 */
+        SMAP_LOGGER_ERROR("Store migrated smap config to %s failed: %d, keep legacy file.", path, ret);
+        return;
+    }
+    if (unlink(SmapConfigLegacyPath()) == NORMAL_ERR && errno != ENOENT) {
+        SMAP_LOGGER_WARNING("Remove legacy smap config failed: %d.", -errno);
+    }
+}
+
 static int RecoverFromConfigLocked(void)
 {
     struct SmapConfigImage img = { 0 };
-    int ret = LoadConfigImage(SmapConfigPath(), &img);
+    const char *path = SmapConfigPath();
+    bool fromLegacy = false;
+    int ret = LoadConfigImage(path, &img);
+    if (ret == -ENOENT) {
+        ret = LoadLegacyConfigImage(path, &img);
+        fromLegacy = ret == 0;
+    }
     if (ret == 0) {
         ret = ParseConfig(&img);
-        FreeConfigImage(&img);
         if (ret == 0) {
+            if (fromLegacy) {
+                FinishLegacyMigration(path, &img);
+            }
+            FreeConfigImage(&img);
             SMAP_LOGGER_INFO("Read config done.");
             return 0;
         }
+        FreeConfigImage(&img);
         // Keep the old config as a backup and create a new one if parse is failed
         SMAP_LOGGER_ERROR("Parse config error: %d.", ret);
-        BackupConfig(SmapConfigPath(), ret);
+        if (!fromLegacy) {
+            BackupConfig(path, ret);
+        }
     } else if (IsConfigUnusable(ret)) {
-        BackupConfig(SmapConfigPath(), ret);
+        BackupConfig(path, ret);
     } else if (ret != -ENOENT) {
         SMAP_LOGGER_ERROR("Read config error: %d.", ret);
         return ret;
@@ -1161,7 +1281,7 @@ static int RecoverFromConfigLocked(void)
 
     ret = BuildInitConfigImage(&img);
     if (ret == 0) {
-        ret = StoreConfigImage(SmapConfigPath(), &img);
+        ret = StoreConfigImage(path, &img);
         FreeConfigImage(&img);
     }
     if (ret) {

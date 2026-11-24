@@ -21,6 +21,8 @@ Requires:      kernel >= 5.10.0-136.12.0.86
 %define ucache_dir /lib/modules/ucache
 %define smap_libsmap_dir /usr/lib64
 %define udev_rules_dir %{_sysconfdir}/udev/rules.d
+%define tmpfiles_dir /usr/lib/tmpfiles.d
+%define tmpfiles_conf %{tmpfiles_dir}/ubturbo-smap.conf
 %define smap_conf_dir /opt/ubturbo/conf/smap
 %define smap_conf_file %{smap_conf_dir}/smap_strategy.conf
 
@@ -44,12 +46,14 @@ mkdir -p -m755 ${RPM_BUILD_ROOT}/%{smap_dir}
 mkdir -p -m755 ${RPM_BUILD_ROOT}/%{ucache_dir}
 mkdir -p -m755 ${RPM_BUILD_ROOT}/%{smap_libsmap_dir}
 mkdir -p -m755 ${RPM_BUILD_ROOT}/%{udev_rules_dir}
+mkdir -p -m755 ${RPM_BUILD_ROOT}/%{tmpfiles_dir}
 mkdir -p -m755 ${RPM_BUILD_ROOT}/%{smap_conf_dir}
 %{__install} -b -m 0500 %{_builddir}/smap/src/kernel/smap.ko ${RPM_BUILD_ROOT}/%{smap_dir}
 %{__install} -b -m 0500 %{_builddir}/smap/src/ucache/ucache.ko ${RPM_BUILD_ROOT}/%{ucache_dir}
 %{__install} -b -m 0500 %{_builddir}/smap/output/smap/lib/libsmap.so ${RPM_BUILD_ROOT}/%{smap_libsmap_dir}
 %{__install} -b -m 0640 %{_builddir}/smap/conf/smap_strategy.conf ${RPM_BUILD_ROOT}/%{smap_conf_file}
 %{__install} -b -m 0640 %{_builddir}/smap/99-smap.rules ${RPM_BUILD_ROOT}/%{udev_rules_dir}
+%{__install} -b -m 0644 %{_builddir}/smap/ubturbo-smap-tmpfiles.conf ${RPM_BUILD_ROOT}/%{tmpfiles_conf}
 
 %clean
 rm -rf ${RPM_BUILD_ROOT}
@@ -64,6 +68,8 @@ rm -rf ${RPM_BUILD_ROOT}
 # upgrade must overwrite the old config. Local modifications are saved as .rpmorig.
 %config %attr(0640,ubturbo,ubturbo) %{smap_conf_file}
 %{udev_rules_dir}/99-smap.rules
+# Private runtime directory for the persisted SMAP config (/run/smap, 0700 ubturbo:ubturbo)
+%attr(0644,root,root) %{tmpfiles_conf}
 
 %pre
 
@@ -73,6 +79,8 @@ depmod -a
 echo "external 6.6.0-* %{smap_dir}" > /etc/depmod.d/smap.conf
 echo "external 6.6.0-* %{ucache_dir}" > /etc/depmod.d/ucache.conf
 depmod -a
+# Create /run/smap now instead of waiting for the next boot; the daemon migrates /dev/shm/smap_config into it
+systemd-tmpfiles --create %{tmpfiles_conf} >/dev/null 2>&1 || :
 
 %preun
 if [ "$1" = "0" ]; then

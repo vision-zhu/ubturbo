@@ -17,7 +17,15 @@
 
 #define NORMAL_ERR (-1)
 
-#define SMAP_CONFIG_PATH "/dev/shm/smap_config"
+/*
+ * 配置放在 daemon 用户私有目录（tmpfs，跨 daemon 重启保留、重启机器清空，与原 /dev/shm 语义一致），
+ * 目录由 tmpfiles.d（smap.spec 安装 ubturbo-smap-tmpfiles.conf）按 0700 ubturbo:ubturbo 创建。
+ * 私有目录不可用时退回旧位置 /dev/shm，并对文件做属主/权限/符号链接校验。
+ */
+#define SMAP_CONFIG_DIR "/run/smap"
+#define SMAP_CONFIG_DIR_MODE (0700)
+#define SMAP_CONFIG_PATH SMAP_CONFIG_DIR "/smap_config"
+#define SMAP_CONFIG_LEGACY_PATH "/dev/shm/smap_config"
 #define SMAP_CONFIG_MODE (0600)
 #define SMAP_CONFIG_PATH_MAX 256
 /* 不可用（损坏/版本不支持）的旧配置改名保留的后缀 */
