@@ -88,6 +88,8 @@ bool GetMigrateModeChanged(void);
 
 void SetMigrateModeChanged(bool val);
 
+void GetScanCpuRangeConfig(uint32_t *cpuMin, uint32_t *cpuMax, bool *configured);
+
 uint32_t GetScanCpuMinConfig(void);
 
 uint32_t GetScanCpuMaxConfig(void);

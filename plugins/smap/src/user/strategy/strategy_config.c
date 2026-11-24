@@ -13,6 +13,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include "smap_user_log.h"
 #include "securec.h"
 #include "manage/thread_pool.h"
@@ -123,6 +124,21 @@ static StrategyConfig g_tmpStrategyConfig;
 
 static StrategyConfig g_strategyConfig;
 
+/*
+ * g_strategyConfig 只由 daemon 线程（StrategyConfigRead / Set*Changed）写入，PID worker、
+ * 迁移子线程和 IPC 线程并发读取：写入在锁内完成，getter 在锁内取快照，读方不会看到半更新的值。
+ * daemon 自身读取不加锁（唯一写者）。锁内不得调用本文件的 getter（非递归锁）。
+ */
+static pthread_mutex_t g_strategyConfigLock = PTHREAD_MUTEX_INITIALIZER;
+
+static StrategyConfig StrategyConfigSnapshot(void)
+{
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
+    StrategyConfig cfg = g_strategyConfig;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
+    return cfg;
+}
+
 /* idempotency guard: InitStrategyConfig runs only once (first StrategyConfigRead),
  * so periodic reload never resets runtime config to defaults */
 static bool g_strategyConfigInited = false;
@@ -160,172 +176,192 @@ static void WarnParseError(int lineNo, const char *fmt, ...)
 
 bool GetAdaptivePeriodEnableConfig(void)
 {
-    return g_strategyConfig.adaptivePeriodEnable;
+    return StrategyConfigSnapshot().adaptivePeriodEnable;
 }
 
 void GetAdaptivePeriods(bool slow, uint32_t *scan, uint32_t *migrate)
 {
+    StrategyConfig cfg = StrategyConfigSnapshot();
     *scan = slow ? DEFAULT_ADAPTIVE_SLOW_SCAN_PERIOD : DEFAULT_SCAN_PERIOD;
     *migrate = slow ? DEFAULT_ADAPTIVE_SLOW_MIGRATE_PERIOD : DEFAULT_MIGRATE_PERIOD;
     if (GetFileConfSwitchConfig()) {
-        *scan = slow ? g_strategyConfig.adaptiveSlowScanPeriod : g_strategyConfig.adaptiveFastScanPeriod;
-        *migrate = slow ? g_strategyConfig.adaptiveSlowMigratePeriod : g_strategyConfig.adaptiveFastMigratePeriod;
+        *scan = slow ? cfg.adaptiveSlowScanPeriod : cfg.adaptiveFastScanPeriod;
+        *migrate = slow ? cfg.adaptiveSlowMigratePeriod : cfg.adaptiveFastMigratePeriod;
     }
 }
 
 uint32_t GetScanPeriodConfig(void)
 {
-    return g_strategyConfig.scanPeriod;
+    return StrategyConfigSnapshot().scanPeriod;
 }
 
 uint32_t GetMigratePeriodConfig(void)
 {
-    return g_strategyConfig.migratePeriod;
+    return StrategyConfigSnapshot().migratePeriod;
 }
 
 uint32_t GetRemoteFreqPercentileConfig(void)
 {
-    return g_strategyConfig.remoteFreqPercentile;
+    return StrategyConfigSnapshot().remoteFreqPercentile;
 }
 
 uint32_t GetSlowThresholdConfig(void)
 {
-    return g_strategyConfig.slowThreshold;
+    return StrategyConfigSnapshot().slowThreshold;
 }
 
 uint64_t GetFreqWtConfig(void)
 {
-    return g_strategyConfig.freqWt;
+    return StrategyConfigSnapshot().freqWt;
 }
 
 uint32_t GetRemoteHotThreshold(void)
 {
-    return g_strategyConfig.remoteHotThreshold;
+    return StrategyConfigSnapshot().remoteHotThreshold;
 }
 
 uint32_t GetGroupSwapRatioConfig(void)
 {
-    return g_strategyConfig.groupSwapRatio;
+    return StrategyConfigSnapshot().groupSwapRatio;
 }
 
 uint32_t GetGroupSwapMinRemoteFreqConfig(void)
 {
-    return g_strategyConfig.groupSwapMinRemoteFreq;
+    return StrategyConfigSnapshot().groupSwapMinRemoteFreq;
 }
 
 uint32_t GetGroupSwapMinFreqGainConfig(void)
 {
-    return g_strategyConfig.groupSwapMinFreqGain;
+    return StrategyConfigSnapshot().groupSwapMinFreqGain;
 }
 
 uint32_t GetGroupSwapLocalWatermarkRatioConfig(void)
 {
-    return g_strategyConfig.groupSwapLocalWatermarkRatio;
+    return StrategyConfigSnapshot().groupSwapLocalWatermarkRatio;
 }
 
 uint32_t GetMigrateModeConfig(void)
 {
-    return g_strategyConfig.migrateMode;
+    return StrategyConfigSnapshot().migrateMode;
 }
 
 bool GetMigrateModeChanged(void)
 {
-    return g_strategyConfig.migrateModeChanged;
+    return StrategyConfigSnapshot().migrateModeChanged;
 }
 
 void SetMigrateModeChanged(bool val)
 {
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     g_strategyConfig.migrateModeChanged = val;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
+}
+
+/* scan.cpu 的 min/max/configured 必须一次取齐，避免热加载时读到新旧混合的范围 */
+void GetScanCpuRangeConfig(uint32_t *cpuMin, uint32_t *cpuMax, bool *configured)
+{
+    StrategyConfig cfg = StrategyConfigSnapshot();
+    *cpuMin = cfg.scanCpuMin;
+    *cpuMax = cfg.scanCpuMax;
+    *configured = cfg.scanCpuConfigured;
 }
 
 uint32_t GetScanCpuMinConfig(void)
 {
-    return g_strategyConfig.scanCpuMin;
+    return StrategyConfigSnapshot().scanCpuMin;
 }
 
 uint32_t GetScanCpuMaxConfig(void)
 {
-    return g_strategyConfig.scanCpuMax;
+    return StrategyConfigSnapshot().scanCpuMax;
 }
 
 bool GetScanCpuChanged(void)
 {
-    return g_strategyConfig.scanCpuChanged;
+    return StrategyConfigSnapshot().scanCpuChanged;
 }
 
 void SetScanCpuChanged(bool val)
 {
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     g_strategyConfig.scanCpuChanged = val;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
 }
 
 bool GetScanCpuConfigured(void)
 {
-    return g_strategyConfig.scanCpuConfigured;
+    return StrategyConfigSnapshot().scanCpuConfigured;
 }
 
 bool GetZeroFreqMigrateEnableConfig(void)
 {
-    return g_strategyConfig.zeroFreqMigrateEnable;
+    return StrategyConfigSnapshot().zeroFreqMigrateEnable;
 }
 
 bool GetAdaptiveRatioEnableConfig(void)
 {
-    return g_strategyConfig.adaptiveRatioEnable;
+    return StrategyConfigSnapshot().adaptiveRatioEnable;
 }
 
 bool GetFileConfSwitchConfig(void)
 {
-    return g_strategyConfig.fileConfSwitch;
+    return StrategyConfigSnapshot().fileConfSwitch;
 }
 
 uint32_t GetUbBwThresholdConfig(void)
 {
-    return g_strategyConfig.ubBwThreshold;
+    return StrategyConfigSnapshot().ubBwThreshold;
 }
 
 uint32_t GetRemoteScanModeConfig(void)
 {
-    return g_strategyConfig.remoteScanMode;
+    return StrategyConfigSnapshot().remoteScanMode;
 }
 
 bool GetRemoteScanModeChanged(void)
 {
-    return g_strategyConfig.remoteScanModeChanged;
+    return StrategyConfigSnapshot().remoteScanModeChanged;
 }
 
 void SetRemoteScanModeChanged(bool val)
 {
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     g_strategyConfig.remoteScanModeChanged = val;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
 }
 
 bool GetSwapEnableConfig(void)
 {
-    return g_strategyConfig.swapEnable;
+    return StrategyConfigSnapshot().swapEnable;
 }
 
 uint32_t GetL3ColdThresholdConfig(void)
 {
-    return g_strategyConfig.l3ColdThreshold;
+    return StrategyConfigSnapshot().l3ColdThreshold;
 }
 
 bool GetSwapEnableChanged(void)
 {
-    return g_strategyConfig.swapEnableChanged;
+    return StrategyConfigSnapshot().swapEnableChanged;
 }
 
 void SetSwapEnableChanged(bool val)
 {
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     g_strategyConfig.swapEnableChanged = val;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
 }
 
 bool GetL3ColdThresholdChanged(void)
 {
-    return g_strategyConfig.l3ColdThresholdChanged;
+    return StrategyConfigSnapshot().l3ColdThresholdChanged;
 }
 
 void SetL3ColdThresholdChanged(bool val)
 {
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     g_strategyConfig.l3ColdThresholdChanged = val;
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
 }
 
 /*
@@ -356,7 +392,7 @@ static bool DetectHugetlbSwapSupport(void)
 
 bool GetHugetlbSwapSupported(void)
 {
-    return g_strategyConfig.hugetlbSwapSupported;
+    return StrategyConfigSnapshot().hugetlbSwapSupported;
 }
 
 static int32_t ConfigReadValueToInt(char *pvalue, uint32_t *resultvalue)
@@ -1198,7 +1234,9 @@ void StrategyConfigRead(void)
     /* init in-memory defaults on first call (config file is RPM-installed, never
      * generated/rewritten at runtime); idempotent against periodic reload */
     if (!g_strategyConfigInited) {
+        (void)pthread_mutex_lock(&g_strategyConfigLock);
         InitStrategyConfig();
+        (void)pthread_mutex_unlock(&g_strategyConfigLock);
         g_strategyConfigInited = true;
     }
     /* candidate starts from current effective values, then overwritten key by key
@@ -1226,6 +1264,8 @@ void StrategyConfigRead(void)
     }
     PrepareScanCpuUnset();
 
+    /* publish atomically with respect to the getters; no getter may be called below until unlock */
+    (void)pthread_mutex_lock(&g_strategyConfigLock);
     /* The automatic-period switch is independent of the fixed file-period switch. */
     g_strategyConfig.adaptivePeriodEnable = g_tmpStrategyConfig.adaptivePeriodEnable;
     g_strategyConfig.adaptiveFastScanPeriod = g_tmpStrategyConfig.adaptiveFastScanPeriod;
@@ -1238,6 +1278,7 @@ void StrategyConfigRead(void)
     if (UpdateStrategyConfigChanged()) {
         g_strategyConfig = g_tmpStrategyConfig;
     }
+    (void)pthread_mutex_unlock(&g_strategyConfigLock);
     PeriodConifgReset();
     SMAP_LOGGER_DEBUG("FileConfSwitch: %d.", g_strategyConfig.fileConfSwitch);
     return;
