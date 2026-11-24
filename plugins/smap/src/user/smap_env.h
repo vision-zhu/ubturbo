@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <sys/time.h>
+#include <time.h>
 
 #include "common.h"
 
@@ -131,6 +132,36 @@ static inline void EnvCondSignal(EnvCond *cond)
 static inline void EnvCondBroadcast(EnvCond *cond)
 {
     pthread_cond_broadcast(&cond->cond);
+}
+
+/* 使用 CLOCK_MONOTONIC 计时的条件变量，供 EnvCondTimedWaitMs 使用，不受系统时间调整影响 */
+static inline int EnvCondInitMonotonic(EnvCond *cond)
+{
+    pthread_condattr_t attr;
+    int ret = pthread_condattr_init(&attr);
+    if (ret) {
+        return ret;
+    }
+    ret = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+    if (ret == 0) {
+        ret = pthread_cond_init(&cond->cond, &attr);
+    }
+    (void)pthread_condattr_destroy(&attr);
+    return ret;
+}
+
+/* 须持 mutex 调用；cond 须由 EnvCondInitMonotonic 初始化。超时返回 ETIMEDOUT */
+static inline int EnvCondTimedWaitMs(EnvCond *cond, EnvMutex *mutex, uint64_t ms)
+{
+    struct timespec ts;
+    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_sec += (time_t)(ms / 1000ULL);
+    ts.tv_nsec += (long)(ms % 1000ULL) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) {
+        ts.tv_sec += 1;
+        ts.tv_nsec -= 1000000000L;
+    }
+    return pthread_cond_timedwait(&cond->cond, &mutex->lock, &ts);
 }
 
 typedef struct {

@@ -138,3 +138,22 @@ TEST_F(ThreadTest, TestInitEventLoopRegisterFailureNotFatal)
     EXPECT_FALSE(pm->eventLoop.inited);
     memset(pm->slots, 0, sizeof(pm->slots));
 }
+
+extern "C" int ManagerDaemonWork(struct ProcessManager *manager);
+TEST_F(ThreadTest, TestDestroyScanMigrateThreadWakesLongPeriod)
+{
+    struct ProcessManager *pm = (struct ProcessManager *)calloc(1, sizeof(struct ProcessManager));
+    ASSERT_NE(nullptr, pm);
+    MOCKER(ManagerDaemonWork).stubs().will(returnValue(0));
+
+    // 一小时的迁移周期：stop 必须唤醒周期等待而不是睡满整个周期
+    ASSERT_EQ(0, InitScanMigrateThread(pm, 3600U * 1000U));
+    struct timespec begin;
+    struct timespec end;
+    clock_gettime(CLOCK_MONOTONIC, &begin);
+    EXPECT_EQ(0, DestroyScanMigrateThread(pm));
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    EXPECT_LT(end.tv_sec - begin.tv_sec, 5);
+    EXPECT_EQ(1, EnvAtomicRead(&pm->scanMigrateStop));
+    free(pm);
+}
