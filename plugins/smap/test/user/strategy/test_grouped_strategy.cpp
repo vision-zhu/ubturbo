@@ -528,6 +528,52 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategySwapAfterStableRounds)
     FreeMigList(mlist);
 }
 
+/* 进程级 maxMigrate 是旧组/旧策略留下的值，不能限死当前组的交换上限 */
+TEST_F(GroupedStrategyTest, TestGroupedStrategySwapCapIgnoresStaleMaxMigrate)
+{
+    ProcessAttr process = {};
+    struct MigList *mlist = TestMlist();
+    ActcData localPages[2] = {};
+    ActcData remotePages[2] = {};
+
+    process.pid = 130;
+    process.enableSwap = true;
+    process.separateParam.maxMigrate = 1;
+    process.separateParam.freqWt = 1;
+    process.separateParam.slowThred = 1;
+    process.groupPolicy.enabled = true;
+    process.groupPolicy.groupCount = 1;
+    process.groupPolicy.groups[0].localCount = 1;
+    process.groupPolicy.groups[0].locals[0].nid = 0;
+    process.groupPolicy.groups[0].locals[0].localReservePages = 2;
+    process.groupPolicy.groups[0].targetCount = 1;
+    process.groupPolicy.groups[0].targets[0].nid = 4;
+    process.groupPolicy.groups[0].targets[0].quotaPages = 10;
+
+    localPages[0].freq = 1;
+    localPages[1].freq = 1;
+    process.scanAttr.actcData[0] = localPages;
+    process.scanAttr.actcLen[0] = 2;
+    remotePages[0].freq = 10;
+    remotePages[1].freq = 10;
+    process.scanAttr.actcData[4] = remotePages;
+    process.scanAttr.actcLen[4] = 2;
+
+    MOCKER(GetGroupSwapLocalWatermarkRatioConfig).stubs().will(returnValue((uint32_t)100));
+    MOCKER(GetNrFreeHugePagesByNode).stubs().will(returnValue((uint64_t)10));
+    MOCKER(GetGroupSwapRatioConfig).stubs().will(returnValue((uint32_t)100));
+    MOCKER(GetGroupSwapMinRemoteFreqConfig).stubs().will(returnValue((uint32_t)0));
+    MOCKER(GetGroupSwapMinFreqGainConfig).stubs().will(returnValue((uint32_t)0));
+
+    EXPECT_EQ(0, GroupedMigrationStrategy(&process, mlist));
+    EXPECT_EQ(0, GroupedMigrationStrategy(&process, mlist));
+    EXPECT_EQ(0, GroupedMigrationStrategy(&process, mlist));
+    EXPECT_EQ(2, NM_AT(mlist, 4, 0).nr);
+    EXPECT_EQ(2, NM_AT(mlist, 0, 4).nr);
+
+    FreeMigList(mlist);
+}
+
 TEST_F(GroupedStrategyTest, TestGroupedStrategySwapUsesLocalWatermarkRatio)
 {
     ProcessAttr process = {};

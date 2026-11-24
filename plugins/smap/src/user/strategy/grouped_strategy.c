@@ -447,16 +447,13 @@ static uint64_t CalcGroupSwapBaseCap(uint64_t remoteUsed)
     return (remoteUsed * ratio + GROUP_SWAP_PERCENT_BASE - 1) / GROUP_SWAP_PERCENT_BASE;
 }
 
-static void EnsureGroupedSwapParam(ProcessAttr *process, uint64_t localUsed, uint64_t remoteUsed)
+static void EnsureGroupedSwapParam(ProcessAttr *process)
 {
     if (process->separateParam.freqWt == 0) {
         process->separateParam.freqWt = GROUP_SWAP_DEFAULT_FREQ_WT;
     }
     if (process->separateParam.slowThred == 0) {
         process->separateParam.slowThred = GROUP_SWAP_DEFAULT_SLOW_THRED;
-    }
-    if (process->separateParam.maxMigrate == 0) {
-        process->separateParam.maxMigrate = localUsed + remoteUsed;
     }
 }
 
@@ -1168,8 +1165,9 @@ static int BuildSwapMigList(ProcessAttr *process, MigrationGroupAttr *group, str
         free(localPages);
         return ret;
     }
+    /* 交换上限按当前组本轮的 local+remote 计算，不沿用进程级的旧值 */
     uint64_t swapCap = CalcGroupSwapBaseCap(remoteUsed);
-    swapCap = MIN(swapCap, process->separateParam.maxMigrate);
+    swapCap = MIN(swapCap, localUsed + remoteUsed);
     swapCap = MIN(swapCap, nrLocalPages);
     swapCap = MIN(swapCap, nrRemotePages);
     if (swapCap == 0) {
@@ -1250,7 +1248,7 @@ static int RunSwapStage(ProcessAttr *process, struct MigList *mlist)
                              group->swapCandidateRounds);
             continue;
         }
-        EnsureGroupedSwapParam(process, localUsed, remoteUsed);
+        EnsureGroupedSwapParam(process);
         uint64_t nrBuilt = 0;
         int ret = BuildSwapMigList(process, group, mlist, localUsed, remoteUsed, &nrBuilt);
         if (ret) {
