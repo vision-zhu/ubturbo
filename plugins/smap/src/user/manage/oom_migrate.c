@@ -102,6 +102,38 @@ static bool ReadNumaMapsLine(FILE *fp, char *buf, size_t size)
     }
 }
 
+/*
+ * 进程当前是否已有页驻留在 nid 上（读 numa_maps，任一段 N<nid> 计数 > 0 即为真）。
+ * walkPage 是扫描周期的快照，迁出刚完成时 L2 计数可能仍为 0，不能单独用来判定
+ * "已迁移过"；以 numa_maps 的实时驻留为准。读取失败按"无驻留"处理（不额外拦截）。
+ */
+static bool PidHasPagesOnNode(pid_t pid, int nid)
+{
+    char pattern[NUMA_MAPS_MAX_PATTERN_LEN];
+    if (snprintf_s(pattern, sizeof(pattern), sizeof(pattern) - 1, " N%d=", nid) < 0) {
+        return false;
+    }
+    FILE *fp = OpenNumaMaps(pid);
+    if (fp == NULL) {
+        return false;
+    }
+    char line[NUMA_MAPS_LINE_LEN];
+    bool found = false;
+    while (!found && ReadNumaMapsLine(fp, line, sizeof(line))) {
+        const char *sub = strstr(line, pattern);
+        if (sub == NULL) {
+            continue;
+        }
+        const char *value = sub + strlen(pattern);
+        char *end = NULL;
+        errno = 0;
+        unsigned long long c = strtoull(value, &end, 10);
+        found = (value != end && errno == 0 && c > 0);
+    }
+    (void)fclose(fp);
+    return found;
+}
+
 /* 累加本地页数 = Σ N<i>=<count>，i ∈ [0, nrLocalNuma)。 */
 static uint64_t ParseNumaMapLocalCount(const char *line, int nrLocalNuma)
 {
@@ -456,6 +488,11 @@ void FindPidMigrateSize(uint64_t size)
     PidSlotReleaseRefs(all, cnt);
 
     for (int i = 0; i < n && pageBudget > 0; i++) {
+        if (PidHasPagesOnNode(snap[i].pid, snap[i].l2)) {
+            /* 已有页驻留在 L2：视为已迁移过的进程，不重复介入（walkPage 快照可能尚未反映） */
+            SMAP_LOGGER_INFO("pid %d already has pages on L2 %d, skip urgent migrate.", snap[i].pid, snap[i].l2);
+            continue;
+        }
         int ret = MigratePidFromToL2(snap[i].pid, nrLocalNuma, snap[i].l2, pageSize, &pageBudget);
         if (ret != 0) {
             if (ret == -EACCES || ret == -EPERM) {
