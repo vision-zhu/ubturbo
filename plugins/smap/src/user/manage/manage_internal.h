@@ -122,7 +122,8 @@ void ObservePidAdaptivePeriod(ProcessAttr *attr);
 bool PreparePidAdaptivePeriod(ProcessAttr *attr);
 void RecordPidAppliedPeriods(ProcessAttr *attr, uint32_t scan, uint32_t migrate, bool adaptive);
 void DistributeActcData(ProcessAttr *attr, struct ProcessMemBitmap *pmb, ActcData *buf);
-int RefreshManagedLocalStatePeriodic(ProcessAttr *attr);
+/* startEpoch：BuildPidData 回读页面前在 attrLock 下取得的 configEpoch */
+int RefreshManagedLocalStatePeriodic(ProcessAttr *attr, uint32_t startEpoch);
 /* BuildPidData/RefreshAllPidData 已在 manage.h 中声明 */
 
 /* ========== manage_grouped.c 导出给其他文件的内部函数 ========== */

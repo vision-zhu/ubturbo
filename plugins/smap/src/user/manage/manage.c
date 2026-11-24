@@ -2272,6 +2272,7 @@ static void ClearRemovedRemoteStrategy(ProcessAttr *attr, int remoteNid)
 /* Drop one remote node from a managed process and compact migrateParam. */
 static void RemoveManagedProcessRemoteNode(ProcessAttr *attr, int remoteNid)
 {
+    attr->configEpoch++;
     NumaBitmapClear(&attr->numaAttr.numaNodes, remoteNid);
     ClearRemovedRemoteStrategy(attr, remoteNid);
     (void)RemoveProcessRemoteTarget(&attr->targetConfig, remoteNid);

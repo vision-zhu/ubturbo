@@ -51,7 +51,7 @@ extern "C" RunMode g_runMode;
 extern "C" void RemoteNumaInfoInit();
 extern "C" int GetNodeFromCpu(int cpu);
 extern "C" int RefreshManagedLocalState(ProcessAttr *attr, bool fullReplacement);
-extern "C" int RefreshManagedLocalStatePeriodic(ProcessAttr *attr);
+extern "C" int RefreshManagedLocalStatePeriodic(ProcessAttr *attr, uint32_t startEpoch);
 extern "C" int UpdateManagedProcessTrackingMode(ProcessAttr *attr, ScanType scanType, uint32_t scanTime,
                                                 uint32_t duration);
 extern "C" int SetLocalNumaByCpu(pid_t pid, uint32_t *nodeBitmap);
@@ -619,7 +619,7 @@ TEST_F(ManageTest, TestRefreshManagedLocalStatePeriodicPublishesLocalStateOnly)
     /* Kernel tracks all nodes by topology; no per-cycle tracking-scope ioctl. */
     MOCKER(AccessIoctlAddPid).expects(never());
 
-    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr));
+    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr, 0));
     EXPECT_EQ(BIT(0) | BIT(2), attr.managedLocalState.managedLocalMask);
     EXPECT_EQ(BIT(0) | BIT(4), attr.numaAttr.numaNodes.bits[0]);
 }
@@ -637,7 +637,7 @@ TEST_F(ManageTest, TestRefreshManagedLocalStatePeriodicNoIoctlOnSuccess)
     MOCKER(RefreshManagedLocalState).expects(once()).will(invoke(RefreshPeriodicManagedLocalCandidate));
     MOCKER(AccessIoctlAddPid).expects(never());
 
-    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr));
+    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr, 0));
     EXPECT_EQ(BIT(0) | BIT(2), attr.managedLocalState.managedLocalMask);
     EXPECT_EQ(BIT(0) | BIT(4), attr.numaAttr.numaNodes.bits[0]);
 }
@@ -655,9 +655,35 @@ TEST_F(ManageTest, TestRefreshManagedLocalStatePeriodicSkipsUnchangedBitmap)
     MOCKER(RefreshManagedLocalState).expects(once()).will(invoke(RefreshUnchangedManagedLocalCandidate));
     MOCKER(AccessIoctlAddPid).expects(never());
 
-    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr));
+    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr, 0));
     EXPECT_EQ(BIT(0), attr.managedLocalState.residentLocalMask);
     EXPECT_EQ(BIT(0) | BIT(4), attr.numaAttr.numaNodes.bits[0]);
+}
+
+static ProcessAttr *g_epochBumpAttr = nullptr;
+static int RefreshWhileConfigChanges(ProcessAttr *attr, bool fullReplacement)
+{
+    (void)fullReplacement;
+    attr->managedLocalState.managedLocalMask = BIT(0) | BIT(2);
+    /* 模拟接口线程在 worker 锁外采样期间发布新目标（递增 configEpoch） */
+    g_epochBumpAttr->configEpoch++;
+    return 0;
+}
+
+/* 页面快照之后配置被改写：本轮不得用旧快照派生的本地观测覆盖接口线程的新状态 */
+TEST_F(ManageTest, TestRefreshManagedLocalStatePeriodicSkipsWhenConfigChanged)
+{
+    ProcessAttr attr = {};
+    g_processManager.nrLocalNuma = 4;
+    attr.pid = 123;
+    attr.scanType = NORMAL_SCAN;
+    attr.managedLocalState.managedLocalMask = BIT(0);
+    g_epochBumpAttr = &attr;
+    MOCKER(RefreshManagedLocalState).expects(once()).will(invoke(RefreshWhileConfigChanges));
+
+    EXPECT_EQ(0, RefreshManagedLocalStatePeriodic(&attr, 0));
+    EXPECT_EQ(BIT(0), attr.managedLocalState.managedLocalMask);
+    g_epochBumpAttr = nullptr;
 }
 
 TEST_F(ManageTest, TestConfigureMigrationTargetsStagesWhileMigrating)
@@ -7320,7 +7346,7 @@ TEST_F(ManageTest, TestRefreshManagedLocalStatePeriodicKeepsNumaNodes)
     MOCKER(RefreshManagedLocalState).stubs().will(returnValue(0));
     /* numaNodes is synthesized in user-state; periodic refresh must not touch it. */
     MOCKER(AccessIoctlAddPid).expects(never());
-    int ret = RefreshManagedLocalStatePeriodic(&attr);
+    int ret = RefreshManagedLocalStatePeriodic(&attr, 0);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(0x0FUL, attr.numaAttr.numaNodes.bits[0]);
 }
