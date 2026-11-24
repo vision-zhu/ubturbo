@@ -431,6 +431,89 @@ TEST_F(MigrationTest, TestBuildMigrationMsgKeepsMatrixOrder)
     EXPECT_EQ(0, g_addMigListOrder[1]);
 }
 
+/* L0->{R2 demote, R3 swap, R4 swap}, L1->{R5 swap, R6 swap}: 7 + 2 entries > 8 */
+static void SetPairCell(struct MigList *mlist, int from, int to)
+{
+    struct MigList *cell = MigListCell(mlist, from, to);
+    cell->nr = 1;
+    cell->addr = (uint64_t *)calloc(1, sizeof(uint64_t));
+}
+
+static int BuildOverLimitPairLists(ProcessAttr *process, struct MigList *mlist, size_t mlistSize)
+{
+    (void)process;
+    (void)mlistSize;
+    SetPairCell(mlist, 0, 2);
+    for (int r = 3; r <= 4; r++) {
+        SetPairCell(mlist, 0, r);
+        SetPairCell(mlist, r, 0);
+    }
+    for (int r = 5; r <= 6; r++) {
+        SetPairCell(mlist, 1, r);
+        SetPairCell(mlist, r, 1);
+    }
+    return 0;
+}
+
+static bool MsgHasEntry(const struct MigrateMsg *mMsg, int from, int to)
+{
+    for (int i = 0; i < mMsg->cnt; i++) {
+        if (mMsg->migList[i].from == from && mMsg->migList[i].to == to) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void ResetPidMsg(struct MigrateMsg *mMsg)
+{
+    for (int i = 0; i < mMsg->cnt; i++) {
+        free(mMsg->migList[i].addr);
+        mMsg->migList[i].addr = NULL;
+    }
+    mMsg->cnt = 0;
+}
+
+TEST_F(MigrationTest, TestBuildMigrationMsgDefersWholePairAndRotates)
+{
+    uint32_t oldCap = g_numaCap;
+    g_numaCap = 7;
+    ProcessAttr process = {};
+    process.pid = 1234;
+    ActcData actc = {};
+    process.scanAttr.actcData[0] = &actc;
+    struct MigrateMsg mMsg = {};
+    mMsg.migList = (struct MigList *)calloc(MAX_PER_PID_MIG_LIST_COUNT, sizeof(struct MigList));
+    uint64_t pages = 0;
+
+    MOCKER(CheckActcDataValid).stubs().will(returnValue(0));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(2));
+    MOCKER(RunStrategy).stubs().will(invoke(BuildOverLimitPairLists));
+
+    /* 第一轮：L1-R6 这一对放不下，整对推迟，不能只下发 R6->L1 */
+    ASSERT_EQ(0, BuildMigrationMsg(&process, &mMsg, &pages));
+    EXPECT_EQ(7, mMsg.cnt);
+    EXPECT_EQ(7U, pages);
+    EXPECT_FALSE(MsgHasEntry(&mMsg, 6, 1));
+    EXPECT_FALSE(MsgHasEntry(&mMsg, 1, 6));
+    EXPECT_EQ(1U * 5U + (6U - 2U), process.strategyAttr.migPairCursor);
+
+    /* 第二轮：从被推迟的 L1-R6 开始，此时 L1-R5 被整对推迟 */
+    ResetPidMsg(&mMsg);
+    pages = 0;
+    ASSERT_EQ(0, BuildMigrationMsg(&process, &mMsg, &pages));
+    EXPECT_EQ(7, mMsg.cnt);
+    EXPECT_TRUE(MsgHasEntry(&mMsg, 6, 1));
+    EXPECT_TRUE(MsgHasEntry(&mMsg, 1, 6));
+    EXPECT_FALSE(MsgHasEntry(&mMsg, 5, 1));
+    EXPECT_FALSE(MsgHasEntry(&mMsg, 1, 5));
+    EXPECT_EQ(1U * 5U + (5U - 2U), process.strategyAttr.migPairCursor);
+
+    ResetPidMsg(&mMsg);
+    free(mMsg.migList);
+    g_numaCap = oldCap;
+}
+
 TEST_F(MigrationTest, TestBuildMigrationMsgSuccess)
 {
     int ret;
