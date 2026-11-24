@@ -3529,6 +3529,43 @@ TEST_F(InterfaceTest, TestSmapMigrateOutSyncSuccess)
     EXPECT_EQ(0, ret);
 }
 
+static bool MigOutNotDoneMultiNuma(ProcessAttr *attr, bool *isMultiNumaPid)
+{
+    (void)attr;
+    *isMultiNumaPid = true;
+    return false;
+}
+
+extern "C" bool IsMemoryLow(pid_t pid);
+extern "C" uint64_t g_migOutSyncDefaultWaitLimitMs;
+TEST_F(InterfaceTest, TestSmapMigrateOutSyncNoWaitLimitIsBounded)
+{
+    struct MigrateOutMsg msg = {};
+    ProcessAttr attr = {};
+    attr.pid = 1;
+    msg.count = 1;
+    msg.payload[0].count = 1;
+    msg.payload[0].pid = 1;
+    msg.payload[0].inner[0].ratio = 25;
+    g_pageSizeHuge = PAGESIZE_2M;
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+
+    int savedStatus = EnvAtomicRead(&g_status);
+    EnvAtomicSet(&g_status, RUNNING);
+    MOCKER(GetProcessAttr).stubs().will(returnValue(&attr));
+    MOCKER(GetRunMode).stubs().will(returnValue(MEM_POOL_MODE));
+    MOCKER(GetPidTypeFromComm).stubs().will(returnValue((int)VM_TYPE));
+    MOCKER(MigrateOutWithCapacityPolicy).stubs().will(returnValue(0));
+    MOCKER(MigOutIsDone).stubs().will(invoke(MigOutNotDoneMultiNuma));
+    MOCKER(IsMemoryLow).stubs().will(returnValue(false));
+    uint64_t savedLimit = g_migOutSyncDefaultWaitLimitMs;
+    g_migOutSyncDefaultWaitLimitMs = 300;
+    /* maxWaitTime == 0 且迁出永远无法完成（如目标节点被禁用）：须在上限（默认 MAX_WAIT_TIME）后返回 */
+    EXPECT_EQ(-EBUSY, ubturbo_smap_migrate_out_sync(&msg, PAGETYPE_HUGE, 0));
+    g_migOutSyncDefaultWaitLimitMs = savedLimit;
+    EnvAtomicSet(&g_status, savedStatus);
+}
+
 TEST_F(InterfaceTest, TestSmapMigrateOutSyncFail)
 {
     int ret;

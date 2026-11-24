@@ -3072,7 +3072,8 @@ static int CheckMigOutSyncMsg(struct MigrateOutMsg *msg, int pageType, uint64_t 
         return -EINVAL;
     }
     if ((maxWaitTime < MIN_WAIT_TIME || maxWaitTime > MAX_WAIT_TIME) && maxWaitTime != 0) {
-        SMAP_LOGGER_ERROR("The maxWaitTime parameter is improper,The maxWaitTime from 10s to 1 min.");
+        SMAP_LOGGER_ERROR("The maxWaitTime parameter is improper, the maxWaitTime is 0 or from %ums to %ums.",
+                          MIN_WAIT_TIME, MAX_WAIT_TIME);
         return -EINVAL;
     }
 
@@ -3190,6 +3191,9 @@ static void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable, Proce
     }
 }
 
+/* maxWaitTime == 0 时的等待上限（毫秒）。非 const 全局，供 UT 缩短 */
+uint64_t g_migOutSyncDefaultWaitLimitMs = MAX_WAIT_TIME;
+
 static int CheckMigOutSyncResult(struct MigrateOutMsg *msg, int *invalidPidNum, bool *allPidSuccess,
                                  uint64_t maxWaitTime)
 {
@@ -3253,7 +3257,10 @@ static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t 
     /* 迁移完成后为（含新纳管的）零目标 pid 建立保护，直到等待结束。 */
     SetSyncWaitRemoteEmpty(msg, true, syncWaitHeld);
 
-    while (maxWaitTime == 0 || waitTime < maxWaitTime) {
+    /* maxWaitTime == 0 保留其「内存不足/非多 NUMA 立即返回」语义，但等待时长同样以 MAX_WAIT_TIME
+     * 为上限：目标节点被禁用、配额为 0、迁移被关闭等情况下迁出永远不会完成，不能让 IPC 线程无限挂起 */
+    uint64_t waitLimit = maxWaitTime != 0 ? maxWaitTime : g_migOutSyncDefaultWaitLimitMs;
+    while (waitTime < waitLimit) {
         waitTime += WAIT_TIME;
         invalidPidNum = 0;
         SMAP_LOGGER_INFO("ubturbo_smap_migrate_out_sync waitTime %llu.", waitTime);
