@@ -2157,7 +2157,10 @@ int ManagerDaemonWork(struct ProcessManager *manager)
     }
     EventLoopEnsureRegistered(manager);
     StrategyConfigRead(); // read strategy config from file
-    manager->migPeriod = GetMigratePeriodConfig();
+    /* 文件周期仅在开关打开时生效；关闭时恢复初始化时的默认周期 */
+    manager->migPeriod = GetFileConfSwitchConfig() ?
+                             GetMigratePeriodConfig() :
+                             (IsHugeMode() ? LIGHT_STABLE_MIGRATE_CYCLE : PROCESS_LIGHT_STABLE_MIGRATE_CYCLE);
     manager->ubBwMonitor.ubBwThreshold = GetUbBwThresholdConfig();
     if (GetFileConfSwitchConfig()) {
         SetAdaptMem(GetAdaptiveRatioEnableConfig());

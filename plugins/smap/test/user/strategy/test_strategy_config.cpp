@@ -855,6 +855,29 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigChangedAdaptiveRatioChanged)
     EXPECT_EQ(true, ret);
 }
 
+/* 开关 true -> false：文件控制的字段恢复默认，不再沿用文件值 */
+TEST_F(PeriodConfigTest, TestUpdatePeriodConfigSwitchOffRestoresDefaults)
+{
+    StrategyConfig saved = g_strategyConfig;
+    g_strategyConfig.fileConfSwitch = true;
+    g_strategyConfig.ubBwThreshold = 100;
+    g_strategyConfig.migratePeriod = 6000;
+    g_strategyConfig.remoteFreqPercentile = 50;
+    g_strategyConfig.zeroFreqMigrateEnable = false;
+    g_strategyConfig.groupSwapRatio = 5;
+    g_tmpStrategyConfig = g_strategyConfig;
+    g_tmpStrategyConfig.fileConfSwitch = false;
+
+    EXPECT_FALSE(UpdateStrategyConfigChanged());
+    EXPECT_FALSE(g_strategyConfig.fileConfSwitch);
+    EXPECT_EQ(0U, g_strategyConfig.ubBwThreshold);
+    EXPECT_EQ((uint32_t)DEFAULT_MIGRATE_PERIOD, g_strategyConfig.migratePeriod);
+    EXPECT_EQ(99U, g_strategyConfig.remoteFreqPercentile);
+    EXPECT_TRUE(g_strategyConfig.zeroFreqMigrateEnable);
+    EXPECT_EQ(1U, g_strategyConfig.groupSwapRatio);
+    g_strategyConfig = saved;
+}
+
 extern "C" void StrategyConfigRead(void);
 extern "C" int ConfigReadReadFile(const char *configFile);
 
