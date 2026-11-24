@@ -160,8 +160,14 @@ int AccessIoctlWalkPagemap(pid_t pid, struct ProcessMemBitmap *pmb)
     param.pid = pid;
     ret = ioctl(manager->fds.access, SMAP_ACCESS_WALK_PAGEMAP, &param);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("access walk pagemap for pid %d error: %d.", pid, -errno);
-        return -errno;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        if (err == ESRCH) {
+            /* 本周期内核未跟踪该 pid 属常态，调用方静默跳过，不按错误刷屏 */
+            SMAP_LOGGER_DEBUG("access walk pagemap for pid %d: not tracked this cycle.", pid);
+        } else {
+            SMAP_LOGGER_ERROR("access walk pagemap for pid %d error: %d.", pid, -err);
+        }
+        return -err;
     }
     *pmb = param;
     return 0;
@@ -241,9 +247,9 @@ int AccessIoctlRestartPid(pid_t pid)
     /* TRACKING_CMD 复用为 per-pid 窗口重启：arg=pid；-ENOENT 表示 pid 未被内核跟踪 */
     int ret = ioctl(manager->fds.access, SMAP_IOCTL_TRACKING_CMD, pid);
     if (ret < 0) {
-        ret = errno;
-        SMAP_LOGGER_ERROR("ioctl restart pid %d scan failed: %d.", ret, errno);
-        return -ret;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        SMAP_LOGGER_ERROR("ioctl restart pid %d scan failed: %d.", pid, err);
+        return -err;
     }
     return ret;
 }

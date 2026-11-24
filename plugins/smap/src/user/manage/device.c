@@ -69,8 +69,9 @@ int RefreshRemoteRam(struct ProcessManager *manager)
         return -EINVAL;
     }
     if (ioctl(manager->fds.access, SMAP_ACCESS_REFRESH_REMOTE_RAM, 0) < 0) {
-        SMAP_LOGGER_ERROR("refresh_remote_ram ioctl failed: %s.", strerror(errno));
-        return -errno;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        SMAP_LOGGER_ERROR("refresh_remote_ram ioctl failed: %s.", strerror(err));
+        return -err;
     }
     return 0;
 }
@@ -81,8 +82,9 @@ static int ConfigTrackingDev(struct ProcessManager *manager, uint32_t pageSize)
 
     arg = pageSize == PAGESIZE_2M ? PGSIZE_TWO_MB : PGSIZE_FOUR_KB;
     if (ioctl(manager->fds.access, SMAP_IOCTL_PAGE_SIZE_SET_CMD, arg) < 0) {
-        SMAP_LOGGER_ERROR("ioctl set tracking page size failed: %s.", strerror(errno));
-        return -errno;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        SMAP_LOGGER_ERROR("ioctl set tracking page size failed: %s.", strerror(err));
+        return -err;
     }
     return 0;
 }
@@ -336,8 +338,9 @@ int ConfigUbWatch(uint32_t durationMs)
     }
 
     if (ioctl(manager->fds.access, SMAP_IOCTL_UB_WATCH_CONFIG_CMD, &config) < 0) {
-        SMAP_LOGGER_ERROR("ioctl SMAP_IOCTL_UB_WATCH_CONFIG_CMD failed on scan device.");
-        return -errno;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        SMAP_LOGGER_ERROR("ioctl SMAP_IOCTL_UB_WATCH_CONFIG_CMD failed on scan device: %d.", err);
+        return -err;
     }
     return 0;
 }
