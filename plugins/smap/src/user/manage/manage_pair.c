@@ -813,19 +813,21 @@ static void AddPairCapacityAllocation(PairArbitrationEntry *entry, PairCapacityP
 }
 
 /*
- * Proportionally allocate one capacity tier. Entries are already sorted by
- * pid, local nid and remote nid, so integer remainders are deterministic and
- * independent of the process-list traversal order.
+ * Proportionally allocate one capacity tier. idx[] lists, in the original
+ * entry order (sorted by pid, local nid and remote nid), the entries of one
+ * remote node, so integer remainders are deterministic and independent of
+ * the process-list traversal order.
  */
-static uint64_t AllocatePairCapacityPhase(PairArbitrationEntry entries[], size_t entryCount, int localNid,
-                                          int remoteNid, uint64_t capacity, PairCapacityPhase phase)
+static uint64_t AllocatePairCapacityPhase(PairArbitrationEntry entries[], const size_t idx[], size_t idxCount,
+                                          int localNid, int remoteNid, uint64_t capacity, PairCapacityPhase phase)
 {
     uint64_t totalDemand = 0;
-    for (size_t i = 0; i < entryCount; i++) {
-        if (!PairMatchesCapacityPool(&entries[i], localNid, remoteNid)) {
+    for (size_t k = 0; k < idxCount; k++) {
+        PairArbitrationEntry *entry = &entries[idx[k]];
+        if (!PairMatchesCapacityPool(entry, localNid, remoteNid)) {
             continue;
         }
-        totalDemand += PairCapacityDemand(&entries[i], phase);
+        totalDemand += PairCapacityDemand(entry, phase);
     }
 
     uint64_t pagesToAllocate = MIN(capacity, totalDemand);
@@ -834,21 +836,23 @@ static uint64_t AllocatePairCapacityPhase(PairArbitrationEntry entries[], size_t
     }
 
     uint64_t allocated = 0;
-    for (size_t i = 0; i < entryCount; i++) {
-        if (!PairMatchesCapacityPool(&entries[i], localNid, remoteNid)) {
+    for (size_t k = 0; k < idxCount; k++) {
+        PairArbitrationEntry *entry = &entries[idx[k]];
+        if (!PairMatchesCapacityPool(entry, localNid, remoteNid)) {
             continue;
         }
-        uint64_t demand = PairCapacityDemand(&entries[i], phase);
+        uint64_t demand = PairCapacityDemand(entry, phase);
         uint64_t pages = (uint64_t)(((unsigned __int128)pagesToAllocate * demand) / totalDemand);
-        AddPairCapacityAllocation(&entries[i], phase, pages);
+        AddPairCapacityAllocation(entry, phase, pages);
         allocated += pages;
     }
 
-    for (size_t i = 0; i < entryCount && allocated < pagesToAllocate; i++) {
-        if (!PairMatchesCapacityPool(&entries[i], localNid, remoteNid) || PairCapacityDemand(&entries[i], phase) == 0) {
+    for (size_t k = 0; k < idxCount && allocated < pagesToAllocate; k++) {
+        PairArbitrationEntry *entry = &entries[idx[k]];
+        if (!PairMatchesCapacityPool(entry, localNid, remoteNid) || PairCapacityDemand(entry, phase) == 0) {
             continue;
         }
-        AddPairCapacityAllocation(&entries[i], phase, 1);
+        AddPairCapacityAllocation(entry, phase, 1);
         allocated++;
     }
     return allocated;
@@ -917,18 +921,61 @@ static void BuildPairRequestContext(const struct ProcessManager *manager, const 
     }
 }
 
-static int CollectAllPairRequests(const struct ProcessManager *manager, const uint64_t *privatePages,
-                                  const uint64_t sharedPages[SMAP_MAX_NUMNODES], PairArbitrationEntry entries[],
-                                  size_t entryCap, size_t *entryCount, bool migrateOnly, struct PidSlot *all[],
-                                  size_t *allCnt)
+/* 仲裁条目数组：limit 为调用方给定的条目上限，alloc 不足时按需倍增（不超过 limit） */
+typedef struct {
+    PairArbitrationEntry *items;
+    size_t count;
+    size_t alloc;
+    size_t limit;
+} PairEntryArray;
+
+#define PAIR_ENTRY_ARRAY_INIT_ALLOC 64
+
+static int PairEntryArrayReserve(PairEntryArray *arr, size_t extra)
 {
-    size_t count = 0;
+    if (extra > arr->limit - arr->count) {
+        return -ENOSPC;
+    }
+    size_t need = arr->count + extra;
+    if (need <= arr->alloc) {
+        return 0;
+    }
+    size_t newAlloc = arr->alloc > 0 ? arr->alloc : PAIR_ENTRY_ARRAY_INIT_ALLOC;
+    while (newAlloc < need) {
+        newAlloc *= 2;
+    }
+    newAlloc = MIN(newAlloc, arr->limit);
+    PairArbitrationEntry *items = realloc(arr->items, newAlloc * sizeof(*items));
+    if (items == NULL) {
+        return -ENOMEM;
+    }
+    arr->items = items;
+    arr->alloc = newAlloc;
+    return 0;
+}
+
+static int CollectAllPairRequests(const struct ProcessManager *manager, const uint64_t *privatePages,
+                                  const uint64_t sharedPages[SMAP_MAX_NUMNODES], PairEntryArray *entries,
+                                  bool migrateOnly, struct PidSlot *all[], size_t *allCnt)
+{
     size_t n = PidSlotCollectRefs((struct ProcessManager *)manager, all, MAX_PID_SLOTS);
     *allCnt = n;
-    /* [256][256] 目标表太大（~数 MB），必须堆分配，循环内按迭代清零 */
-    PairTarget *processTargets = calloc(SMAP_MAX_NUMNODES * SMAP_MAX_NUMNODES, sizeof(*processTargets));
-    if (!processTargets) {
-        return -ENOMEM;
+    entries->count = 0;
+    /*
+     * 单 pid 的 Pair 数不超过 nrLocalNuma × (cap - nrLocalNuma)（BuildPairRequestedTargets
+     * 只遍历该区间），按此运行期上限在循环外分配一次；BuildPairRequestedTargets 只写
+     * 前 processTargetCount 项，无需逐 pid 清零。
+     */
+    int nrLocalNuma = manager->nrLocalNuma;
+    int cap = (int)GetNumaCap();
+    size_t pairCap = cap > nrLocalNuma ? (size_t)nrLocalNuma * (size_t)(cap - nrLocalNuma) : 0;
+    PairTarget *processTargets = calloc(MAX(pairCap, (size_t)1), sizeof(*processTargets));
+    /* 汇总结构含 [SMAP_MAX_NUMNODES] 定维成员，超出栈预算，堆分配并跨 pid 复用 */
+    PairRequestSummary *summary = calloc(1, sizeof(*summary));
+    int ret = 0;
+    if (!processTargets || !summary) {
+        ret = -ENOMEM;
+        goto out;
     }
     for (size_t k = 0; k < n; k++) {
         ProcessAttr *attr = all[k]->attr;
@@ -939,48 +986,47 @@ static int CollectAllPairRequests(const struct ProcessManager *manager, const ui
 
         PairRequestContext context = { 0 };
         BuildPairRequestContext(manager, privatePages, sharedPages, attr, &context);
-        /* 汇总结构含 [SMAP_MAX_NUMNODES] 定维成员，超出栈预算，堆分配，按迭代释放 */
-        PairRequestSummary *summary = calloc(1, sizeof(*summary));
-        if (!summary) {
-            free(processTargets);
-            return -ENOMEM;
-        }
         size_t processTargetCount = 0;
-        size_t targetsBytes = SMAP_MAX_NUMNODES * SMAP_MAX_NUMNODES * sizeof(*processTargets);
-        (void)memset_s(processTargets, targetsBytes, 0, targetsBytes);
-        int ret = BuildPairRequestedTargets(attr, &context, processTargets, SMAP_MAX_NUMNODES * SMAP_MAX_NUMNODES,
-                                            &processTargetCount, summary);
+        ret = BuildPairRequestedTargets(attr, &context, processTargets, pairCap, &processTargetCount, summary);
         if (ret) {
             SMAP_LOGGER_ERROR("Build pid %d Pair requests failed: %d.", attr->pid, ret);
-            free(summary);
-            free(processTargets);
-            return ret;
+            goto out;
         }
-        free(summary);
-        if (processTargetCount > entryCap - count) {
-            free(processTargets);
-            return -ENOSPC;
+        ret = PairEntryArrayReserve(entries, processTargetCount);
+        if (ret) {
+            goto out;
         }
 
         for (size_t i = 0; i < processTargetCount; i++) {
-            entries[count].target = processTargets[i];
-            entries[count].process = attr;
-            entries[count].actualPages = NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, processTargets[i].localNid,
-                                               processTargets[i].remoteNid);
-            count++;
+            PairArbitrationEntry *entry = &entries->items[entries->count++];
+            *entry = (PairArbitrationEntry){
+                .target = processTargets[i],
+                .process = attr,
+                .actualPages = NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, processTargets[i].localNid,
+                                     processTargets[i].remoteNid),
+            };
         }
     }
 
-    if (count > 1) {
-        qsort(entries, count, sizeof(entries[0]), ComparePairArbitrationEntry);
+    if (entries->count > 1) {
+        qsort(entries->items, entries->count, sizeof(entries->items[0]), ComparePairArbitrationEntry);
     }
-    *entryCount = count;
+out:
+    free(summary);
     free(processTargets);
-    return 0;
+    return ret;
 }
 
-static void ArbitrateAllPairCapacity(PairArbitrationEntry entries[], size_t entryCount, int nrLocalNuma,
-                                     const uint64_t *privateCapacity, const uint64_t sharedCapacity[SMAP_MAX_NUMNODES])
+/*
+ * 每个容量池只涉及同一远端节点的条目：先按远端节点对条目下标做稳定的计数
+ * 排序（同一远端内保持原 pid/local 顺序），各远端只遍历自己的条目，复杂度由
+ * O(nrLocal × cap × entries) 降为 O(nrLocal × entries + cap)，分配结果与逐条
+ * 全量扫描完全一致。onlyPid >= 0 时只仲裁该 pid 涉及的远端节点（其他远端
+ * 的结果不影响该 pid）。
+ */
+static int ArbitrateAllPairCapacity(PairArbitrationEntry entries[], size_t entryCount, int nrLocalNuma,
+                                    const uint64_t *privateCapacity, const uint64_t sharedCapacity[SMAP_MAX_NUMNODES],
+                                    pid_t onlyPid)
 {
     for (size_t i = 0; i < entryCount; i++) {
         if (entries[i].process->ignoreRemoteCapacity) {
@@ -988,23 +1034,71 @@ static void ArbitrateAllPairCapacity(PairArbitrationEntry entries[], size_t entr
             entries[i].privatePages = entries[i].target.requestedPages;
         }
     }
+    if (entryCount == 0) {
+        return 0;
+    }
 
     /* remoteNid 为绝对 nid；容量数组（BuildPairCapacitySnapshot）第二维同为绝对 nid */
     int cap = (int)GetNumaCap();
-    for (int remoteNid = nrLocalNuma; remoteNid < cap; remoteNid++) {
+    size_t *start = calloc((size_t)cap + 1, sizeof(*start));
+    size_t *order = malloc(entryCount * sizeof(*order));
+    bool *wanted = calloc((size_t)cap, sizeof(*wanted));
+    if (!start || !order || !wanted) {
+        free(start);
+        free(order);
+        free(wanted);
+        return -ENOMEM;
+    }
+    for (size_t i = 0; i < entryCount; i++) {
+        int remoteNid = entries[i].target.remoteNid;
+        if (remoteNid < nrLocalNuma || remoteNid >= cap) {
+            continue; /* 与逐远端扫描一致：区间外条目不参与任何容量池 */
+        }
+        start[remoteNid + 1]++;
+        if (onlyPid < 0 || entries[i].target.pid == onlyPid) {
+            wanted[remoteNid] = true;
+        }
+    }
+    for (int remoteNid = 0; remoteNid < cap; remoteNid++) {
+        start[remoteNid + 1] += start[remoteNid];
+    }
+    for (size_t i = 0; i < entryCount; i++) {
+        int remoteNid = entries[i].target.remoteNid;
+        if (remoteNid < nrLocalNuma || remoteNid >= cap) {
+            continue;
+        }
+        /* start[remoteNid] 作为写游标递增，结束后恰好等于下一远端的起点 */
+        order[start[remoteNid]++] = i;
+    }
+
+    size_t begin = 0;
+    for (int remoteNid = 0; remoteNid < cap; remoteNid++) {
+        size_t end = start[remoteNid];
+        const size_t *idx = order + begin;
+        size_t idxCount = end - begin;
+        begin = end;
+        if (idxCount == 0 || !wanted[remoteNid]) {
+            continue;
+        }
         for (int local = 0; local < nrLocalNuma; local++) {
             uint64_t remaining = NM_AT(privateCapacity, local, remoteNid);
             uint64_t used =
-                AllocatePairCapacityPhase(entries, entryCount, local, remoteNid, remaining, PAIR_PRIVATE_BASELINE);
+                AllocatePairCapacityPhase(entries, idx, idxCount, local, remoteNid, remaining, PAIR_PRIVATE_BASELINE);
             remaining -= used;
-            (void)AllocatePairCapacityPhase(entries, entryCount, local, remoteNid, remaining, PAIR_PRIVATE_REMAINDER);
+            (void)AllocatePairCapacityPhase(entries, idx, idxCount, local, remoteNid, remaining,
+                                            PAIR_PRIVATE_REMAINDER);
         }
 
         uint64_t remaining = sharedCapacity[remoteNid];
-        uint64_t used = AllocatePairCapacityPhase(entries, entryCount, -1, remoteNid, remaining, PAIR_SHARED_BASELINE);
+        uint64_t used =
+            AllocatePairCapacityPhase(entries, idx, idxCount, -1, remoteNid, remaining, PAIR_SHARED_BASELINE);
         remaining -= used;
-        (void)AllocatePairCapacityPhase(entries, entryCount, -1, remoteNid, remaining, PAIR_SHARED_REMAINDER);
+        (void)AllocatePairCapacityPhase(entries, idx, idxCount, -1, remoteNid, remaining, PAIR_SHARED_REMAINDER);
     }
+    free(start);
+    free(order);
+    free(wanted);
+    return 0;
 }
 
 static void PublishPairCapacityResult(struct ProcessManager *manager, PairArbitrationEntry entries[], size_t entryCount,
@@ -1047,23 +1141,21 @@ static void PublishPairCapacityResult(struct ProcessManager *manager, PairArbitr
     free(privateUsed);
 }
 
-static int BuildPairArbitrationSnapshotLocked(struct ProcessManager *manager, PairArbitrationEntry entries[],
-                                              size_t entryCap, size_t *entryCount, uint64_t *privateCapacity,
-                                              uint64_t totalCapacity[SMAP_MAX_NUMNODES], bool migrateOnly,
-                                              struct PidSlot *all[], size_t *allCnt)
+static int BuildPairArbitrationSnapshotLocked(struct ProcessManager *manager, PairEntryArray *entries,
+                                              uint64_t *privateCapacity, uint64_t totalCapacity[SMAP_MAX_NUMNODES],
+                                              bool migrateOnly, pid_t onlyPid, struct PidSlot *all[], size_t *allCnt)
 {
     uint64_t sharedCapacity[SMAP_MAX_NUMNODES] = { 0 };
     int ret = BuildPairCapacitySnapshot(manager, privateCapacity, sharedCapacity, totalCapacity);
     if (ret) {
         return ret;
     }
-    ret = CollectAllPairRequests(manager, privateCapacity, sharedCapacity, entries, entryCap, entryCount, migrateOnly,
-                                 all, allCnt);
+    ret = CollectAllPairRequests(manager, privateCapacity, sharedCapacity, entries, migrateOnly, all, allCnt);
     if (ret) {
         return ret;
     }
-    ArbitrateAllPairCapacity(entries, *entryCount, manager->nrLocalNuma, privateCapacity, sharedCapacity);
-    return 0;
+    return ArbitrateAllPairCapacity(entries->items, entries->count, manager->nrLocalNuma, privateCapacity,
+                                    sharedCapacity, onlyPid);
 }
 
 int BuildPidArbitratedTargetsLocked(struct ProcessManager *manager, pid_t pid, PairTarget targets[], size_t targetCap,
@@ -1073,24 +1165,24 @@ int BuildPidArbitratedTargetsLocked(struct ProcessManager *manager, pid_t pid, P
         return -EINVAL;
     }
     *targetCnt = 0;
-    PairArbitrationEntry *entries = calloc(MAX_PAIR_TARGET_COUNT, sizeof(*entries));
+    /* 条目数组按实际 Pair 数增长，不再每次按 MAX_PAIR_TARGET_COUNT 整块分配 */
+    PairEntryArray entries = { .limit = MAX_PAIR_TARGET_COUNT };
     uint64_t *privateCapacity = calloc(NM_COUNT(manager->nrLocalNuma), sizeof(*privateCapacity));
     uint64_t totalCapacity[SMAP_MAX_NUMNODES] = { 0 };
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t allCnt = 0;
-    size_t entryCount = 0;
     int ret = 0;
-    if (!entries || !privateCapacity) {
+    if (!privateCapacity) {
         ret = -ENOMEM;
         goto out;
     }
-    ret = BuildPairArbitrationSnapshotLocked(manager, entries, MAX_PAIR_TARGET_COUNT, &entryCount, privateCapacity,
-                                             totalCapacity, false, all, &allCnt);
+    ret =
+        BuildPairArbitrationSnapshotLocked(manager, &entries, privateCapacity, totalCapacity, false, pid, all, &allCnt);
     if (ret) {
         goto out;
     }
-    for (size_t i = 0; i < entryCount; i++) {
-        if (entries[i].target.pid != pid) {
+    for (size_t i = 0; i < entries.count; i++) {
+        if (entries.items[i].target.pid != pid) {
             continue;
         }
         if (*targetCnt == targetCap) {
@@ -1098,13 +1190,13 @@ int BuildPidArbitratedTargetsLocked(struct ProcessManager *manager, pid_t pid, P
             *targetCnt = 0;
             goto out;
         }
-        targets[*targetCnt] = entries[i].target;
-        targets[*targetCnt].targetPages = entries[i].privatePages + entries[i].sharedPages;
+        targets[*targetCnt] = entries.items[i].target;
+        targets[*targetCnt].targetPages = entries.items[i].privatePages + entries.items[i].sharedPages;
         (*targetCnt)++;
     }
 out:
     PidSlotReleaseRefs(all, allCnt);
-    free(entries);
+    free(entries.items);
     free(privateCapacity);
     return ret;
 }
@@ -1121,36 +1213,30 @@ int BuildAllPairTargets(struct ProcessManager *manager, PairTarget targets[], si
     }
     *targetCnt = 0;
 
-    PairArbitrationEntry *entries = targetCap == 0 ? NULL : calloc(targetCap, sizeof(PairArbitrationEntry));
-    if (targetCap > 0 && !entries) {
-        return -ENOMEM;
-    }
-
     int ret;
-    size_t entryCount = 0;
+    PairEntryArray entries = { .limit = targetCap };
     /* 第一维按 nrLocalNuma 分配（行跨度 = cap），避免大栈数组 */
     uint64_t *privateCapacity = calloc(NM_COUNT(manager->nrLocalNuma), sizeof(*privateCapacity));
     uint64_t totalCapacity[SMAP_MAX_NUMNODES] = { 0 };
     if (!privateCapacity) {
-        free(entries);
         return -ENOMEM;
     }
 
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t allCnt = 0;
     EnvMutexLock(&manager->remoteNumaInfo.lock);
-    ret = BuildPairArbitrationSnapshotLocked(manager, entries, targetCap, &entryCount, privateCapacity, totalCapacity,
-                                             false, all, &allCnt);
+    ret =
+        BuildPairArbitrationSnapshotLocked(manager, &entries, privateCapacity, totalCapacity, false, -1, all, &allCnt);
     if (!ret) {
-        PublishPairCapacityResult(manager, entries, entryCount, privateCapacity, totalCapacity);
-        for (size_t i = 0; i < entryCount; i++) {
-            targets[i] = entries[i].target;
+        PublishPairCapacityResult(manager, entries.items, entries.count, privateCapacity, totalCapacity);
+        for (size_t i = 0; i < entries.count; i++) {
+            targets[i] = entries.items[i].target;
         }
-        *targetCnt = entryCount;
+        *targetCnt = entries.count;
     }
     EnvMutexUnlock(&manager->remoteNumaInfo.lock);
     PidSlotReleaseRefs(all, allCnt);
-    free(entries);
+    free(entries.items);
     free(privateCapacity);
     return ret;
 }
@@ -1172,26 +1258,22 @@ int BuildAllPairPlanInputsForState(struct ProcessManager *manager, PairPlan plan
     *planCnt = 0;
     *pidBudgetCnt = 0;
 
-    PairArbitrationEntry *entries = planCap == 0 ? NULL : calloc(planCap, sizeof(PairArbitrationEntry));
-    if (planCap > 0 && !entries) {
-        return -ENOMEM;
-    }
-
     int ret;
-    size_t entryCount = 0;
+    PairEntryArray entryArray = { .limit = planCap };
     size_t budgetCount = 0;
     uint64_t *privateCapacity = calloc(NM_COUNT(manager->nrLocalNuma), sizeof(*privateCapacity));
     uint64_t totalCapacity[SMAP_MAX_NUMNODES] = { 0 };
     if (!privateCapacity) {
-        free(entries);
         return -ENOMEM;
     }
 
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t allCnt = 0;
     EnvMutexLock(&manager->remoteNumaInfo.lock);
-    ret = BuildPairArbitrationSnapshotLocked(manager, entries, planCap, &entryCount, privateCapacity, totalCapacity,
-                                             migrateOnly, all, &allCnt);
+    ret = BuildPairArbitrationSnapshotLocked(manager, &entryArray, privateCapacity, totalCapacity, migrateOnly, -1, all,
+                                             &allCnt);
+    PairArbitrationEntry *entries = entryArray.items;
+    size_t entryCount = entryArray.count;
     if (!ret) {
         for (size_t i = 0; i < entryCount; i++) {
             if (i == 0 || entries[i].target.pid != entries[i - 1].target.pid) {
