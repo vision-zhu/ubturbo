@@ -855,7 +855,14 @@ static void RefreshPairAccountMask(ProcessAttr *process, int localNid, int remot
     process->managedLocalState.managedLocalMask |= process->managedLocalState.accountLocalMask[remoteNid];
 }
 
-static void UpdateMigResultFrom(struct MigrateMsg *mMsg, int startIdx, struct ProcessManager *manager)
+typedef enum {
+    MIG_RESULT_ALL,
+    MIG_RESULT_GROUPED, /* 仅 grouped 进程：写 groupPolicy，须持 attrLock */
+    MIG_RESULT_PAIR, /* 仅非 grouped 进程：写远端账本，须持 remoteNumaInfo.lock */
+} MigResultScope;
+
+static void UpdateMigResultFrom(struct MigrateMsg *mMsg, int startIdx, struct ProcessManager *manager,
+                                MigResultScope scope)
 {
     ProcessAttr *current;
     uint64_t successMigCount;
@@ -875,7 +882,13 @@ static void UpdateMigResultFrom(struct MigrateMsg *mMsg, int startIdx, struct Pr
         successMigCount = GetMigListSuccessPages(&mMsg->migList[i]);
 
         if (current->groupPolicy.enabled) {
-            UpdateGroupedMigrationResult(current, fromNid, toNid, successMigCount);
+            if (scope != MIG_RESULT_PAIR) {
+                UpdateGroupedMigrationResult(current, fromNid, toNid, successMigCount);
+            }
+            PutProcessAttr(current);
+            continue;
+        }
+        if (scope == MIG_RESULT_GROUPED) {
             PutProcessAttr(current);
             continue;
         }
@@ -921,7 +934,7 @@ static void UpdateMigResultFrom(struct MigrateMsg *mMsg, int startIdx, struct Pr
 
 void UpdateMigResult(struct MigrateMsg *mMsg, struct ProcessManager *manager)
 {
-    UpdateMigResultFrom(mMsg, 0, manager);
+    UpdateMigResultFrom(mMsg, 0, manager, MIG_RESULT_ALL);
 }
 
 static void ResetGroupedSwapRuntimeLocked(ProcessAttr *process, bool freeze)
@@ -934,16 +947,38 @@ static void ResetGroupedSwapRuntimeLocked(ProcessAttr *process, bool freeze)
     }
 }
 
+/* 对 grouped 运行态的写入与 IPC 线程整体覆写 groupPolicy 互斥：持该进程 slot 的 attrLock。
+ * attr 未发布到槽表（单测）时 slot 为 NULL，退化为直接写。 */
+static struct PidSlot *GroupedAttrLock(ProcessAttr *process)
+{
+    struct PidSlot *slot = PidSlotGetRefByAttr(process);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    return slot;
+}
+
+static void GroupedAttrUnlock(struct PidSlot *slot)
+{
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+    }
+}
+
 static void FreezeGroupedSwapLocked(struct ProcessManager *manager, pid_t pid)
 {
     (void)manager;
     ProcessAttr *process = GetProcessAttr(pid);
-    if (!process || !process->groupPolicy.enabled) {
-        PutProcessAttr(process);
+    if (!process) {
         return;
     }
-    ResetGroupedSwapRuntimeLocked(process, true);
-    SMAP_LOGGER_ERROR("grouped pid %d swap frozen due to unbalanced swap migration.", pid);
+    struct PidSlot *slot = GroupedAttrLock(process);
+    if (process->groupPolicy.enabled) {
+        ResetGroupedSwapRuntimeLocked(process, true);
+        SMAP_LOGGER_ERROR("grouped pid %d swap frozen due to unbalanced swap migration.", pid);
+    }
+    GroupedAttrUnlock(slot);
     PutProcessAttr(process);
 }
 
@@ -2011,12 +2046,19 @@ static void PostPidMigration(struct ProcessManager *manager, ProcessAttr *proces
             SMAP_LOGGER_ERROR("Per-pid %d grouped swap compensation failed: %d.", process->pid, ret);
         }
     } else if (ret && process->groupPolicy.enabled) {
+        struct PidSlot *slot = GroupedAttrLock(process);
         ResetGroupedSwapRuntimeLocked(process, true);
+        GroupedAttrUnlock(slot);
     }
+
+    /* grouped 结果只写 groupPolicy，持 attrLock 入账；不得嵌套在账本锁内（锁序 attrLock 先于账本锁） */
+    struct PidSlot *slot = GroupedAttrLock(process);
+    UpdateMigResultFrom(mMsg, 0, manager, MIG_RESULT_GROUPED);
+    GroupedAttrUnlock(slot);
 
     /* 成功页入账与在途释放必须原子完成，避免其他 PID 重复使用容量。 */
     EnvMutexLock(&manager->remoteNumaInfo.lock);
-    UpdateMigResult(mMsg, manager);
+    UpdateMigResultFrom(mMsg, 0, manager, MIG_RESULT_PAIR);
     /*
      * 只按规划时的快照回收：grouped 路径没有预扣，不能拿可能过期的
      * attr 方向矩阵去结算，否则会凭空释放其他 PID 的在途额度。

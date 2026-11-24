@@ -47,6 +47,20 @@ typedef struct {
     uint64_t oldUsedPages;
 } GroupTargetEntry;
 
+/*
+ * Working copy of the grouped state the strategy reads and updates. It is
+ * loaded from the active ProcessAttr under the slot's attrLock, planned on
+ * without the lock (the planner reads sysfs), and stored back under the lock
+ * only if the IPC thread has not replaced the policy in the meantime.
+ */
+typedef struct {
+    GroupMigrationPolicy policy;
+    uint64_t lastTotalPages;
+    uint8_t stableTotalRounds;
+    bool totalPagesValid;
+    bool frozen;
+} GroupedRunState;
+
 static int CmpU64Asc(const void *a, const void *b)
 {
     uint64_t ua = *(const uint64_t *)a;
@@ -130,14 +144,14 @@ static bool PolicyHasNode(const GroupMigrationPolicy *policy, int nid)
     return false;
 }
 
-static void WarnUngroupedPages(ProcessAttr *process)
+static void WarnUngroupedPages(ProcessAttr *process, const GroupMigrationPolicy *policy)
 {
     int cap = (int)GetNumaCap();
     for (int nid = 0; nid < cap; nid++) {
         if (process->scanAttr.actcLen[nid] == 0) {
             continue;
         }
-        if (!PolicyHasNode(&process->groupPolicy, nid)) {
+        if (!PolicyHasNode(policy, nid)) {
             SMAP_LOGGER_WARNING("pid %d has %llu pages on ungrouped numa %d, skipped by grouped strategy.",
                                 process->pid, process->scanAttr.actcLen[nid], nid);
         }
@@ -187,19 +201,19 @@ static uint64_t CalcProcessTotalPages(const ProcessAttr *process)
     return total;
 }
 
-static bool UpdateGroupSwapTotalPagesStable(ProcessAttr *process)
+static bool UpdateGroupSwapTotalPagesStable(const ProcessAttr *process, GroupedRunState *st)
 {
     uint64_t totalPages = CalcProcessTotalPages(process);
 
-    if (!process->groupSwapTotalPagesValid || process->groupSwapLastTotalPages != totalPages) {
-        process->groupSwapLastTotalPages = totalPages;
-        process->groupSwapStableTotalRounds = 1;
-        process->groupSwapTotalPagesValid = true;
-    } else if (process->groupSwapStableTotalRounds < GROUP_SWAP_READY_ROUNDS) {
-        process->groupSwapStableTotalRounds++;
+    if (!st->totalPagesValid || st->lastTotalPages != totalPages) {
+        st->lastTotalPages = totalPages;
+        st->stableTotalRounds = 1;
+        st->totalPagesValid = true;
+    } else if (st->stableTotalRounds < GROUP_SWAP_READY_ROUNDS) {
+        st->stableTotalRounds++;
     }
 
-    return process->groupSwapStableTotalRounds >= GROUP_SWAP_READY_ROUNDS;
+    return st->stableTotalRounds >= GROUP_SWAP_READY_ROUNDS;
 }
 
 static void ResetGroupSwapCandidateRounds(GroupMigrationPolicy *policy)
@@ -256,9 +270,10 @@ static uint64_t CalcTargetQuotaSum(GroupMigrationPolicy *policy, const GroupTarg
  * For a non-shared target, ACTC resident pages can be mapped directly to the
  * only owning group target.
  */
-static void SyncSingleTargetUsedPages(ProcessAttr *process, GroupTargetEntry *entry, uint64_t residentPages)
+static void SyncSingleTargetUsedPages(ProcessAttr *process, GroupMigrationPolicy *policy, GroupTargetEntry *entry,
+                                      uint64_t residentPages)
 {
-    MigrationGroupAttr *group = &process->groupPolicy.groups[entry->groupIdx];
+    MigrationGroupAttr *group = &policy->groups[entry->groupIdx];
     GroupTargetAttr *target = &group->targets[entry->targetIdx];
 
     target->usedPages = residentPages;
@@ -276,11 +291,10 @@ static void SyncSingleTargetUsedPages(ProcessAttr *process, GroupTargetEntry *en
  * For a shared target, split ACTC resident pages by configured quota. This is
  * capacity accounting only; it does not imply page-level ownership.
  */
-static void AssignSharedTargetUsedPages(ProcessAttr *process, const GroupTargetEntry entries[], int entryCount,
+static void AssignSharedTargetUsedPages(GroupMigrationPolicy *policy, const GroupTargetEntry entries[], int entryCount,
                                         uint64_t residentPages, uint64_t quotaSum)
 {
     uint64_t assignedPages = 0;
-    GroupMigrationPolicy *policy = &process->groupPolicy;
 
     for (int i = 0; i < entryCount; i++) {
         GroupTargetAttr *target = &policy->groups[entries[i].groupIdx].targets[entries[i].targetIdx];
@@ -299,10 +313,10 @@ static void AssignSharedTargetUsedPages(ProcessAttr *process, const GroupTargetE
 }
 
 /* Validate shared-target quota accounting and publish the split usedPages. */
-static void SyncSharedTargetUsedPages(ProcessAttr *process, const GroupTargetEntry entries[], int entryCount,
-                                      uint64_t residentPages, uint64_t quotaSum)
+static void SyncSharedTargetUsedPages(ProcessAttr *process, GroupMigrationPolicy *policy,
+                                      const GroupTargetEntry entries[], int entryCount, uint64_t residentPages,
+                                      uint64_t quotaSum)
 {
-    GroupMigrationPolicy *policy = &process->groupPolicy;
     int nid = policy->groups[entries[0].groupIdx].targets[entries[0].targetIdx].nid;
 
     if (quotaSum == 0 || quotaSum == UINT64_MAX) {
@@ -315,7 +329,7 @@ static void SyncSharedTargetUsedPages(ProcessAttr *process, const GroupTargetEnt
                             nid, residentPages, quotaSum);
     }
 
-    AssignSharedTargetUsedPages(process, entries, entryCount, residentPages, quotaSum);
+    AssignSharedTargetUsedPages(policy, entries, entryCount, residentPages, quotaSum);
     for (int i = 0; i < entryCount; i++) {
         GroupTargetAttr *target = &policy->groups[entries[i].groupIdx].targets[entries[i].targetIdx];
         if (entries[i].oldUsedPages != target->usedPages) {
@@ -333,10 +347,8 @@ static void SyncSharedTargetUsedPages(ProcessAttr *process, const GroupTargetEnt
  * demote/promote stage, and swap is skipped while a group's local pages are
  * below its reserve watermark (IsGroupLocalSteady).
  */
-static void SyncGroupedTargetUsedPages(ProcessAttr *process)
+static void SyncGroupedTargetUsedPages(ProcessAttr *process, GroupMigrationPolicy *policy)
 {
-    GroupMigrationPolicy *policy = &process->groupPolicy;
-
     int cap = (int)GetNumaCap();
     for (int nid = GetNrLocalNuma(); nid < cap; nid++) {
         GroupTargetEntry entries[MAX_GROUP_TARGET_ENTRY] = { 0 };
@@ -347,12 +359,12 @@ static void SyncGroupedTargetUsedPages(ProcessAttr *process)
 
         uint64_t residentPages = process->scanAttr.actcLen[nid];
         if (entryCount == 1) {
-            SyncSingleTargetUsedPages(process, &entries[0], residentPages);
+            SyncSingleTargetUsedPages(process, policy, &entries[0], residentPages);
             continue;
         }
 
         uint64_t quotaSum = CalcTargetQuotaSum(policy, entries, entryCount);
-        SyncSharedTargetUsedPages(process, entries, entryCount, residentPages, quotaSum);
+        SyncSharedTargetUsedPages(process, policy, entries, entryCount, residentPages, quotaSum);
     }
 }
 
@@ -792,27 +804,28 @@ static int BuildSwapMigList(ProcessAttr *process, MigrationGroupAttr *group, str
     return ret;
 }
 
-static int RunSwapStage(ProcessAttr *process, struct MigList *mlist)
+static int RunSwapStage(ProcessAttr *process, GroupedRunState *st, struct MigList *mlist)
 {
+    GroupMigrationPolicy *policy = &st->policy;
     if (!process->enableSwap) {
         return 0;
     }
-    if (process->groupSwapFrozen) {
-        ResetGroupSwapCandidateRounds(&process->groupPolicy);
+    if (st->frozen) {
+        ResetGroupSwapCandidateRounds(policy);
         SMAP_LOGGER_WARNING("grouped pid %d swap is frozen due to previous imbalance.", process->pid);
         return 0;
     }
-    if (!UpdateGroupSwapTotalPagesStable(process)) {
+    if (!UpdateGroupSwapTotalPagesStable(process, st)) {
         SMAP_LOGGER_INFO("grouped pid %d swap waits for stable total pages, current %llu round %u.", process->pid,
-                         process->groupSwapLastTotalPages, process->groupSwapStableTotalRounds);
-        ResetGroupSwapCandidateRounds(&process->groupPolicy);
+                         st->lastTotalPages, st->stableTotalRounds);
+        ResetGroupSwapCandidateRounds(policy);
         return 0;
     }
-    for (int i = 0; i < process->groupPolicy.groupCount; i++) {
-        MigrationGroupAttr *group = &process->groupPolicy.groups[i];
+    for (int i = 0; i < policy->groupCount; i++) {
+        MigrationGroupAttr *group = &policy->groups[i];
         uint64_t localUsed = CalcLocalUsed(process, group);
         uint64_t remoteUsed = CalcRemoteUsed(group);
-        if (!IsGroupLocalSteady(process, group) || remoteUsed == 0 || IsSharedTarget(&process->groupPolicy, i)) {
+        if (!IsGroupLocalSteady(process, group) || remoteUsed == 0 || IsSharedTarget(policy, i)) {
             group->swapCandidateRounds = 0;
             continue;
         }
@@ -837,19 +850,35 @@ static int RunSwapStage(ProcessAttr *process, struct MigList *mlist)
     return 0;
 }
 
-int GroupedMigrationStrategy(ProcessAttr *process, struct MigList *mlist)
+/* 以下两个函数须在 attrLock 内（或 attr 尚未发布到槽表时）调用 */
+static void LoadGroupedRunState(const ProcessAttr *process, GroupedRunState *st)
 {
-    if (!process || !process->groupPolicy.enabled) {
-        return -EINVAL;
-    }
-    /* Swap depends on target usedPages accounting. */
-    SyncGroupedTargetUsedPages(process);
-    WarnUngroupedPages(process);
-    int ret = RunSwapStage(process, mlist);
-    if (ret) {
-        SMAP_LOGGER_ERROR("grouped pid %d swap stage failed: %d.", process->pid, ret);
-    }
+    /* 按字节拷贝（含填充），供提交前 memcmp 判断策略是否被并发替换 */
+    (void)memcpy_s(&st->policy, sizeof(st->policy), &process->groupPolicy, sizeof(process->groupPolicy));
+    st->lastTotalPages = process->groupSwapLastTotalPages;
+    st->stableTotalRounds = process->groupSwapStableTotalRounds;
+    st->totalPagesValid = process->groupSwapTotalPagesValid;
+    st->frozen = process->groupSwapFrozen;
+}
 
+static bool GroupedRunStateUnchanged(const ProcessAttr *process, const GroupedRunState *st)
+{
+    return memcmp(&st->policy, &process->groupPolicy, sizeof(st->policy)) == 0 &&
+           st->lastTotalPages == process->groupSwapLastTotalPages &&
+           st->stableTotalRounds == process->groupSwapStableTotalRounds &&
+           st->totalPagesValid == process->groupSwapTotalPagesValid && st->frozen == process->groupSwapFrozen;
+}
+
+static void StoreGroupedRunState(ProcessAttr *process, const GroupedRunState *st)
+{
+    (void)memcpy_s(&process->groupPolicy, sizeof(process->groupPolicy), &st->policy, sizeof(st->policy));
+    process->groupSwapLastTotalPages = st->lastTotalPages;
+    process->groupSwapStableTotalRounds = st->stableTotalRounds;
+    process->groupSwapTotalPagesValid = st->totalPagesValid;
+}
+
+static void SortMigListCells(struct MigList *mlist)
+{
     int cap = (int)GetNumaCap();
     int nrLocal = GetNrLocalNuma();
     for (int from = 0; from < cap; from++) {
@@ -861,10 +890,70 @@ int GroupedMigrationStrategy(ProcessAttr *process, struct MigList *mlist)
             }
         }
     }
+}
 
+/*
+ * 策略在 groupPolicy 的快照上规划（快照与提交都持 attrLock），与 IPC 线程整体覆写
+ * groupPolicy（SetGroupedProcessConfig）互斥；规划期间策略被替换时丢弃本轮结果并返回
+ * -EAGAIN，本周期不迁移，下周期按新策略重新规划。
+ */
+int GroupedMigrationStrategy(ProcessAttr *process, struct MigList *mlist)
+{
+    if (!process) {
+        return -EINVAL;
+    }
+    GroupedRunState *orig = malloc(sizeof(*orig));
+    GroupedRunState *work = malloc(sizeof(*work));
+    if (!orig || !work) {
+        free(orig);
+        free(work);
+        return -ENOMEM;
+    }
+    struct PidSlot *slot = PidSlotGetRefByAttr(process);
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    LoadGroupedRunState(process, orig);
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+
+    int ret = -EINVAL;
+    if (!orig->policy.enabled) {
+        goto OUT;
+    }
+    (void)memcpy_s(work, sizeof(*work), orig, sizeof(*orig));
+    /* Swap depends on target usedPages accounting. */
+    SyncGroupedTargetUsedPages(process, &work->policy);
+    WarnUngroupedPages(process, &work->policy);
+    ret = RunSwapStage(process, work, mlist);
+    if (ret) {
+        SMAP_LOGGER_ERROR("grouped pid %d swap stage failed: %d.", process->pid, ret);
+    }
+    SortMigListCells(mlist);
+
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+    if (GroupedRunStateUnchanged(process, orig)) {
+        StoreGroupedRunState(process, work);
+    } else {
+        SMAP_LOGGER_WARNING("grouped pid %d policy changed during planning, drop this round.", process->pid);
+        ret = -EAGAIN;
+    }
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+OUT:
+    if (slot) {
+        PidSlotReleaseRefs(&slot, 1);
+    }
+    free(orig);
+    free(work);
     return ret;
 }
 
+/* 调用方须持该进程 slot 的 attrLock（或 attr 尚未发布到槽表）。 */
 void UpdateGroupedMigrationResult(ProcessAttr *process, int fromNid, int toNid, uint64_t successPages)
 {
     if (!process || !process->groupPolicy.enabled || successPages == 0) {
