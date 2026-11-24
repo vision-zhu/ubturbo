@@ -397,10 +397,20 @@ static bool IsDestNidUnique(struct MigrateOutPayload *payload)
     return true;
 }
 
+/*
+ * 当前纳管页粒度（KB）：2M 模式为 2048，普通页模式为系统基础页（4K 或 64K）。
+ * 内核按该粒度截断 memSize，用户态账本按请求值记账，二者须对齐。未初始化时退回 4K。
+ */
+static uint64_t GetManagedPageSizeKB(void)
+{
+    uint64_t pageSizeKB = GetPageSize() / KIB;
+    return pageSizeKB != 0 ? pageSizeKB : KB_PER_4KB;
+}
+
 static bool CheckMigOutPayloadItems(struct MigrateOutPayload *payload, uint64_t *totalRatio)
 {
     MigrateMode migrateMode = payload->inner[0].migrateMode;
-    uint64_t pageSizeKB = IsHugeMode() ? KB_PER_2MB : KB_PER_4KB;
+    uint64_t pageSizeKB = GetManagedPageSizeKB();
 
     *totalRatio = 0;
     for (int i = 0; i < payload->count; i++) {
@@ -3460,7 +3470,9 @@ static int GetAttrNidInitMemSize(pid_t pid, int nid, uint64_t *memSize)
 
 static bool IsRemoteNidMemSizeValid(pid_t pid, int nid, uint64_t memSize)
 {
-    if (memSize % KB_PER_4KB != 0 || memSize == 0) {
+    uint64_t pageSizeKB = GetManagedPageSizeKB();
+    if (memSize % pageSizeKB != 0 || memSize == 0) {
+        SMAP_LOGGER_ERROR("migrate memSize %llu is not %lluKB aligned.", memSize, pageSizeKB);
         return false;
     }
     uint64_t curMemSize;

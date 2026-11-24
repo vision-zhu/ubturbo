@@ -4651,6 +4651,14 @@ TEST_F(InterfaceTest, TestIsRemoteNidMemSizeValid)
 
     EXPECT_TRUE(IsRemoteNidMemSizeValid(1, 4, 2048));
 
+    /* 2M 模式下按 2M 粒度校验：4K 对齐但不足 2M 的值内核会截断为 0 页，必须拒绝 */
+    uint32_t savedPageSize = g_processManager.tracking.pageSize;
+    g_processManager.tracking.pageSize = PAGESIZE_2M;
+    attr.migrateParam[0].memSize = 4096;
+    EXPECT_FALSE(IsRemoteNidMemSizeValid(1, 4, 2044));
+    EXPECT_TRUE(IsRemoteNidMemSizeValid(1, 4, 4096));
+    g_processManager.tracking.pageSize = savedPageSize;
+
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
 }
 
