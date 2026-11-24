@@ -604,6 +604,17 @@ static inline bool HasProcessConfig(size_t totalLen)
     return totalLen > CONFIG_HEADER_LEN + CalcNumaConfigLen();
 }
 
+/* IsPidRecovered - 恢复期间检查 pid 是否已占用槽位（配置文件中出现重复记录时只恢复第一条） */
+static bool IsPidRecovered(struct ProcessManager *manager, pid_t pid)
+{
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        if (EnvAtomicRead(&manager->slots[i].state) == PID_SLOT_INUSE && manager->slots[i].pid == pid) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static int RecoverProcessConfig(char *processBase)
 {
     struct PayloadHeader *header = (struct PayloadHeader *)processBase;
@@ -629,6 +640,11 @@ static int RecoverProcessConfig(char *processBase)
             (const struct PersistRemoteTarget *)((unsigned long *)(cur + CONFIG_PROC_HEADER_LEN) + h->nrWords);
         cur += stride;
         remaining -= stride;
+
+        if (IsPidRecovered(manager, h->pid)) {
+            SMAP_LOGGER_WARNING("Duplicated persisted process %d, skip recover.", h->pid);
+            continue;
+        }
 
         /* 页类型一致性校验：pid 实际页类型须与 smap 当前模式匹配，否则内核扫描返回 -EINVAL；
          * 进程已退出（-ESRCH）同样跳过恢复 */
@@ -666,7 +682,18 @@ static int RecoverProcessConfig(char *processBase)
                              attr->targetConfig.targets[j].remoteNid, attr->targetConfig.targets[j].ratio,
                              attr->targetConfig.targets[j].memSizeKB);
         }
-        PidSlotAdd(manager, attr);
+        int addRet = PidSlotAdd(manager, attr);
+        if (addRet < 0) {
+            /* attr 未被任何槽位持有，必须就地释放（nr[] 由 PidSlotAdd 内部计数，失败时不计）。
+             * 重复 pid 只跳过该记录；槽位耗尽时剩余记录同样无槽可用，停止恢复 */
+            SMAP_LOGGER_ERROR("Add pid slot for persisted process %d failed: %d.", attr->pid, addRet);
+            FreeProcessAttrArrays(attr);
+            free(attr);
+            if (addRet == -EEXIST) {
+                continue;
+            }
+            break;
+        }
     }
     if (errFlag) {
         for (int i = 0; i < MAX_PID_SLOTS; i++) {

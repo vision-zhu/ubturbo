@@ -925,6 +925,58 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigRestoresPairMultiRemoteTarget)
     PidSlotRemove(&manager, (attr)->pid);
 }
 
+TEST_F(SmapConfigTest, TestRecoverProcessConfigSkipsDuplicatedPid)
+{
+    struct ProcessManager manager; memset(&manager, 0, sizeof(manager));
+    struct PersistRemoteTarget t0[1] = {{ .nid = 4, .ratio = 25, .memSize = 0 }};
+    struct PersistRemoteTarget t1[1] = {{ .nid = 5, .ratio = 15, .memSize = 0 }};
+    const int bits0[] = {0, 4};
+    const int bits1[] = {0, 5};
+    alignas(8) char buf[1024] = {};
+    size_t off = BuildV3Record(buf, 1025, NORMAL_SCAN, PROCESS_TYPE, PROC_IDLE, MIG_RATIO_MODE, 200, bits0, 2,
+                               t0, 1);
+    off += BuildV3Record(buf + off, 1025, NORMAL_SCAN, PROCESS_TYPE, PROC_IDLE, MIG_RATIO_MODE, 200, bits1, 2,
+                         t1, 1);
+    struct PayloadHeader header = {.len = (uint32_t)off};
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(static_cast<char *>(buf)));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
+
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header));
+    EXPECT_EQ(1, manager.nr[PROCESS_TYPE]);
+    ASSERT_NE(nullptr, PmHeadAttr(&manager));
+    EXPECT_EQ(nullptr, PmNthAttr(&manager, 1));
+    /* 只恢复第一条记录 */
+    EXPECT_EQ(4, PmHeadAttr(&manager)->targetConfig.targets[0].remoteNid);
+    PidSlotRemove(&manager, PmHeadAttr(&manager)->pid);
+}
+
+TEST_F(SmapConfigTest, TestRecoverProcessConfigNoFreeSlot)
+{
+    struct ProcessManager manager; memset(&manager, 0, sizeof(manager));
+    struct PersistRemoteTarget t0[1] = {{ .nid = 4, .ratio = 25, .memSize = 0 }};
+    const int bits0[] = {0, 4};
+    alignas(8) char buf[512] = {};
+    size_t off = BuildV3Record(buf, 1025, NORMAL_SCAN, PROCESS_TYPE, PROC_IDLE, MIG_RATIO_MODE, 200, bits0, 2,
+                               t0, 1);
+    struct PayloadHeader header = {.len = (uint32_t)off};
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(static_cast<char *>(buf)));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
+    MOCKER(PidSlotAdd).stubs().will(returnValue(-1));
+
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header));
+    EXPECT_EQ(0, manager.nr[PROCESS_TYPE]);
+    EXPECT_EQ(0, manager.nr[VM_TYPE]);
+    EXPECT_EQ(nullptr, PmHeadAttr(&manager));
+}
+
 extern "C" int WriteProcessConfig(char *processBase, const struct ProcessPayload *p, int nrPayload);
 TEST_F(SmapConfigTest, TestWriteProcessConfig)
 {
