@@ -281,10 +281,10 @@ static void SetLocalMemStatus(SceneInfo *info)
     }
 }
 
-static inline int AddList(int arr[], int len)
+static inline int64_t AddList(int64_t arr[], int len)
 {
     int i = 0;
-    int arrSum = 0;
+    int64_t arrSum = 0;
     for (i = 0; i < len; i++) {
         arrSum += arr[i];
     }
@@ -309,18 +309,20 @@ static void UpdateMemRatio(ProcessAttr *process)
                      NM_AT(process->strategyAttr.l3RemoteMemRatio, l1Node, l2Node), process->pid, p->nrL1Guarantee);
 }
 
-static inline void ClearList(int arr[], int len)
+static inline void ClearList(int64_t arr[], int len)
 {
     for (int i = 0; i < len; i++) {
         arr[i] = 0;
     }
 }
 
-static void DistributeExtraPages(int arr[], int len)
+static void DistributeExtraPages(int64_t arr[], int len)
 {
-    int i, diff;
-    double posSum = 0, negSum = 0, sum = 0;
-    int offered[len];
+    int i;
+    int64_t diff;
+    double posSum = 0, negSum = 0;
+    int64_t sum = 0;
+    int64_t offered[len];
 
     for (i = 0; i < len; i++) {
         sum += arr[i];
@@ -343,9 +345,9 @@ static void DistributeExtraPages(int arr[], int len)
     }
     diff = sum - AddList(arr, len); // 预期为非负数
     i = 0;
-    while (diff > 0) {
+    while (diff > 0 && i < len) {
         if (offered[i] > 0) {
-            int c = MIN(diff, offered[i]);
+            int64_t c = MIN(diff, offered[i]);
             arr[i] += c;
             diff -= c;
         }
@@ -353,11 +355,13 @@ static void DistributeExtraPages(int arr[], int len)
     }
 }
 
-static void DistributeInsufficientPages(int arr[], int len)
+static void DistributeInsufficientPages(int64_t arr[], int len)
 {
-    int i, diff;
-    double posSum = 0, negSum = 0, sum = 0;
-    int consumer[len];
+    int i;
+    int64_t diff;
+    double posSum = 0, negSum = 0;
+    int64_t sum = 0;
+    int64_t consumer[len];
 
     for (i = 0; i < len; i++) {
         sum += arr[i];
@@ -382,7 +386,7 @@ static void DistributeInsufficientPages(int arr[], int len)
     i = 0;
     while (diff > 0 && i < len) {
         if (consumer[i] > 0) {
-            int c = MIN(diff, consumer[i]);
+            int64_t c = MIN(diff, consumer[i]);
             arr[i] -= c;
             diff -= c;
         }
@@ -390,9 +394,9 @@ static void DistributeInsufficientPages(int arr[], int len)
     }
 }
 
-static void BalanceSurpluses(int arr[], int len)
+static void BalanceSurpluses(int64_t arr[], int len)
 {
-    int sum = AddList(arr, len);
+    int64_t sum = AddList(arr, len);
     if (sum == 0) {
         ClearList(arr, len);
     } else if (sum > 0) { // 如果总页数有盈余，直接满足所有有需求的虚机
@@ -422,7 +426,7 @@ static bool IsReadyForAdapt(ProcessAttr *attr)
     return true;
 }
 
-static void AdjustVmMemRatio(struct ProcessManager *manager, int *surpluses, int len)
+static void AdjustVmMemRatio(struct ProcessManager *manager, int64_t *surpluses, int len)
 {
     int i = 0;
     if (len <= 0) {
@@ -439,7 +443,7 @@ static void AdjustVmMemRatio(struct ProcessManager *manager, int *surpluses, int
         SceneInfo *info = &current->sceneInfo;
         PageInfo *p = &info->pageInfo[info->pageInfoIndex];
         p->nrL1Planed = p->nrL1Guarantee + surpluses[i];
-        SMAP_LOGGER_INFO("AdjustVmMemRatio nrL1Planed: %u, nrL1Guarantee: %u, surpluses: %d.", p->nrL1Planed,
+        SMAP_LOGGER_INFO("AdjustVmMemRatio nrL1Planed: %u, nrL1Guarantee: %u, surpluses: %lld.", p->nrL1Planed,
                          p->nrL1Guarantee, surpluses[i]);
         SetLocalMemStatus(info);
         if (info->status == FULL_SATISFIED) {
@@ -460,7 +464,8 @@ void ConfigMultiVmRatio(struct ProcessManager *manager)
         SMAP_LOGGER_DEBUG("No vm is found, skip adapt mem ratio.");
         return;
     }
-    int i = 0, surpluses[nrVms];
+    int i = 0;
+    int64_t surpluses[nrVms];
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
     for (size_t k = 0; k < n && i < nrVms; k++) {
@@ -473,9 +478,10 @@ void ConfigMultiVmRatio(struct ProcessManager *manager)
         int l1Node = GetAttrL1(current);
         int l2Node = GetAttrL2(current);
         if (l1Node >= 0 && l2Node >= manager->nrLocalNuma) {
-            int localPages =
-                p->nrPages * (HUNDRED - NM_AT(current->strategyAttr.l2RemoteMemRatio, l1Node, l2Node)) / HUNDRED;
-            surpluses[i] = localPages - p->nrL1Guarantee;
+            int64_t localPages =
+                (int64_t)(p->nrPages * (HUNDRED - NM_AT(current->strategyAttr.l2RemoteMemRatio, l1Node, l2Node)) /
+                          HUNDRED);
+            surpluses[i] = localPages - (int64_t)p->nrL1Guarantee;
         } else {
             surpluses[i] = 0; // 后续流程中不会更改配比
         }
