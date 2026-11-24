@@ -808,78 +808,92 @@ static int WriteTargetConfigToPayload(struct PersistRemoteTarget payloadTargets[
     return 0;
 }
 
+/*
+ * SnapshotProcessPayload - 在持有 slot->attrLock 的前提下，把 attr 中需要持久化的字段快照到 payload
+ *
+ * Returns 0 on success, 1 if the attr is managed by grouped policy (not persisted), negative errno on failure.
+ */
+static int SnapshotProcessPayload(ProcessAttr *attr, struct ProcessPayload *tmp)
+{
+    if (attr->groupPolicy.enabled && attr->groupPolicy.groupCount > 0) {
+        return 1;
+    }
+    tmp->pid = attr->pid;
+    tmp->scanType = attr->scanType;
+    tmp->type = attr->type;
+    const ProcessTargetConfig *effectiveConfig = attr->pendingTargetConfigValid ? &attr->pendingTargetConfig :
+                                                                                  &attr->targetConfig;
+    tmp->srcNid = effectiveConfig->sourceLocalNid;
+    tmp->state = attr->state == PROC_MIGRATE ? PROC_IDLE : attr->state;
+    /* numaAttr.numaNodes is user-synthesized; persist the last read-back value.
+     * 深拷贝：避免序列化期间 attr 位图被并发替换后悬空 */
+    if (!NumaBitmapCopy(&tmp->numaNodes, &attr->numaAttr.numaNodes)) {
+        SMAP_LOGGER_ERROR("Build pid %d numa bitmap failed.", attr->pid);
+        return -ENOMEM;
+    }
+    tmp->scanTime = attr->scanTime;
+    tmp->duration = attr->duration;
+    int ret = WriteTargetConfigToPayload(tmp->migrateParam, &tmp->count, &tmp->migrateMode, effectiveConfig);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Build pid %d effective target config payload failed: %d.", attr->pid, ret);
+        return ret;
+    }
+    /* 与 effectiveConfig 选择一致：pending 生效时用 pending 的容量策略 */
+    tmp->ignoreRemoteCapacity =
+        (attr->pendingTargetConfigValid ? attr->pendingIgnoreRemoteCapacity : attr->ignoreRemoteCapacity) ? 1 : 0;
+    return 0;
+}
+
 static int BuildAllProcessPayload(struct ProcessPayload **payload, int *len)
 {
     struct ProcessManager *manager = GetProcessManager();
-    struct ProcessPayload *p, *tmp;
+    struct ProcessPayload *p;
     int nrPayload = 0;
+    int ret = 0;
     struct PidSlot *all[MAX_PID_SLOTS];
     size_t n = PidSlotCollectRefs(manager, all, MAX_PID_SLOTS);
 
-    for (size_t i = 0; i < n; i++) {
-        if (!all[i]->attr->groupPolicy.enabled || all[i]->attr->groupPolicy.groupCount <= 0) {
-            nrPayload++;
-        }
-    }
-
-    SMAP_LOGGER_DEBUG("BuildAllProcessPayload nrPayload %d.", nrPayload);
-    if (nrPayload == 0) {
-        *payload = NULL;
-        *len = 0;
+    *payload = NULL;
+    *len = 0;
+    if (n == 0) {
         SMAP_LOGGER_INFO("Number of process payload is 0.");
-        PidSlotReleaseRefs(all, n);
         return 0;
     }
 
-    p = calloc(nrPayload, sizeof(struct ProcessPayload));
+    /* 按槽位引用数分配上界；分组策略的进程在持锁快照时才能确定是否跳过 */
+    p = calloc(n, sizeof(struct ProcessPayload));
     if (!p) {
         SMAP_LOGGER_ERROR("BuildAllProcessPayload calloc failed.");
         PidSlotReleaseRefs(all, n);
         return -ENOMEM;
     }
 
-    tmp = p;
     for (size_t i = 0; i < n; i++) {
-        ProcessAttr *attr = all[i]->attr;
-        if (attr->groupPolicy.enabled && attr->groupPolicy.groupCount > 0) {
-            continue;
+        /* 持 attrLock 快照：位图、pending/active 目标配置会被 IPC 线程与 worker 在锁内整体替换 */
+        EnvMutexLock(&all[i]->attrLock);
+        ProcessAttr *attr = PidSlotAttr(all[i]);
+        ret = attr ? SnapshotProcessPayload(attr, &p[nrPayload]) : 1;
+        EnvMutexUnlock(&all[i]->attrLock);
+        if (ret < 0) {
+            break;
         }
-        tmp->pid = attr->pid;
-        tmp->scanType = attr->scanType;
-        tmp->type = attr->type;
-        const ProcessTargetConfig *effectiveConfig = attr->pendingTargetConfigValid ? &attr->pendingTargetConfig :
-                                                                                      &attr->targetConfig;
-        tmp->srcNid = effectiveConfig->sourceLocalNid;
-        tmp->state = attr->state == PROC_MIGRATE ? PROC_IDLE : attr->state;
-        /* numaAttr.numaNodes is user-synthesized; persist the last read-back value.
-         * 深拷贝：避免序列化期间 attr 位图被并发替换后悬空 */
-        if (!NumaBitmapCopy(&tmp->numaNodes, &attr->numaAttr.numaNodes)) {
-            SMAP_LOGGER_ERROR("Build pid %d numa bitmap failed.", attr->pid);
-            FreeProcessPayloadBitmaps(p, nrPayload);
-            free(p);
-            PidSlotReleaseRefs(all, n);
-            return -ENOMEM;
+        if (ret == 0) {
+            nrPayload++;
         }
-        tmp->scanTime = attr->scanTime;
-        tmp->duration = attr->duration;
-        int ret = WriteTargetConfigToPayload(tmp->migrateParam, &tmp->count, &tmp->migrateMode, effectiveConfig);
-        if (ret) {
-            SMAP_LOGGER_ERROR("Build pid %d effective target config payload failed: %d.", attr->pid, ret);
-            FreeProcessPayloadBitmaps(p, nrPayload);
-            free(p);
-            PidSlotReleaseRefs(all, n);
-            return ret;
-        }
-        /* 与 effectiveConfig 选择一致：pending 生效时用 pending 的容量策略 */
-        tmp->ignoreRemoteCapacity =
-            (attr->pendingTargetConfigValid ? attr->pendingIgnoreRemoteCapacity : attr->ignoreRemoteCapacity) ? 1 : 0;
-        tmp++;
+        ret = 0;
+    }
+    PidSlotReleaseRefs(all, n);
+
+    if (ret < 0 || nrPayload == 0) {
+        FreeProcessPayloadBitmaps(p, (int)n);
+        free(p);
+        SMAP_LOGGER_DEBUG("BuildAllProcessPayload nrPayload %d, ret %d.", nrPayload, ret);
+        return ret;
     }
 
+    SMAP_LOGGER_DEBUG("BuildAllProcessPayload nrPayload %d.", nrPayload);
     *payload = p;
     *len = nrPayload;
-
-    PidSlotReleaseRefs(all, n);
     return 0;
 }
 

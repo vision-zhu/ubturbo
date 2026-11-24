@@ -1307,6 +1307,46 @@ TEST_F(SmapConfigTest, TestBuildAllProcessPayloadPersistsPendingIgnoreRemoteCapa
     free(payload);
 }
 
+TEST_F(SmapConfigTest, TestBuildAllProcessPayloadSkipsGroupedProcess)
+{
+    struct ProcessManager manager;
+    memset(&manager, 0, sizeof(manager));
+    ProcessAttr grouped = {};
+    ProcessAttr normal = {};
+    struct ProcessPayload *payload = nullptr;
+    int len = 0;
+    grouped.type = VM_TYPE;
+    grouped.pid = 2001;
+    grouped.groupPolicy.enabled = true;
+    grouped.groupPolicy.groupCount = 1;
+    normal.type = VM_TYPE;
+    normal.pid = 2002;
+    normal.targetConfig.migrateMode = MIG_RATIO_MODE;
+    normal.targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    PidSlotAdd(&manager, &grouped);
+    PidSlotAdd(&manager, &normal);
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+
+    EXPECT_EQ(0, BuildAllProcessPayload(&payload, &len));
+    ASSERT_NE(nullptr, payload);
+    EXPECT_EQ(1, len);
+    EXPECT_EQ(2002, payload[0].pid);
+    /* 快照结束后槽位锁已释放 */
+    EXPECT_EQ(0, pthread_mutex_trylock(&manager.slots[0].attrLock.lock));
+    pthread_mutex_unlock(&manager.slots[0].attrLock.lock);
+    free(payload);
+
+    /* 只剩分组进程：不产出载荷 */
+    normal.groupPolicy.enabled = true;
+    normal.groupPolicy.groupCount = 1;
+    payload = nullptr;
+    EXPECT_EQ(0, BuildAllProcessPayload(&payload, &len));
+    EXPECT_EQ(nullptr, payload);
+    EXPECT_EQ(0, len);
+}
+
 extern "C" int MapAndWriteProcessConfig(int fd, size_t mapLen, struct ProcessPayload *payload, int nrPayload);
 TEST_F(SmapConfigTest, TestMapAndWriteProcessConfig)
 {
