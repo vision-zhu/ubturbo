@@ -1557,7 +1557,13 @@ static void NumaSwapMemPool(ProcessAttr *current)
 static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
 {
     uint32_t threshold = manager->ubBwMonitor.ubBwThreshold;
-    if (!IsBwMonitorEnabled(manager) || manager->ubBwMonitor.currentFluxRet) {
+    if (!IsBwMonitorEnabled(manager)) {
+        return;
+    }
+    /* daemon 线程并发发布新数据：取一致快照，避免 len 与 flux[] 新旧混读 */
+    struct UbFluxMbStatistic *flux = calloc(1, sizeof(*flux));
+    if (flux == NULL || SnapshotUbFlux(manager, flux) != 0) {
+        free(flux);
         return;
     }
 
@@ -1565,14 +1571,13 @@ static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
     for (int nid = 0; nid < cap; nid++)
         current->strategyAttr.ubBwRestrict[nid] = UB_BW_NORMAL;
 
-    for (int i = 0; i < manager->ubBwMonitor.currentFluxMb.len; i++) {
-        int nid = manager->ubBwMonitor.currentFluxMb.flux[i].numaId;
+    for (int i = 0; i < flux->len; i++) {
+        int nid = flux->flux[i].numaId;
         if (nid < 0 || nid >= cap) {
             SMAP_LOGGER_ERROR("UB BW: invalid numa id %d, skip.", nid);
             continue;
         }
-        uint32_t totalBw =
-            manager->ubBwMonitor.currentFluxMb.flux[i].readMb + manager->ubBwMonitor.currentFluxMb.flux[i].writeMb;
+        uint32_t totalBw = flux->flux[i].readMb + flux->flux[i].writeMb;
 
         if (totalBw >= threshold) {
             current->strategyAttr.ubBwRestrict[nid] = UB_BW_SWAP_STOP;
@@ -1580,6 +1585,7 @@ static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
                              totalBw, threshold);
         }
     }
+    free(flux);
 }
 
 static void NumaMigReduceDeal(ProcessAttr *current)
