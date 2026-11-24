@@ -7,6 +7,9 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <thread>
+#include <vector>
+#include <atomic>
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
 
@@ -291,4 +294,40 @@ TEST_F(SmapLogCoreTest, TestWriteFilteredByLevel)
     EXPECT_EQ(0, ret);
 
     SmapLogCoreExit();
+}
+
+TEST_F(SmapLogCoreTest, TestConcurrentWriteAndExit)
+{
+    /* Exit 与并发 Write 交错：不得使用已销毁的锁或已关闭的文件句柄 */
+    SmapLogConfig config;
+    strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
+    config.maxFileSize = 1024 * 1024;
+    config.maxFileCount = 2;
+    config.minLogLevel = SMAP_LOG_CORE_INFO;
+    ASSERT_EQ(0, SmapLogCoreInit(&config));
+
+    std::atomic<bool> stop(false);
+    std::atomic<int> bad(0);
+    std::vector<std::thread> writers;
+    for (int t = 0; t < 4; t++) {
+        writers.emplace_back([&stop, &bad]() {
+            while (!stop.load()) {
+                int r = SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, "prefix", "concurrent message");
+                if (r != 0 && r != -EINVAL) {
+                    bad++;
+                }
+            }
+        });
+    }
+    for (int i = 0; i < 200; i++) {
+        SmapLogCoreExit();
+        ASSERT_EQ(0, SmapLogCoreInit(&config));
+    }
+    stop = true;
+    for (auto &w : writers) {
+        w.join();
+    }
+    EXPECT_EQ(0, bad.load());
+    SmapLogCoreExit();
+    EXPECT_EQ(-EINVAL, SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, "prefix", "after exit"));
 }

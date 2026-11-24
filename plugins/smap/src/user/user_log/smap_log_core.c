@@ -19,9 +19,23 @@
 #include "securec.h"
 #include "smap_log_core.h"
 
-static SmapLogFile g_smapLogFile;
-static int g_minLogLevel = SMAP_LOG_CORE_INFO;
+/*
+ * lock 静态初始化且从不销毁：SmapLogCoreExit 与并发的 SmapLogCoreWrite 可能交错（IPC 线程在
+ * ubturbo_smap_stop 期间仍可能打日志），销毁后再加锁属于未定义行为。g_initialized 仅在锁内读写。
+ */
+static SmapLogFile g_smapLogFile = { .lock = PTHREAD_MUTEX_INITIALIZER };
+static int g_minLogLevel = SMAP_LOG_CORE_INFO; /* 原子读写：日志热路径无锁读取 */
 static int g_initialized = 0;
+
+static inline int LoadMinLogLevel(void)
+{
+    return __atomic_load_n(&g_minLogLevel, __ATOMIC_RELAXED);
+}
+
+static inline void StoreMinLogLevel(int level)
+{
+    __atomic_store_n(&g_minLogLevel, level, __ATOMIC_RELAXED);
+}
 
 static const char *LogLevelToString(int level)
 {
@@ -80,7 +94,7 @@ static size_t GetFileSize(const char *filePath)
 
 static void WriteLogHeader(FILE *fp)
 {
-    (void)fprintf(fp, "Log started at [%s] level\n", LogLevelToString(g_minLogLevel));
+    (void)fprintf(fp, "Log started at [%s] level\n", LogLevelToString(LoadMinLogLevel()));
     (void)fprintf(fp, "Log default format: yyyy-mm-dd hh:mm:ss.uuuuuu threadid loglevel msg\n");
 }
 
@@ -140,55 +154,56 @@ int SmapLogCoreInit(const SmapLogConfig *config)
         return -EINVAL;
     }
 
+    pthread_mutex_lock(&g_smapLogFile.lock);
     if (g_initialized) {
+        pthread_mutex_unlock(&g_smapLogFile.lock);
         return 0;
     }
-
-    pthread_mutex_init(&g_smapLogFile.lock, NULL);
 
     ret = snprintf_s(g_smapLogFile.basePath, sizeof(g_smapLogFile.basePath), sizeof(g_smapLogFile.basePath) - 1, "%s",
                      config->filePath);
     if (ret == -1) {
-        pthread_mutex_destroy(&g_smapLogFile.lock);
+        pthread_mutex_unlock(&g_smapLogFile.lock);
         return -EINVAL;
     }
 
     g_smapLogFile.maxFileSize = config->maxFileSize > 0 ? config->maxFileSize : SMAP_LOG_MAX_FILE_SIZE_DEFAULT;
     g_smapLogFile.maxFileCount = config->maxFileCount > 0 ? config->maxFileCount : SMAP_LOG_MAX_FILE_COUNT_DEFAULT;
-    g_minLogLevel = config->minLogLevel;
+    StoreMinLogLevel(config->minLogLevel);
 
     g_smapLogFile.currentFileIndex = 0;
     g_smapLogFile.currentFileSize = GetFileSize(config->filePath);
     g_smapLogFile.fileHandle = OpenLogFile(config->filePath);
 
     if (g_smapLogFile.fileHandle == NULL) {
-        pthread_mutex_destroy(&g_smapLogFile.lock);
+        pthread_mutex_unlock(&g_smapLogFile.lock);
         return -EIO;
     }
 
     WriteLogHeader(g_smapLogFile.fileHandle);
     g_initialized = 1;
+    pthread_mutex_unlock(&g_smapLogFile.lock);
 
     return 0;
 }
 
 void SmapLogCoreExit(void)
 {
+    pthread_mutex_lock(&g_smapLogFile.lock);
     if (!g_initialized) {
+        pthread_mutex_unlock(&g_smapLogFile.lock);
         return;
     }
-
-    pthread_mutex_lock(&g_smapLogFile.lock);
 
     if (g_smapLogFile.fileHandle != NULL) {
         fclose(g_smapLogFile.fileHandle);
         g_smapLogFile.fileHandle = NULL;
     }
-
-    pthread_mutex_unlock(&g_smapLogFile.lock);
-    pthread_mutex_destroy(&g_smapLogFile.lock);
     g_initialized = 0;
-    g_minLogLevel = SMAP_LOG_CORE_INFO;
+    StoreMinLogLevel(SMAP_LOG_CORE_INFO);
+
+    /* 互斥锁不销毁：并发写者可能仍在等待该锁，拿到锁后会看到 g_initialized == 0 并返回 */
+    pthread_mutex_unlock(&g_smapLogFile.lock);
 }
 
 int SmapLogCoreWrite(int level, const char *prefix, const char *message)
@@ -198,11 +213,7 @@ int SmapLogCoreWrite(int level, const char *prefix, const char *message)
     size_t lineLen;
     int ret;
 
-    if (!g_initialized) {
-        return -EINVAL;
-    }
-
-    if (level < g_minLogLevel || level >= SMAP_LOG_CORE_BUTT) {
+    if (level < LoadMinLogLevel() || level >= SMAP_LOG_CORE_BUTT) {
         return 0;
     }
 
@@ -211,6 +222,11 @@ int SmapLogCoreWrite(int level, const char *prefix, const char *message)
     }
 
     pthread_mutex_lock(&g_smapLogFile.lock);
+
+    if (!g_initialized) {
+        pthread_mutex_unlock(&g_smapLogFile.lock);
+        return -EINVAL;
+    }
 
     if (g_smapLogFile.fileHandle == NULL) {
         pthread_mutex_unlock(&g_smapLogFile.lock);
@@ -256,12 +272,12 @@ int SmapLogCoreWrite(int level, const char *prefix, const char *message)
 
 int SmapLogCoreGetMinLogLevel(void)
 {
-    return g_minLogLevel;
+    return LoadMinLogLevel();
 }
 
 void SmapLogCoreSetMinLogLevel(int level)
 {
     if (level >= SMAP_LOG_CORE_TRACE && level < SMAP_LOG_CORE_BUTT) {
-        g_minLogLevel = level;
+        StoreMinLogLevel(level);
     }
 }
