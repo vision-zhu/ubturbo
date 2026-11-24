@@ -14,6 +14,7 @@
 #include "manage/manage_internal.h"
 #include "manage/smap_config.h"
 #include "manage/thread.h"
+#include "smap_interface.h"
 #include "securec.h"
 #include "strategy/strategy_config.h"
 
@@ -2104,6 +2105,25 @@ TEST_F(ManageTest, TestPidSlotAddNoFreeSlot)
     for (int i = 0; i < MAX_PID_SLOTS; i++) {
         EnvAtomicSet(&g_processManager.slots[i].state, PID_SLOT_FREE);
     }
+    PidSlotDestroy(&g_processManager);
+}
+
+TEST_F(ManageTest, TestClearManagedProcessSyncsWhenLaterPidUnmanaged)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, attr);
+    attr->pid = 211;
+    attr->type = VM_TYPE;
+    ASSERT_GE(PidSlotAdd(&g_processManager, attr), 0);
+    struct RemovePayload payload[2] = {};
+    payload[0].pid = 211; /* 已纳管，整进程移除 */
+    payload[1].pid = 212; /* 未纳管 */
+
+    /* 后一个未纳管 pid 不得覆盖前一个已移除的标志，必须落盘，否则重启后被恢复纳管 */
+    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
+    ClearManagedProcess(2, payload);
+    EXPECT_EQ(nullptr, GetProcessAttr(211));
     PidSlotDestroy(&g_processManager);
 }
 

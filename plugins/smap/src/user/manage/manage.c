@@ -2122,8 +2122,8 @@ static void ClearManagedWholeProcess(pid_t pid, bool *removed)
     struct ProcessManager *manager = GetProcessManager();
     ProcessAttr *attr = GetProcessAttr(pid);
     if (!attr) {
+        /* 批量移除共用 removed 标志：未找到时不得清掉前序 payload 已置的 true */
         SMAP_LOGGER_WARNING("pid: %d, not exist, not need to remove.", pid);
-        *removed = false;
         return;
     }
 
@@ -2192,8 +2192,6 @@ static void ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *
     ProcessAttr *attr = GetProcessAttr(payload->pid);
     if (!attr) {
         SMAP_LOGGER_WARNING("pid: %d, not exist, not need to remove.", payload->pid);
-        *changed = false;
-        PutProcessAttr(attr);
         return;
     }
     for (int i = 0; i < payload->count; i++) {
