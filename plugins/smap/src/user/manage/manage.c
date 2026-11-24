@@ -1277,21 +1277,41 @@ int ReadCmdlineByPid(pid_t pid, char *buf, int len)
         SMAP_LOGGER_ERROR("Make pid %d cmdline path error.", pid);
         return -EINVAL;
     }
-    /* 进程内直读 /proc/<pid>/cmdline，依赖 CAP_DAC_READ_SEARCH + CAP_SYS_PTRACE，不再经 sudo cat.sh */
-    FILE *file = fopen(path, "r");
-    if (file == NULL) {
-        SMAP_LOGGER_ERROR("Open pid %d cmdline error: %d.", pid, errno);
-        return -errno;
+    if (buf == NULL || len <= 1) {
+        return -EINVAL;
     }
-    if (fgets(buf, len, file) == NULL) {
-        (void)fclose(file);
+    /* 进程内直读 /proc/<pid>/cmdline，依赖 CAP_DAC_READ_SEARCH + CAP_SYS_PTRACE，不再经 sudo cat.sh */
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        int err = errno;
+        SMAP_LOGGER_ERROR("Open pid %d cmdline error: %d.", pid, err);
+        return -err;
+    }
+    /* cmdline 以 NUL 分隔参数，fgets+strlen 只能看到 argv[0]，无法判断截断：按字节读取并计数，
+     * 最多读 len-1 字节，保证缓冲末尾至少保留一个 NUL 供调用方安全遍历 */
+    size_t total = 0;
+    size_t cap = (size_t)len - 1;
+    while (total < cap) {
+        ssize_t n = read(fd, buf + total, cap - total);
+        if (n < 0 && errno == EINTR) {
+            continue;
+        }
+        if (n <= 0) {
+            break;
+        }
+        total += (size_t)n;
+    }
+    char extra;
+    ssize_t more = total == cap ? read(fd, &extra, 1) : 0;
+    (void)close(fd);
+    buf[total] = '\0';
+    if (total == 0) {
         SMAP_LOGGER_ERROR("Read pid %d cmdline content failed.", pid);
         return -EIO;
     }
-    (void)fclose(file);
-    /* /proc/<pid>/cmdline 不受 4096 字节限制: 大虚机参数可能更长。缓冲填满说明被截断,
+    /* /proc/<pid>/cmdline 不受 4096 字节限制: 大虚机参数可能更长。缓冲读满且仍有数据说明被截断,
      * share 标志可能落在窗口外导致误判 PRIVATE。保守返回错误, 由 ParseMmapType 置 SHARED。 */
-    if (strlen(buf) >= (size_t)len - 1) {
+    if (more > 0) {
         SMAP_LOGGER_ERROR("Pid %d cmdline exceeds %d bytes, may be truncated, default mmap_shared.", pid, len);
         return -E2BIG;
     }
@@ -1311,7 +1331,8 @@ static int CmdlineHasSharedMem(const char *cmdline, int len)
             return 1;
         }
         tmp = strchr(tmp, '\0');
-        if (tmp == NULL || tmp >= cmdline + len) {
+        /* 下一参数起点须仍在缓冲内：末参数的终止符恰在 cmdline[len-1] 时不能再前进 */
+        if (tmp == NULL || tmp + 1 >= cmdline + len) {
             break;
         }
         tmp++;

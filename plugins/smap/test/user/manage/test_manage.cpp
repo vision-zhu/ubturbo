@@ -1018,6 +1018,26 @@ TEST_F(ManageTest, TestParseMmapTypeShared)
     EXPECT_EQ(MMAP_SHARED, mmapType);
 }
 
+extern "C" int CmdlineHasSharedMem(const char *cmdline, int len);
+TEST_F(ManageTest, TestReadCmdlineByPidDetectsTruncation)
+{
+    char small[8] = {0};
+    char big[CMDLINE_LEN] = {0};
+    /* 本进程 cmdline 远超 7 字节：读满且仍有数据，按截断处理（调用方据此保守置 SHARED） */
+    EXPECT_EQ(-E2BIG, ReadCmdlineByPid(getpid(), small, sizeof(small)));
+    EXPECT_EQ('\0', small[sizeof(small) - 1]);
+    EXPECT_EQ(0, ReadCmdlineByPid(getpid(), big, sizeof(big)));
+}
+
+TEST_F(ManageTest, TestCmdlineHasSharedMemStopsAtBufferEnd)
+{
+    /* 末参数终止符恰在 cmdline[len-1]：不得越过缓冲继续扫描 */
+    const char full[] = {'a', 'b', '\0', 'c', 'd', '\0'};
+    EXPECT_EQ(0, CmdlineHasSharedMem(full, sizeof(full)));
+    const char shared[] = "x\0share=on";
+    EXPECT_EQ(1, CmdlineHasSharedMem(shared, sizeof(shared)));
+}
+
 extern "C" int VMPreprocess(pid_t pid, ProcessAttr *attr);
 TEST_F(ManageTest, TestVMProcessNormal)
 {
