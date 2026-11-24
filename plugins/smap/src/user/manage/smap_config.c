@@ -426,6 +426,13 @@ static void WriteOneNumaConfig(char *numaBase, struct NumaPayload *np)
     SMAP_LOGGER_DEBUG("Exit WriteOneNumaPayload.");
 }
 
+/* ConfigRemoteNidLimit - 持久化目标远端 nid 的上界（不含）：运行期 cap，且不超过 remoteSeen 数组宽度 */
+static inline int ConfigRemoteNidLimit(void)
+{
+    int cap = (int)GetNumaCap();
+    return cap < SMAP_MAX_NUMNODES ? cap : SMAP_MAX_NUMNODES;
+}
+
 static int RestoreProcessTargetConfig(ProcessTargetConfig *config, uint8_t migrateMode, int srcNid, int count,
                                       const struct PersistRemoteTarget targets[])
 {
@@ -441,9 +448,11 @@ static int RestoreProcessTargetConfig(ProcessTargetConfig *config, uint8_t migra
     uint64_t totalRatio = 0;
     uint64_t pageSizeKB = GetPageSize() / KIB;
     bool remoteSeen[SMAP_MAX_NUMNODES] = { false };
+    /* 策略矩阵按 nrLocalNuma x cap 分配（NM_AT 无边界检查），远端 nid 必须落在运行期 cap 内 */
+    int maxNid = ConfigRemoteNidLimit();
     for (int i = 0; i < count; i++) {
         const struct PersistRemoteTarget *target = &targets[i];
-        bool valid = target->nid >= GetNrLocalNuma() && target->nid < SMAP_MAX_NUMNODES && !remoteSeen[target->nid];
+        bool valid = target->nid >= GetNrLocalNuma() && target->nid < maxNid && !remoteSeen[target->nid];
         if (valid && migrateMode == MIG_RATIO_MODE) {
             valid = target->ratio <= HUNDRED && totalRatio + target->ratio <= HUNDRED;
         }
@@ -751,10 +760,10 @@ static int WriteTargetConfigToPayload(struct PersistRemoteTarget payloadTargets[
     uint64_t totalRatio = 0;
     uint64_t pageSizeKB = GetPageSize() / KIB;
     bool remoteSeen[SMAP_MAX_NUMNODES] = { false };
+    int maxNid = ConfigRemoteNidLimit();
     for (uint32_t i = 0; i < config->count; i++) {
         const ProcessRemoteTarget *target = &config->targets[i];
-        if (target->remoteNid < GetNrLocalNuma() || target->remoteNid >= SMAP_MAX_NUMNODES ||
-            remoteSeen[target->remoteNid] ||
+        if (target->remoteNid < GetNrLocalNuma() || target->remoteNid >= maxNid || remoteSeen[target->remoteNid] ||
             (config->migrateMode == MIG_RATIO_MODE &&
              (target->ratio > HUNDRED || totalRatio + target->ratio > HUNDRED)) ||
             (config->migrateMode == MIG_MEMSIZE_MODE &&
