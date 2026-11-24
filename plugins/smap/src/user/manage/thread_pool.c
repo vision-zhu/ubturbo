@@ -78,6 +78,11 @@ int ThreadPoolSubmit(struct ProcessManager *manager, struct PidSlot *slot, pid_t
 
     ThreadPool *pool = &manager->threadPool;
     EnvMutexLock(&pool->lock);
+    /* 已开始销毁：拒绝入队，避免任务（及其携带的槽位引用）落入无人消费的队列 */
+    if (EnvAtomicRead(&pool->stop)) {
+        EnvMutexUnlock(&pool->lock);
+        return -ESHUTDOWN;
+    }
     if (pool->count == MAX_PID_SLOTS) {
         EnvMutexUnlock(&pool->lock);
         return -EAGAIN;
