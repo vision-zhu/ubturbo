@@ -34,13 +34,9 @@ int SmapEnableAdaptMem(int flag)
     }
 }
 
-int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg)
+static int QueryVmMemRatio(struct VmRatioMsg *vrMsg)
 {
     int ret = 0;
-    if (!ubturbo_smap_is_running()) {
-        SMAP_LOGGER_ERROR("Smap already stopped, SmapQueryVmMemRatio failed.");
-        return -EPERM;
-    }
     if (!vrMsg) {
         SMAP_LOGGER_ERROR("Query failed as msg is null.");
         return -EINVAL;
@@ -85,6 +81,17 @@ int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg)
     return ret;
 }
 
+int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg)
+{
+    if (!SmapApiEnter()) {
+        SMAP_LOGGER_ERROR("Smap already stopped, SmapQueryVmMemRatio failed.");
+        return -EPERM;
+    }
+    int ret = QueryVmMemRatio(vrMsg);
+    SmapApiExit();
+    return ret;
+}
+
 int SmapSetLogLevel(int level)
 {
     if (level < SMAP_LOG_CORE_TRACE || level >= SMAP_LOG_CORE_BUTT) {
@@ -97,11 +104,8 @@ int SmapSetLogLevel(int level)
     return 0;
 }
 
-static int SetPidPeriod(pid_t pid, uint32_t scanPeriodMs, uint32_t migratePeriodMs)
+static int SetPidPeriodInner(pid_t pid, uint32_t scanPeriodMs, uint32_t migratePeriodMs)
 {
-    if (!ubturbo_smap_is_running()) {
-        return -EPERM;
-    }
     if (pid <= 0) {
         return -EINVAL;
     }
@@ -122,6 +126,16 @@ static int SetPidPeriod(pid_t pid, uint32_t scanPeriodMs, uint32_t migratePeriod
     }
     EnvMutexUnlock(&slot->attrLock);
     PidSlotReleaseRefs(&slot, 1);
+    return ret;
+}
+
+static int SetPidPeriod(pid_t pid, uint32_t scanPeriodMs, uint32_t migratePeriodMs)
+{
+    if (!SmapApiEnter()) {
+        return -EPERM;
+    }
+    int ret = SetPidPeriodInner(pid, scanPeriodMs, migratePeriodMs);
+    SmapApiExit();
     return ret;
 }
 

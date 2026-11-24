@@ -39,6 +39,7 @@
 #include "strategy/migration.h"
 #include "strategy/strategy_config.h"
 #include "smap_interface.h"
+#include "smap_inner_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
 #define REMOTE_NUMA_MEMORY_MAX (TIB / MIB)
 #define LOCAL_NUMA_BIT_MAP_MASK 0xF
@@ -47,6 +48,13 @@
 #define UB_URMA_CTP_ROI_MASK (1 << 19)
 
 static EnvAtomic g_status;
+/* 已通过 SmapApiEnter 进入、尚未退出的接口调用数 */
+static EnvAtomic g_apiInFlight;
+/* 串行化 start/stop，避免两者的初始化与销毁交错 */
+static EnvMutex g_lifecycleLock = { PTHREAD_MUTEX_INITIALIZER };
+
+#define STOP_DRAIN_POLL_MS 10
+#define STOP_DRAIN_LOG_INTERVAL_MS 1000
 
 /* 未指定 taskID 时，与当前秒数一起生成任务 ID。 */
 static EnvAtomic g_migBackTaskSeq;
@@ -55,6 +63,58 @@ inline bool ubturbo_smap_is_running(void)
 {
     return EnvAtomicRead(&g_status) == RUNNING;
 }
+
+/*
+ * 先计入在途再检查状态：与 stop 的「先切 STOPPING 再读在途计数」构成 Dekker 式配对
+ * （两侧均为全序原子操作），保证 stop 要么看到本次调用的计数并等待，要么本次调用
+ * 看到非 RUNNING 并拒绝，不存在 stop 已开始销毁而调用仍进入的窗口。
+ */
+bool SmapApiEnter(void)
+{
+    EnvAtomicAdd(&g_apiInFlight, 1);
+    if (ubturbo_smap_is_running()) {
+        return true;
+    }
+    EnvAtomicSub(&g_apiInFlight, 1);
+    return false;
+}
+
+void SmapApiExit(void)
+{
+    EnvAtomicSub(&g_apiInFlight, 1);
+}
+
+/* 长等待循环（迁回等待空闲、同步迁出、freq_query）据此提前退出，缩短 stop 的等待时间 */
+bool SmapStopRequested(void)
+{
+    return !ubturbo_smap_is_running();
+}
+
+/* stop 在销毁 manager 前等待全部在途接口调用退出 */
+static void WaitApiInFlightDrained(void)
+{
+    uint32_t waitedMs = 0;
+    int inFlight;
+    while ((inFlight = EnvAtomicRead(&g_apiInFlight)) > 0) {
+        if (waitedMs % STOP_DRAIN_LOG_INTERVAL_MS == 0) {
+            SMAP_LOGGER_INFO("Smap stop waiting for %d in-flight calls, waited %ums.", inFlight, waitedMs);
+        }
+        EnvMsleep(STOP_DRAIN_POLL_MS);
+        waitedMs += STOP_DRAIN_POLL_MS;
+    }
+}
+
+/* 接口生命周期门：仅 RUNNING 时进入实现体，返回前退出 */
+#define SMAP_API_CALL(call)                                                 \
+    do {                                                                    \
+        if (!SmapApiEnter()) {                                              \
+            SMAP_LOGGER_ERROR("Smap is not running, %s failed.", __func__); \
+            return -EPERM;                                                  \
+        }                                                                   \
+        int apiRet_ = (call);                                               \
+        SmapApiExit();                                                      \
+        return apiRet_;                                                     \
+    } while (0)
 
 static int IoctlHandler(int fd, const void *msg)
 {
@@ -1101,10 +1161,10 @@ static int MigrateOutWithCapacityPolicy(struct MigrateOutMsg *msg, int pageType,
 
 int ubturbo_smap_migrate_out(struct MigrateOutMsg *msg, int pageType)
 {
-    return MigrateOutWithCapacityPolicy(msg, pageType, false);
+    SMAP_API_CALL(MigrateOutWithCapacityPolicy(msg, pageType, false));
 }
 
-int ubturbo_smap_migrate_out_grouped(struct GroupedMigrateOutMsg *msg, int pageType)
+static int MigrateOutGroupedImpl(struct GroupedMigrateOutMsg *msg, int pageType)
 {
     struct ProcessManager *manager = GetProcessManager();
 
@@ -1178,6 +1238,11 @@ out_free_bitmap:
         NumaBitmapFree(&nodeBitmap[i]);
     }
     return ret;
+}
+
+int ubturbo_smap_migrate_out_grouped(struct GroupedMigrateOutMsg *msg, int pageType)
+{
+    SMAP_API_CALL(MigrateOutGroupedImpl(msg, pageType));
 }
 
 static int CheckMigrateBackMsg(struct MigrateBackMsg *msg)
@@ -1304,6 +1369,10 @@ static bool CheckProcessIdle(int nid)
         if (IsAllL2NodePidInState(PROC_IDLE, nid)) {
             return true;
         }
+        if (SmapStopRequested()) {
+            SMAP_LOGGER_WARNING("Smap is stopping, stop waiting for nid %d idle.", nid);
+            return false;
+        }
         EnvMsleep(WAIT_CHECK_ALREADY_FORBIDDEN_PERIOD);
         nrWait++;
     }
@@ -1312,7 +1381,7 @@ static bool CheckProcessIdle(int nid)
 
 static void MarkAutoRemoveByMigrateBack(struct MigrateBackMsg *msg);
 
-int ubturbo_smap_migrate_back(struct MigrateBackMsg *msg)
+static int MigrateBackImpl(struct MigrateBackMsg *msg)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_migrate_back msg.");
     if (!ubturbo_smap_is_running()) {
@@ -1364,6 +1433,11 @@ int ubturbo_smap_migrate_back(struct MigrateBackMsg *msg)
         MarkAutoRemoveByMigrateBack(msg);
     }
     return ret;
+}
+
+int ubturbo_smap_migrate_back(struct MigrateBackMsg *msg)
+{
+    SMAP_API_CALL(MigrateBackImpl(msg));
 }
 
 /* Validate remove payload shape before touching kernel or manager state. */
@@ -1424,7 +1498,7 @@ static int CheckSmapRemoveGroupedPidLocked(struct RemoveMsg *msg)
     return 0;
 }
 
-int ubturbo_smap_remove(struct RemoveMsg *msg, int pageType)
+static int RemoveImpl(struct RemoveMsg *msg, int pageType)
 {
     int ret = 0;
     SMAP_LOGGER_INFO("Receive ubturbo_smap_remove msg.");
@@ -1458,6 +1532,11 @@ int ubturbo_smap_remove(struct RemoveMsg *msg, int pageType)
     ClearManagedProcess(msg->count, msg->payload);
     SMAP_LOGGER_INFO("smap remove result: %d.", ret);
     return ret;
+}
+
+int ubturbo_smap_remove(struct RemoveMsg *msg, int pageType)
+{
+    SMAP_API_CALL(RemoveImpl(msg, pageType));
 }
 
 static bool HasRemotePages(ProcessAttr *attr)
@@ -1610,7 +1689,7 @@ void SmapAutoRemoveRemoteEmptyProcessesWithFreshData(void)
     free(pids);
 }
 
-int ubturbo_smap_node_enable(struct EnableNodeMsg *msg)
+static int NodeEnableImpl(struct EnableNodeMsg *msg)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_node_enable msg.");
     if (!ubturbo_smap_is_running()) {
@@ -1641,6 +1720,11 @@ int ubturbo_smap_node_enable(struct EnableNodeMsg *msg)
     }
 
     return 0;
+}
+
+int ubturbo_smap_node_enable(struct EnableNodeMsg *msg)
+{
+    SMAP_API_CALL(NodeEnableImpl(msg));
 }
 
 static int InitLog(Logfunc extlog)
@@ -1850,7 +1934,11 @@ int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
 {
     int ret = 0;
     int lockFd;
-    if (EnvAtomicCmpAndSwap(SLEEP, RUNNING, &g_status) == RUNNING) {
+    /* 初始化全程持生命周期锁并处于 STARTING：接口在 RUNNING 前一律拒绝，
+     * 并发的 stop 在锁上等待初始化结束，不会销毁正在初始化的 manager */
+    EnvMutexLock(&g_lifecycleLock);
+    if (EnvAtomicCmpAndSwap(SLEEP, STARTING, &g_status) != SLEEP) {
+        EnvMutexUnlock(&g_lifecycleLock);
         SMAP_LOGGER_WARNING("Smap init failed, already initialized.");
         ret = -EPERM;
         return ret;
@@ -1917,6 +2005,8 @@ int ubturbo_smap_start(uint32_t pageType, Logfunc extlog)
         goto EXIT_DEV;
     }
     SMAP_LOGGER_INFO("Smap init success.");
+    EnvAtomicSet(&g_status, RUNNING);
+    EnvMutexUnlock(&g_lifecycleLock);
     return ret;
 
 EXIT_DEV:
@@ -1926,16 +2016,21 @@ EXIT_LOGGER:
     SmapLoggerExit();
 EXIT_ENV:
     EnvAtomicSet(&g_status, SLEEP);
+    EnvMutexUnlock(&g_lifecycleLock);
     return ret;
 }
 
 int ubturbo_smap_stop(void)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_stop msg.");
-    if (EnvAtomicCmpAndSwap(RUNNING, SLEEP, &g_status) == SLEEP) {
+    EnvMutexLock(&g_lifecycleLock);
+    if (EnvAtomicCmpAndSwap(RUNNING, STOPPING, &g_status) != RUNNING) {
+        EnvMutexUnlock(&g_lifecycleLock);
         SMAP_LOGGER_ERROR("Smap stop failed, already stopped.");
         return -EPERM;
     }
+    /* STOPPING 已拒绝新调用；等在途调用全部退出后再销毁它们可能仍在使用的对象 */
+    WaitApiInFlightDrained();
 
     struct ProcessManager *manager = GetProcessManager();
     EnvMutexLock(&manager->threadLock);
@@ -1962,13 +2057,15 @@ int ubturbo_smap_stop(void)
 
     SmapLoggerExit();
 
+    EnvAtomicSet(&g_status, SLEEP);
+    EnvMutexUnlock(&g_lifecycleLock);
     return 0;
 }
 
 void ubturbo_smap_urgent_migrate_out(uint64_t size)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_urgent_migrate_out msg.");
-    if (!ubturbo_smap_is_running()) {
+    if (!SmapApiEnter()) {
         SMAP_LOGGER_ERROR("Smap is not running.");
         return;
     }
@@ -1977,10 +2074,11 @@ void ubturbo_smap_urgent_migrate_out(uint64_t size)
     SMAP_LOGGER_INFO("ubturbo_smap_urgent_migrate_out size = %llu.", size);
     FindPidMigrateSize(size);
     SMAP_LOGGER_INFO("ubturbo_smap_urgent_migrate_out success.");
+    SmapApiExit();
     return;
 }
 
-int ubturbo_smap_remote_numa_info_set(struct SetRemoteNumaInfoMsg *msg)
+static int RemoteNumaInfoSetImpl(struct SetRemoteNumaInfoMsg *msg)
 {
     int ret;
     SMAP_LOGGER_INFO("Receive ubturbo_smap_remote_numa_info_set msg.");
@@ -2011,6 +2109,11 @@ int ubturbo_smap_remote_numa_info_set(struct SetRemoteNumaInfoMsg *msg)
     }
     SMAP_LOGGER_INFO("Set smap remote numa info %d-%d to %llu.", msg->srcNid, msg->destNid, msg->size);
     return 0;
+}
+
+int ubturbo_smap_remote_numa_info_set(struct SetRemoteNumaInfoMsg *msg)
+{
+    SMAP_API_CALL(RemoteNumaInfoSetImpl(msg));
 }
 
 static int CheckQueryVMFreqMsgValid(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut, int dataSource)
@@ -2092,6 +2195,48 @@ static int QueryVMFreqFromKernel(int pid, uint16_t *data, uint32_t lengthIn, uin
  * 不会进入等待；仅"内核未跟踪/读取失败等回调来源缺失"场景才会等待满超时返回 -ETIMEDOUT。 */
 int g_freqQueryWaitTimeoutMs = 20000;
 
+#define FREQ_WAIT_SLICE_MS 100
+#define MSEC_PER_SEC 1000
+#define NSEC_PER_MSEC 1000000L
+#define NSEC_PER_SEC 1000000000L
+
+static void TimespecAddMs(struct timespec *ts, long ms)
+{
+    ts->tv_sec += ms / MSEC_PER_SEC;
+    ts->tv_nsec += (ms % MSEC_PER_SEC) * NSEC_PER_MSEC;
+    if (ts->tv_nsec >= NSEC_PER_SEC) {
+        ts->tv_sec += 1;
+        ts->tv_nsec -= NSEC_PER_SEC;
+    }
+}
+
+/*
+ * 分片等待 freq 回调：每片最长 FREQ_WAIT_SLICE_MS，片间检查 stop 请求，避免 stop
+ * 等待在途 freq_query 满超时。返回值语义同 sem_timedwait（0 = 已被 post）。
+ */
+static int FreqWaiterTimedWait(sem_t *sem, int timeoutMs)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct timespec deadline = { .tv_sec = tv.tv_sec, .tv_nsec = tv.tv_usec * 1000L };
+    TimespecAddMs(&deadline, timeoutMs > 0 ? timeoutMs : 0);
+    for (;;) {
+        gettimeofday(&tv, NULL);
+        struct timespec slice = { .tv_sec = tv.tv_sec, .tv_nsec = tv.tv_usec * 1000L };
+        TimespecAddMs(&slice, FREQ_WAIT_SLICE_MS);
+        bool last = slice.tv_sec > deadline.tv_sec ||
+                    (slice.tv_sec == deadline.tv_sec && slice.tv_nsec >= deadline.tv_nsec);
+        int r = sem_timedwait(sem, last ? &deadline : &slice);
+        if (r == 0 || errno != ETIMEDOUT || last) {
+            return r;
+        }
+        if (SmapStopRequested()) {
+            SMAP_LOGGER_WARNING("Smap is stopping, freq_query stop waiting.");
+            return r;
+        }
+    }
+}
+
 static int QueryVMFreqFromUser(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut)
 {
     ProcessAttr *attr = GetProcessAttr(pid);
@@ -2124,16 +2269,7 @@ static int QueryVMFreqFromUser(int pid, uint16_t *data, uint32_t lengthIn, uint3
         return -EINVAL;
     }
 
-    struct timeval tv;
-    struct timespec ts;
-    gettimeofday(&tv, NULL);
-    ts.tv_sec = tv.tv_sec + g_freqQueryWaitTimeoutMs / 1000;
-    ts.tv_nsec = tv.tv_usec * 1000 + (long)(g_freqQueryWaitTimeoutMs % 1000) * 1000000L;
-    if (ts.tv_nsec >= 1000000000L) {
-        ts.tv_sec += 1;
-        ts.tv_nsec -= 1000000000L;
-    }
-    int r = sem_timedwait(&waiter.sem, &ts);
+    int r = FreqWaiterTimedWait(&waiter.sem, g_freqQueryWaitTimeoutMs);
 
     if (r != 0) {
         /* 超时或被信号打断（EINTR 为未消费唤醒）：waiter 仍可能在链表中，必须摘除后
@@ -2159,7 +2295,7 @@ static int QueryVMFreqFromUser(int pid, uint16_t *data, uint32_t lengthIn, uint3
     return retCode;
 }
 
-int ubturbo_smap_freq_query(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut, int dataSource)
+static int FreqQueryImpl(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut, int dataSource)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_freq_query msg, dataSource: %d.\n", dataSource);
     if (!ubturbo_smap_is_running()) {
@@ -2186,8 +2322,13 @@ int ubturbo_smap_freq_query(int pid, uint16_t *data, uint32_t lengthIn, uint32_t
     return 0;
 }
 
+int ubturbo_smap_freq_query(int pid, uint16_t *data, uint32_t lengthIn, uint32_t *lengthOut, int dataSource)
+{
+    SMAP_API_CALL(FreqQueryImpl(pid, data, lengthIn, lengthOut, dataSource));
+}
+
 // 根据使用场景配置SMAP的运行模式
-int ubturbo_smap_run_mode_set(int runMode)
+static int RunModeSetImpl(int runMode)
 {
     int ret;
     SMAP_LOGGER_INFO("Receive ubturbo_smap_run_mode_set msg, runMode:%d.", runMode);
@@ -2221,6 +2362,11 @@ int ubturbo_smap_run_mode_set(int runMode)
     }
     SMAP_LOGGER_INFO("runMode(%d) set success.", runMode);
     return 0;
+}
+
+int ubturbo_smap_run_mode_set(int runMode)
+{
+    SMAP_API_CALL(RunModeSetImpl(runMode));
 }
 
 static int CheckAddProcessTrackingMsg(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
@@ -2365,7 +2511,7 @@ out_free:
     return ret;
 }
 
-int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
+static int ProcessTrackingAddImpl(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
 {
     int ret = 0;
     struct ProcessManager *manager = GetProcessManager();
@@ -2442,6 +2588,11 @@ int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_
     return ret;
 }
 
+int ubturbo_smap_process_tracking_add(pid_t *pidArr, uint32_t *scanTime, uint32_t *duration, int len, int scanType)
+{
+    SMAP_API_CALL(ProcessTrackingAddImpl(pidArr, scanTime, duration, len, scanType));
+}
+
 static int CheckRemoveProcessTrackingMsg(pid_t *pidArr, int len)
 {
     int ret = 0;
@@ -2471,7 +2622,7 @@ static int CheckRemoveProcessTrackingMsg(pid_t *pidArr, int len)
     return ret;
 }
 
-int ubturbo_smap_process_tracking_remove(pid_t *pidArr, int len, int flag)
+static int ProcessTrackingRemoveImpl(pid_t *pidArr, int len, int flag)
 {
     int ret = 0;
     SMAP_LOGGER_INFO("Receive ubturbo_smap_process_tracking_remove msg, len:%d, flag:%d.", len, flag);
@@ -2508,7 +2659,12 @@ int ubturbo_smap_process_tracking_remove(pid_t *pidArr, int len, int flag)
     return ret;
 }
 
-int ubturbo_smap_process_migrate_enable(pid_t *pidArr, int len, int enable, int flags)
+int ubturbo_smap_process_tracking_remove(pid_t *pidArr, int len, int flag)
+{
+    SMAP_API_CALL(ProcessTrackingRemoveImpl(pidArr, len, flag));
+}
+
+static int ProcessMigrateEnableImpl(pid_t *pidArr, int len, int enable, int flags)
 {
     SMAP_LOGGER_INFO("Receive ubturbo_smap_process_migrate_enable msg, len:%d, enable:%d, flags:%d.", len, enable,
                      flags);
@@ -2531,6 +2687,11 @@ int ubturbo_smap_process_migrate_enable(pid_t *pidArr, int len, int enable, int 
     SMAP_LOGGER_DEBUG("ubturbo_smap_process_migrate_enable parameters are all valid.");
 
     return EnableProcessMigrate(pidArr, len, enable);
+}
+
+int ubturbo_smap_process_migrate_enable(pid_t *pidArr, int len, int enable, int flags)
+{
+    SMAP_API_CALL(ProcessMigrateEnableImpl(pidArr, len, enable, flags));
 }
 
 static int CheckMigrateNumaMsg(struct MigrateNumaMsg *msg)
@@ -2569,7 +2730,7 @@ static int CheckMigrateNumaMsg(struct MigrateNumaMsg *msg)
     return 0;
 }
 
-int ubturbo_smap_remote_numa_migrate(struct MigrateNumaMsg *msg)
+static int RemoteNumaMigrateImpl(struct MigrateNumaMsg *msg)
 {
     struct ProcessManager *manager = GetProcessManager();
     SMAP_LOGGER_INFO("Receive ubturbo_smap_remote_numa_migrate msg.");
@@ -2590,6 +2751,11 @@ int ubturbo_smap_remote_numa_migrate(struct MigrateNumaMsg *msg)
     ret = ChangePidRemoteByNuma(msg->srcNid, msg->destNid);
     SMAP_LOGGER_INFO("ubturbo_smap_remote_numa_migrate change pid remote ret: %d.", ret);
     return ret;
+}
+
+int ubturbo_smap_remote_numa_migrate(struct MigrateNumaMsg *msg)
+{
+    SMAP_API_CALL(RemoteNumaMigrateImpl(msg));
 }
 
 static int CheckSameMigrateNumaMsg(struct MigrateNumaMsg *msg)
@@ -2620,7 +2786,7 @@ static int CheckSameMigrateNumaMsg(struct MigrateNumaMsg *msg)
     return 0;
 }
 
-int ubturbo_smap_same_remote_numa_migrate(struct MigrateNumaMsg *msg)
+static int SameRemoteNumaMigrateImpl(struct MigrateNumaMsg *msg)
 {
     struct ProcessManager *manager = GetProcessManager();
     SMAP_LOGGER_INFO("Receive ubturbo_smap_same_remote_numa_migrate msg.");
@@ -2641,6 +2807,11 @@ int ubturbo_smap_same_remote_numa_migrate(struct MigrateNumaMsg *msg)
     ret = ChangePidRemoteByNuma(msg->srcNid, msg->destNid);
     SMAP_LOGGER_INFO("ubturbo_smap_same_remote_numa_migrate change pid remote ret: %d.", ret);
     return ret;
+}
+
+int ubturbo_smap_same_remote_numa_migrate(struct MigrateNumaMsg *msg)
+{
+    SMAP_API_CALL(SameRemoteNumaMigrateImpl(msg));
 }
 
 static int CheckMigOutSyncMsg(struct MigrateOutMsg *msg, int pageType, uint64_t maxWaitTime)
@@ -2764,7 +2935,7 @@ static int CheckMigOutSyncResult(struct MigrateOutMsg *msg, int *invalidPidNum, 
     return 0;
 }
 
-int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pageType, uint64_t maxWaitTime)
+static int MigrateOutSyncImpl(struct MigrateOutMsg *msg, int pageType, uint64_t maxWaitTime)
 {
     int ret;
     uint64_t waitTime = 0;
@@ -2815,6 +2986,11 @@ int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pageType, uint6
             goto out;
         }
         allPidSuccess = true;
+        if (SmapStopRequested()) {
+            SMAP_LOGGER_WARNING("Smap is stopping, ubturbo_smap_migrate_out_sync stop waiting.");
+            ret = -EPERM;
+            goto out;
+        }
         EnvMsleep(WAIT_TIME);
     }
     SMAP_LOGGER_ERROR("Migration timed out. pageType %d, ret %d.", pageType, ret);
@@ -2825,6 +3001,11 @@ out:
         SetSyncWaitRemoteEmpty(msg, false);
     }
     return ret;
+}
+
+int ubturbo_smap_migrate_out_sync(struct MigrateOutMsg *msg, int pageType, uint64_t maxWaitTime)
+{
+    SMAP_API_CALL(MigrateOutSyncImpl(msg, pageType, maxWaitTime));
 }
 
 static bool IsScanTypeValid(pid_t *pidArr, int len)
@@ -3105,7 +3286,7 @@ static int BuildMigRemoteNumaMsg(struct MigrateEscapeMsg *msg, struct MigPidRemo
     return 0;
 }
 
-int ubturbo_smap_pid_remote_numa_migrate(struct MigrateEscapeMsg *msg)
+static int PidRemoteNumaMigrateImpl(struct MigrateEscapeMsg *msg)
 {
     int ret;
     SMAP_LOGGER_INFO("received ubturbo_smap_pid_remote_numa_migrate msg.");
@@ -3150,6 +3331,11 @@ out:
     free(ioctlMsg.migResArray);
     SMAP_LOGGER_INFO("ubturbo_smap_pid_remote_numa_migrate done, ret: %d.", ret);
     return ret;
+}
+
+int ubturbo_smap_pid_remote_numa_migrate(struct MigrateEscapeMsg *msg)
+{
+    SMAP_API_CALL(PidRemoteNumaMigrateImpl(msg));
 }
 
 static int AssignOldProcessPayload(struct OldProcessPayload *result, ProcessAttr *attr, int l2Node)
@@ -3202,7 +3388,7 @@ static int CheckSmapQueryProcessConfig(int nid, struct OldProcessPayload *result
     return 0;
 }
 
-int ubturbo_smap_process_config_query(int nid, struct OldProcessPayload *result, int inLen, int *outLen)
+static int ProcessConfigQueryImpl(int nid, struct OldProcessPayload *result, int inLen, int *outLen)
 {
     struct ProcessManager *manager = GetProcessManager();
     int i = 0;
@@ -3246,7 +3432,12 @@ int ubturbo_smap_process_config_query(int nid, struct OldProcessPayload *result,
     return ret;
 }
 
-int ubturbo_smap_remote_numa_freq_query(uint16_t *numa, uint64_t *freq, uint16_t length)
+int ubturbo_smap_process_config_query(int nid, struct OldProcessPayload *result, int inLen, int *outLen)
+{
+    SMAP_API_CALL(ProcessConfigQueryImpl(nid, result, inLen, outLen));
+}
+
+static int RemoteNumaFreqQueryImpl(uint16_t *numa, uint64_t *freq, uint16_t length)
 {
     int ret;
     uint16_t i;
@@ -3289,4 +3480,9 @@ int ubturbo_smap_remote_numa_freq_query(uint16_t *numa, uint64_t *freq, uint16_t
     PidSlotReleaseRefs(all, n);
     SMAP_LOGGER_INFO("ubturbo_smap_remote_numa_freq_query success.");
     return 0;
+}
+
+int ubturbo_smap_remote_numa_freq_query(uint16_t *numa, uint64_t *freq, uint16_t length)
+{
+    SMAP_API_CALL(RemoteNumaFreqQueryImpl(numa, freq, length));
 }
