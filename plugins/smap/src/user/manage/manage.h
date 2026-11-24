@@ -427,6 +427,9 @@ struct ProcessAttribute {
     bool pendingTargetConfigValid;
     uint32_t pendingSeq; // 防止应用期间的新配置被旧快照清除
     uint32_t migrateHoldRefs; // 部分移除等待/执行中的持有数，attrLock 保护；>0 时 worker 不开始新的迁移周期
+    /* 接口线程改写目标配置/本地观测/sync-wait 保护时递增（attrLock 保护）；worker 据此丢弃
+     * 基于改写前页面快照计算的本地观测、账本校准与快照有效标记 */
+    uint32_t configEpoch;
     ManagedLocalState managedLocalState;
     SeparateParam separateParam;
     NumaAttribute numaAttr;

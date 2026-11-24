@@ -3238,6 +3238,7 @@ static void SetSyncWaitRemoteEmpty(struct MigrateOutMsg *msg, bool enable, Proce
             touched = true;
         }
         if (touched) {
+            attr->configEpoch++; /* 作废保护变更前开始的页面快照，不得据其置快照有效 */
             attr->syncWaitRemoteEmpty = attr->syncWaitRemoteEmptyRefs > 0;
             /* 新加保护需等新一轮快照；最后一个持有者解除时复位快照标记 */
             if (enable || !attr->syncWaitRemoteEmpty) {

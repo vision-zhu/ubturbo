@@ -242,20 +242,48 @@ static int FillPidData(ProcessAttr *attr, struct ProcessMemBitmap *pmb)
     return 0;
 }
 
-int RefreshManagedLocalStatePeriodic(ProcessAttr *attr)
+static void ScanAttrLock(struct PidSlot *slot)
 {
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+}
+
+static void ScanAttrUnlock(struct PidSlot *slot)
+{
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+}
+
+/*
+ * 页面快照之后刷新本地观测：亲和性采样有 I/O，锁外在副本上计算，attrLock 内发布。
+ * worker 在 IDLE 阶段运行，接口线程可能在此期间改写目标配置/本地观测（递增 configEpoch）：
+ * epoch 自回读页面前发生变化时本轮不发布，下一轮按新配置与新快照重新计算。
+ */
+int RefreshManagedLocalStatePeriodic(ProcessAttr *attr, uint32_t startEpoch)
+{
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr); /* 调用方持有槽位引用；NULL 仅见于单测 */
+    ScanAttrLock(slot);
     ProcessAttr candidate = *attr;
+    ScanAttrUnlock(slot);
     int ret = RefreshManagedLocalState(&candidate, false);
-    if (ret) {
+
+    ScanAttrLock(slot);
+    if (attr->configEpoch != startEpoch) {
+        ScanAttrUnlock(slot);
+        SMAP_LOGGER_INFO("Pid %d config changed during page snapshot, skip local/account refresh.", attr->pid);
         return ret;
     }
-
     /*
      * 内核不维护 numa_nodes 位图，numaAttr.numaNodes 由用户态在
      * bitmap 回读后按各节点页数合成；此处仅刷新本地观测状态。
      */
-    attr->managedLocalState = candidate.managedLocalState;
-    return 0;
+    if (ret == 0) {
+        attr->managedLocalState = candidate.managedLocalState;
+    }
+    ScanAttrUnlock(slot);
+    return ret;
 }
 
 int BuildPidData(ProcessAttr *attr)
@@ -274,6 +302,10 @@ int BuildPidData(ProcessAttr *attr)
      * 此类无回调来源的出口须 InvokeFreqCallbacks 释放等待者（actcLen==0 →
      * 等待者以 -EINVAL 立即失败），避免 IPC 线程在无数据（内核未跟踪/读取失败）
      * 场景白等满超时。 */
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr); /* 调用方持有槽位引用 */
+    ScanAttrLock(slot);
+    uint32_t startEpoch = attr->configEpoch;
+    ScanAttrUnlock(slot);
     ret = AccessIoctlWalkPagemap(attr->pid, &pmb);
     if (ret == -ESRCH) {
         InvokeFreqCallbacks(attr);
@@ -303,9 +335,6 @@ int BuildPidData(ProcessAttr *attr)
             NumaBitmapSet(&numaNodes, nid);
         }
     }
-    for (uint32_t i = 0; i < attr->targetConfig.count; i++) {
-        AddL2ByNid(&numaNodes, attr->targetConfig.targets[i].remoteNid);
-    }
     /*
      * 本地位为空有两种情况：首个 walk 尚未完成（全零快照），或
      * 进程页已全部迁到远端。两种情况都保留现有本地位（纳管预置
@@ -322,15 +351,15 @@ int BuildPidData(ProcessAttr *attr)
     /*
      * 原位覆写 attr 现有位图（NumaBitmapCopy 在字数一致时不重新分配），避免
      * 释放读侧（查询/序列化线程）正引用的 bits；持 attrLock 与其他写者串行。
+     * 远端位在同一临界区内按当前 targetConfig 合成：接口线程（部分移除/发布）
+     * 在此之前删掉的远端不会被旧配置重新写回。
      */
-    struct PidSlot *slot = PidSlotFindHeldByAttr(attr); /* 调用方持有槽位引用 */
-    if (slot) {
-        EnvMutexLock(&slot->attrLock);
+    ScanAttrLock(slot);
+    for (uint32_t i = 0; i < attr->targetConfig.count; i++) {
+        AddL2ByNid(&numaNodes, attr->targetConfig.targets[i].remoteNid);
     }
     bool copied = NumaBitmapCopy(&attr->numaAttr.numaNodes, &numaNodes);
-    if (slot) {
-        EnvMutexUnlock(&slot->attrLock);
-    }
+    ScanAttrUnlock(slot);
     NumaBitmapFree(&numaNodes);
     if (!copied) {
         SMAP_LOGGER_ERROR("Copy numaNodes for pid %d failed.", attr->pid);
@@ -347,14 +376,20 @@ int BuildPidData(ProcessAttr *attr)
     }
     InvokeFreqCallbacks(attr);
     if (!attr->groupPolicy.enabled) {
-        ret = RefreshManagedLocalStatePeriodic(attr);
+        ret = RefreshManagedLocalStatePeriodic(attr, startEpoch);
         if (ret) {
             SMAP_LOGGER_ERROR("Refresh pid %d managed local state failed: %d.", attr->pid, ret);
         }
-        CalibratePairAccount(attr);
-        if (attr->syncWaitRemoteEmpty) {
-            attr->syncWaitRemoteEmptySnapshotValid = true;
+        /* 账本校准与快照有效标记同样只在快照期间配置未变时发布（锁内纯内存计算）；
+         * 否则 sync-wait 会基于保护开启/目标发布之前的快照提前判定远端已清空 */
+        ScanAttrLock(slot);
+        if (attr->configEpoch == startEpoch) {
+            CalibratePairAccount(attr);
+            if (attr->syncWaitRemoteEmpty) {
+                attr->syncWaitRemoteEmptySnapshotValid = true;
+            }
         }
+        ScanAttrUnlock(slot);
     }
     return ret;
 }

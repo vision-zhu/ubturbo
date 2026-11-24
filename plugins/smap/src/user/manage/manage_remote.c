@@ -669,6 +669,7 @@ OUT:
 void PublishProcessTargetCandidate(ProcessAttr *attr, const ProcessAttr *candidate)
 {
     ResetPidAdaptivePeriod(attr);
+    attr->configEpoch++; /* 目标与本地观测整体替换：作废 worker 基于旧配置的快照派生结果 */
     attr->targetConfig = candidate->targetConfig;
     attr->migrateMode = candidate->migrateMode;
     attr->remoteNumaCnt = candidate->remoteNumaCnt;
@@ -1594,6 +1595,7 @@ static void MoveProcessTargetConfig(ProcessAttr *attr, int srcNid, int destNid)
         SMAP_LOGGER_WARNING("Pid %d move Pair target %d to %d failed: %d.", attr->pid, srcNid, destNid, ret);
     }
     attr->remoteNumaCnt = attr->targetConfig.count;
+    attr->configEpoch++;
 }
 
 int ChangePidRemoteByNuma(int srcNid, int destNid)
@@ -1989,6 +1991,7 @@ int ChangePidRemoteByPid(struct MigPidRemoteNumaIoctlMsg *msg)
         if (moveRet) {
             SMAP_LOGGER_WARNING("Pid %d move Pair target %d to %d failed: %d.", attr->pid, srcNid, destNid, moveRet);
         }
+        attr->configEpoch++;
         /* migrateParam 始终按 targetConfig 重建：策略层读取 memSize，且失败路径不得残留
          * ChangePidRemoteMemory 手工维护的中间态（空槽/缺失 destNid） */
         SyncMigrateParamFromTargetConfig(attr);
