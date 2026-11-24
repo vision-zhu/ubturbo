@@ -306,10 +306,10 @@ TEST_F(SceneTest, TestSetLocalMemStatus)
     EXPECT_EQ(LESS, info.status);
 }
 
-extern "C" int AddList(int arr[], int len);
+extern "C" int64_t AddList(int64_t arr[], int len);
 TEST_F(SceneTest, TestAddList)
 {
-    int arr[2];
+    int64_t arr[2];
     arr[0] = 1;
     arr[1] = 2;
     int ret = AddList(arr, 2);
@@ -332,10 +332,10 @@ TEST_F(SceneTest, TestUpdateMemRatio)
     FreeProcessAttrArrays(&process);
 }
 
-extern "C" void ClearList(int arr[], int len);
+extern "C" void ClearList(int64_t arr[], int len);
 TEST_F(SceneTest, TestClearList)
 {
-    int arr[2];
+    int64_t arr[2];
     arr[0] = 1;
     arr[1] = 2;
     ClearList(arr, 1);
@@ -343,10 +343,10 @@ TEST_F(SceneTest, TestClearList)
     EXPECT_EQ(2, arr[1]);
 }
 
-extern "C" void DistributeExtraPages(int arr[], int len);
+extern "C" void DistributeExtraPages(int64_t arr[], int len);
 TEST_F(SceneTest, TestDistributeExtraPages)
 {
-    int arr[4];
+    int64_t arr[4];
     arr[0] = 2;
     arr[1] = 2;
     arr[2] = -1;
@@ -360,7 +360,7 @@ TEST_F(SceneTest, TestDistributeExtraPages)
 
 TEST_F(SceneTest, TestDistributeExtraPagesTwo)
 {
-    int arr[3];
+    int64_t arr[3];
     arr[0] = 2;
     arr[1] = 2;
     arr[2] = -1;
@@ -370,10 +370,21 @@ TEST_F(SceneTest, TestDistributeExtraPagesTwo)
     EXPECT_EQ(0, arr[2]);
 }
 
-extern "C" void DistributeInsufficientPages(int arr[], int len);
+/* 页数之和超过 INT_MAX 时按 int64 求和，分配后总量守恒 */
+TEST_F(SceneTest, TestDistributeExtraPagesLargeSum)
+{
+    int64_t arr[3] = {INT32_MAX, INT32_MAX, -1};
+    DistributeExtraPages(arr, 3);
+    EXPECT_GE(arr[0], 0);
+    EXPECT_GE(arr[1], 0);
+    EXPECT_EQ(0, arr[2]);
+    EXPECT_EQ((int64_t)INT32_MAX * 2 - 1, arr[0] + arr[1] + arr[2]);
+}
+
+extern "C" void DistributeInsufficientPages(int64_t arr[], int len);
 TEST_F(SceneTest, TestDistributeInsufficientPages)
 {
-    int arr[4];
+    int64_t arr[4];
     arr[0] = -2;
     arr[1] = -2;
     arr[2] = 1;
@@ -387,7 +398,7 @@ TEST_F(SceneTest, TestDistributeInsufficientPages)
 
 TEST_F(SceneTest, TestDistributeInsufficientPagesTwo)
 {
-    int arr[3];
+    int64_t arr[3];
     arr[0] = 2;
     arr[1] = -2;
     arr[2] = -1;
@@ -397,10 +408,10 @@ TEST_F(SceneTest, TestDistributeInsufficientPagesTwo)
     EXPECT_EQ(0, arr[2]);
 }
 
-extern "C" void BalanceSurpluses(int arr[], int len);
+extern "C" void BalanceSurpluses(int64_t arr[], int len);
 TEST_F(SceneTest, TestBalanceSurpluses)
 {
-    int arr[4] = {0};
+    int64_t arr[4] = {0};
     arr[0] = 1;
     arr[1] = -1;
     BalanceSurpluses(arr, 4);
@@ -425,10 +436,10 @@ TEST_F(SceneTest, TestSetAdaptMem)
     EXPECT_EQ(false, g_adaptLocalMem);
 }
 extern "C" bool IsReadyForAdapt(ProcessAttr *attr);
-extern "C" void AdjustVmMemRatio(struct ProcessManager *manager, int *surpluses, int len);
+extern "C" void AdjustVmMemRatio(struct ProcessManager *manager, int64_t *surpluses, int len);
 TEST_F(SceneTest, TestAdjustVmMemRatio)
 {
-    int arr[2];
+    int64_t arr[2];
     int len = 1;
     struct ProcessManager manager;
     ProcessAttr current;
