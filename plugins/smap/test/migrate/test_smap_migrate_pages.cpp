@@ -970,6 +970,62 @@ TEST_F(SmapMigratePagesTest, DoMigrateNrFoliosZeroGotoAgainFiltered)
     kfree(mig_list);
 }
 
+static int g_vzallocBudget;
+/* 前 g_vzallocBudget 次真实分配，之后返回 NULL */
+static void *LimitedVzalloc(unsigned long size)
+{
+    if (g_vzallocBudget <= 0) {
+        return nullptr;
+    }
+    g_vzallocBudget--;
+    return calloc(1, size);
+}
+
+// An aborted ioctl (here: folio array allocation fails on the second batch)
+// must report the pages it never processed as failed, so user space does not
+// count them as migrated.
+TEST_F(SmapMigratePagesTest, DoMigrateAbortAccountsUnprocessedPages)
+{
+    struct page page;
+    unsigned int nr_folios = 1;
+    const u64 extra = 10;
+    const u64 nr_total = NR_BATCHED_MIGRATION + extra;
+    struct migrate_msg msg = {};
+    struct mig_list mig_list[1] = {};
+
+    mig_list[0].from = NUMA_NO_NODE + 1;
+    mig_list[0].nr = nr_total;
+    mig_list[0].addr = (u64 *)calloc(nr_total, sizeof(u64));
+    ASSERT_NE(nullptr, mig_list[0].addr);
+    for (u64 j = 0; j < nr_total; j++) {
+        mig_list[0].addr[j] = 0x100000 + j * 0x1000;
+    }
+    msg.cnt = 1;
+    msg.page_size = 0x1000;
+    msg.mig_list = mig_list;
+
+    MOCKER(pfn_valid).stubs().will(returnValue(true));
+    MOCKER(pfn_to_online_page).stubs().will(returnValue(&page));
+    MOCKER(is_filter_anon).stubs().will(returnValue(false));
+    MOCKER(is_filter_4k).stubs().will(returnValue(-1));
+    MOCKER(smap_add_page_for_migration)
+        .stubs()
+        .with(any(), any(), outBoundP(&nr_folios, sizeof(nr_folios)), any(), any())
+        .will(returnValue(0));
+    MOCKER(smap_migrate).stubs().will(returnValue(0));
+    /* nr_remain 数组、第一批 folio 数组成功，第二批 folio 数组分配失败 */
+    g_vzallocBudget = 2;
+    MOCKER(vzalloc).stubs().will(invoke(LimitedVzalloc));
+
+    int ret = do_migrate(&msg, mig_list);
+    EXPECT_EQ(-ENOMEM, ret);
+    EXPECT_TRUE(mig_list[0].success_to_user);
+    EXPECT_EQ(0, mig_list[0].failed_mig_nr);
+    EXPECT_EQ(extra, mig_list[0].failed_pre_migrated_nr);
+
+    free(mig_list[0].addr);
+}
+
 // ========== New DT supplement: set_remote_migrate_mode ==========
 
 extern "C" unsigned int remote_migrate_mode;

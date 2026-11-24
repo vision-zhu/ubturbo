@@ -865,6 +865,19 @@ static int init_mig_entry(int idx, struct mig_list *mig_list, u64 *nr_remain)
 }
 
 /*
+ * account_unprocessed - count the pages of entry i that will never be
+ * processed as failed, so user space can derive the migrated pages as
+ * nr - failed_mig_nr - failed_pre_migrated_nr even when an entry is cut
+ * short (critical node error) or the whole ioctl aborts.
+ */
+static void account_unprocessed(int i, struct mig_list *mig_list,
+				u64 *nr_remain)
+{
+	mig_list[i].failed_pre_migrated_nr += nr_remain[i];
+	nr_remain[i] = 0;
+}
+
+/*
  * run_one_batch - run one migrate_one_batch for entry i and update its
  * remaining count. Returns 0 after a step (entry advanced, finished, or
  * skipped due to -EINVAL), or a negative errno to abort the whole ioctl.
@@ -878,8 +891,8 @@ static int run_one_batch(int i, struct migrate_msg *msg,
 
 	if (r < 0 && r != -EINVAL)
 		return r;
-	if (r == -EINVAL || r == 0)
-		nr_remain[i] = 0;
+	if (r == -EINVAL)
+		account_unprocessed(i, mig_list, nr_remain);
 	else
 		nr_remain[i] = r;
 	return 0;
@@ -970,6 +983,8 @@ int do_migrate(struct migrate_msg *msg, struct mig_list *mig_list)
 		ret = migrate_pid_interleaved(index, msg, mig_list, nr_remain,
 					      &stats);
 		if (ret) {
+			for (i = 0; i < msg->cnt; i++)
+				account_unprocessed(i, mig_list, nr_remain);
 			vfree(nr_remain);
 			return ret;
 		}
