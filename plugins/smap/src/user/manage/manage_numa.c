@@ -46,6 +46,9 @@ static void NoAccountAlloc(int remoteNid, ProcessAttr *attr)
     for (i = 0; i < nrLocalNuma; i++) {
         if (InAttrL1(attr, i)) {
             l1Nid[l1Len++] = i;
+        } else {
+            /* 非 L1 本地节点不分摊，显式清零上一轮的残留值 */
+            NM_AT(attr->strategyAttr.allocRemoteNrPages, i, remoteNid) = 0;
         }
     }
     if (l1Len == 0) {
@@ -176,13 +179,21 @@ static void CalRemoteAllocPages(ProcessAttr *attr, int remoteNid, double *ratio,
     StrategyAttribute *sa = &attr->strategyAttr;
     uint32_t nrTotal = attr->walkPage.nrPages[remoteNid];
     uint32_t nrLeft = nrTotal;
+    /* 余量归最后一个比例非零的本地节点；比例为 0 的项显式写 0，不保留上一轮的值 */
+    int lastNonZero = -1;
+    for (int i = 0; i < ratioLen; i++) {
+        if (ratio[i] != 0) {
+            lastNonZero = i;
+        }
+    }
 
     for (int i = 0; i < ratioLen; i++) {
         if (ratio[i] == 0) {
+            NM_AT(sa->allocRemoteNrPages, i, remoteNid) = 0;
             continue;
         }
 
-        if (i == ratioLen - 1) {
+        if (i == lastNonZero) {
             NM_AT(sa->allocRemoteNrPages, i, remoteNid) = nrLeft;
             SMAP_LOGGER_DEBUG("[alloc_remote] pid=%d local=%d remote=%d pages=%u", attr->pid, i, remoteNid, nrLeft);
         } else {
@@ -218,9 +229,21 @@ static void CalRemotePerLocal(ProcessAttr *attr)
         returnFlag[i] = true;
     }
 
+    int nrLocalNuma = GetNrLocalNuma();
+    /* allocRemoteNrPages 每轮按当前快照与账本整体重算：不参与重算的远端列
+     * （不在 L2 或远端页已清空）直接写 0，否则残留上一轮的值会被
+     * CalNrPagesPerLocalNuma 累加进 nrPagesPerLocalNuma 导致超配。
+     * 只写本轮确定的值、不做先整体清零，避免并发读者看到瞬时的全 0 */
+    for (j = nrLocalNuma; j < cap; j++) {
+        if (NotInAttrL2(attr, j) || attr->walkPage.nrPages[j] == 0) {
+            for (i = 0; i < nrLocalNuma; i++) {
+                NM_AT(attr->strategyAttr.allocRemoteNrPages, i, j) = 0;
+            }
+        }
+    }
+
     // 检查账本和当前内存页分布情况，处理有远端内存，但是没有账本的情况
     CheckAccountAndNrPage(attr, returnFlag);
-    int nrLocalNuma = GetNrLocalNuma();
 
     for (j = nrLocalNuma; j < cap; j++) {
         // 1、Pid本地单一numa占比：pid->本地numa/sum(所有本地numa总迁出量)
