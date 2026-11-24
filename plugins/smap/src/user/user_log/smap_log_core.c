@@ -239,14 +239,18 @@ int SmapLogCoreWrite(int level, const char *prefix, const char *message)
         return -EINVAL;
     }
 
-    ret = snprintf_s(logLine, sizeof(logLine), sizeof(logLine) - 1, "%s %d %s [%s] %s\n", timestamp, getpid(),
-                     LogLevelToString(level), prefix, message);
-    if (ret == -1) {
+    /* 超长行截断保留而不是整条丢弃；截断时补回行尾换行 */
+    ret = snprintf_truncated_s(logLine, sizeof(logLine), "%s %d %s [%s] %s\n", timestamp, getpid(),
+                               LogLevelToString(level), prefix, message);
+    if (ret < 0) {
         pthread_mutex_unlock(&g_smapLogFile.lock);
         return -EINVAL;
     }
 
     lineLen = strlen(logLine);
+    if (lineLen == sizeof(logLine) - 1 && logLine[lineLen - 1] != '\n') {
+        logLine[lineLen - 1] = '\n';
+    }
     if (g_smapLogFile.currentFileSize + lineLen > g_smapLogFile.maxFileSize) {
         if (RotateLogFile() != 0) {
             pthread_mutex_unlock(&g_smapLogFile.lock);

@@ -29,6 +29,10 @@ int snprintf_s(char *strDest, unsigned long destMax, unsigned long count, const 
 
 int vsnprintf_s(char *strDest, size_t destMax, size_t count, const char *format, va_list argList);
 
+int snprintf_truncated_s(char *strDest, size_t destMax, const char *format, ...);
+
+int vsnprintf_truncated_s(char *strDest, size_t destMax, const char *format, va_list argList);
+
 int sscanf_s(const char *buffer, const char *format, ...);
 
 errno_t memcpy_s(void *dest, size_t numberOfElements, const void *src, size_t count);
