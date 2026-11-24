@@ -33,6 +33,7 @@
 #include "strategy/migration.h"
 #include "manage.h"
 #include "manage_internal.h"
+#include "smap_inner_interface.h"
 
 /* 写入 grouped 配置；attr 已注册进槽位表时调用方须持该槽位 attrLock */
 void SetGroupedProcessConfig(ProcessAttr *attr, pid_t pid, const NumaBitmap *nodeBitmap,
@@ -291,32 +292,63 @@ static void FinishPendingGroupedPolicyLocked(ProcessAttr *attr, uint32_t pending
     }
 }
 
+static void GroupedSlotLock(struct PidSlot *slot)
+{
+    if (slot) {
+        EnvMutexLock(&slot->attrLock);
+    }
+}
+
+static void GroupedSlotUnlock(struct PidSlot *slot)
+{
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+    }
+}
+
+/*
+ * worker 迁移收尾时应用 grouped pending（调用方持有该 attr 的槽位引用）。
+ * 下发 ADD_PID 会改变内核跟踪，必须与移除接口串行：持 g_manageLock（trylock，拿不到则保留
+ * pending 下一周期再应用）期间在 attrLock 内确认槽位仍为 INUSE；槽位已被移除（REMOVING）时
+ * 放弃 pending，不得把已撤销跟踪的 pid 重新加入内核。
+ */
 int ApplyPendingGroupedPolicy(ProcessAttr *attr)
 {
     if (!attr) {
         return 0;
     }
 
-    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
-    if (slot) {
-        EnvMutexLock(&slot->attrLock);
-    }
-    if (!attr->pendingGroupPolicy.valid) {
-        if (slot) {
-            EnvMutexUnlock(&slot->attrLock);
-            PidSlotReleaseRefs(&slot, 1);
-        }
+    /* 按持有的引用定位槽位（不要求 INUSE）；NULL 仅见于 attr 未注册进槽表的单测，无并发写者 */
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr);
+    GroupedSlotLock(slot);
+    bool hasPending = attr->pendingGroupPolicy.valid;
+    GroupedSlotUnlock(slot);
+    if (!hasPending) {
         return 0;
+    }
+    if (!SmapManageTryLock()) {
+        SMAP_LOGGER_INFO("Manage interface busy, defer pending grouped policy of pid %d.", attr->pid);
+        return 0;
+    }
+
+    int ret = 0;
+    NumaBitmap nodeBitmap = { 0 };
+    GroupedSlotLock(slot);
+    if (!attr->pendingGroupPolicy.valid) {
+        GroupedSlotUnlock(slot);
+        goto out;
+    }
+    if (slot && EnvAtomicRead(&slot->state) != PID_SLOT_INUSE) {
+        attr->pendingGroupPolicy.valid = false;
+        GroupedSlotUnlock(slot);
+        SMAP_LOGGER_INFO("Grouped pid %d removed, drop its pending policy.", attr->pid);
+        goto out;
     }
     /* 锁内取 pending 快照（位图深拷贝），锁外读 numa_maps / 下发 ioctl */
     GroupMigrationPolicy policy = attr->pendingGroupPolicy.policy;
-    NumaBitmap nodeBitmap = { 0 };
     bool copied = NumaBitmapCopy(&nodeBitmap, &attr->pendingGroupPolicy.nodeBitmap);
     uint32_t pendingSeq = attr->pendingSeq;
-    if (slot) {
-        EnvMutexUnlock(&slot->attrLock);
-    }
-    int ret = 0;
+    GroupedSlotUnlock(slot);
     if (!copied) {
         SMAP_LOGGER_ERROR("Copy pending grouped bitmap of pid %d failed.", attr->pid);
         ret = -ENOMEM; /* 保留 pending，下一周期重试 */
@@ -338,13 +370,9 @@ int ApplyPendingGroupedPolicy(ProcessAttr *attr)
     }
     if (ret) {
         /* 新策略无法生效：放弃该 pending（期间重新暂存的除外） */
-        if (slot) {
-            EnvMutexLock(&slot->attrLock);
-        }
+        GroupedSlotLock(slot);
         FinishPendingGroupedPolicyLocked(attr, pendingSeq);
-        if (slot) {
-            EnvMutexUnlock(&slot->attrLock);
-        }
+        GroupedSlotUnlock(slot);
         goto out;
     }
 
@@ -362,23 +390,20 @@ int ApplyPendingGroupedPolicy(ProcessAttr *attr)
     }
 
     /* Tracking has accepted the new node scope; publish policy to manager. */
-    if (slot) {
-        EnvMutexLock(&slot->attrLock);
-    }
+    GroupedSlotLock(slot);
     SetGroupedProcessConfig(attr, attr->pid, &nodeBitmap, &policy);
     FinishPendingGroupedPolicyLocked(attr, pendingSeq);
-    if (slot) {
-        EnvMutexUnlock(&slot->attrLock);
-    }
+    GroupedSlotUnlock(slot);
+    SmapManageUnlock();
+    NumaBitmapFree(&nodeBitmap);
     int syncRet = SyncAllProcessConfig();
     if (syncRet) {
         SMAP_LOGGER_WARNING("Synchronize pending grouped pid %d config maybe failed: %d.", attr->pid, syncRet);
     }
     SMAP_LOGGER_INFO("Apply pending grouped policy for pid %d success.", attr->pid);
+    return 0;
 out:
+    SmapManageUnlock();
     NumaBitmapFree(&nodeBitmap);
-    if (slot) {
-        PidSlotReleaseRefs(&slot, 1);
-    }
     return ret;
 }

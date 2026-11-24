@@ -323,14 +323,13 @@ int BuildPidData(ProcessAttr *attr)
      * 原位覆写 attr 现有位图（NumaBitmapCopy 在字数一致时不重新分配），避免
      * 释放读侧（查询/序列化线程）正引用的 bits；持 attrLock 与其他写者串行。
      */
-    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr); /* 调用方持有槽位引用 */
     if (slot) {
         EnvMutexLock(&slot->attrLock);
     }
     bool copied = NumaBitmapCopy(&attr->numaAttr.numaNodes, &numaNodes);
     if (slot) {
         EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
     }
     NumaBitmapFree(&numaNodes);
     if (!copied) {

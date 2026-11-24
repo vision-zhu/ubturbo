@@ -799,6 +799,7 @@ bool PidSlotRemove(struct ProcessManager *manager, pid_t pid);
 bool PidSlotEmpty(struct ProcessManager *manager);
 struct PidSlot *PidSlotGetRef(pid_t pid);
 struct PidSlot *PidSlotGetRefByAttr(const ProcessAttr *attr);
+struct PidSlot *PidSlotFindHeldByAttr(const ProcessAttr *attr);
 bool PidSlotTryGetRef(struct PidSlot *slot);
 size_t PidSlotCollectRefs(struct ProcessManager *manager, struct PidSlot *arr[], size_t cap);
 void PidSlotReleaseRefs(struct PidSlot *arr[], size_t n);

@@ -2001,6 +2001,76 @@ TEST_F(ManageTest, TestApplyPendingGroupedPolicyKeepsRestagedPending)
     NumaBitmapFree(&current.pendingGroupPolicy.nodeBitmap);
 }
 
+/* worker 收尾时 pid 已被移除（槽位 REMOVING）：放弃 pending，不得重新把 pid 加入内核跟踪 */
+TEST_F(ManageTest, TestApplyPendingGroupedPolicyDropsRemovedPid)
+{
+    ProcessAttr current = {};
+    GroupMigrationPolicy pending = {};
+    FillPolicyForManageTest(&pending);
+    current.pid = 1234;
+    current.scanType = STATISTIC_SCAN;
+    current.groupPolicy.enabled = true;
+    current.pendingGroupPolicy.valid = true;
+    current.pendingGroupPolicy.nodeBitmap = BmFromWord(0x31);
+    current.pendingGroupPolicy.policy = pending;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    int idx = PidSlotAdd(&g_processManager, &current);
+    ASSERT_GE(idx, 0);
+    EnvAtomicSet(&g_processManager.slots[idx].state, PID_SLOT_REMOVING);
+    MOCKER(GetPidNumaPagesFromNumaMaps).expects(never());
+    MOCKER(AccessIoctlAddPid).expects(never());
+
+    EXPECT_EQ(0, ApplyPendingGroupedPolicy(&current));
+    EXPECT_FALSE(current.pendingGroupPolicy.valid);
+    GlobalMockObject::verify();
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    g_processManager.nr[current.type] = 0;
+    NumaBitmapFree(&current.pendingGroupPolicy.nodeBitmap);
+}
+
+/* 纳管/移除接口正持有 g_manageLock：worker 不阻塞，保留 pending 到下一周期 */
+extern "C" EnvMutex g_manageLock;
+TEST_F(ManageTest, TestApplyPendingGroupedPolicyDefersWhenManageBusy)
+{
+    ProcessAttr current = {};
+    GroupMigrationPolicy pending = {};
+    FillPolicyForManageTest(&pending);
+    current.pid = 1234;
+    current.pendingGroupPolicy.valid = true;
+    current.pendingGroupPolicy.nodeBitmap = BmFromWord(0x31);
+    current.pendingGroupPolicy.policy = pending;
+    MOCKER(GetPidNumaPagesFromNumaMaps).expects(never());
+    MOCKER(AccessIoctlAddPid).expects(never());
+
+    EnvMutexLock(&g_manageLock);
+    EXPECT_EQ(0, ApplyPendingGroupedPolicy(&current));
+    EnvMutexUnlock(&g_manageLock);
+    EXPECT_TRUE(current.pendingGroupPolicy.valid);
+    GlobalMockObject::verify();
+    NumaBitmapFree(&current.pendingGroupPolicy.nodeBitmap);
+}
+
+/* 迁移收尾时 pid 已被移除：放弃 pending 目标，不再对已移除的 attr 重建候选 */
+extern "C" int ApplyPendingMigrationTargets(ProcessAttr *attr);
+TEST_F(ManageTest, TestApplyPendingMigrationTargetsDropsRemovedPid)
+{
+    ProcessAttr current = {};
+    current.pid = 1234;
+    current.scanType = STATISTIC_SCAN;
+    current.pendingTargetConfigValid = true;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    int idx = PidSlotAdd(&g_processManager, &current);
+    ASSERT_GE(idx, 0);
+    EnvAtomicSet(&g_processManager.slots[idx].state, PID_SLOT_REMOVING);
+    MOCKER(CollectProcessCandidateObservation).expects(never());
+
+    EXPECT_EQ(0, ApplyPendingMigrationTargets(&current));
+    EXPECT_FALSE(current.pendingTargetConfigValid);
+    GlobalMockObject::verify();
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    g_processManager.nr[current.type] = 0;
+}
+
 /* 无空闲槽位（槽位仍处于 RESERVED/REMOVING）时不得计数、不得泄漏，返回 -ENOSPC */
 TEST_F(ManageTest, TestProcessAddGroupedManageNoFreeSlot)
 {
