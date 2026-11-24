@@ -2,6 +2,9 @@
  * Description: smap5.0 user thread ut code
  */
 
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 #include <cerrno>
 #include <cstdlib>
 #include "gtest/gtest.h"
@@ -179,4 +182,39 @@ TEST_F(ThreadTest, TestThreadPoolSubmitIndexWrapsWithinRing)
     EnvCondDestroy(&pool->cond);
     EnvMutexDestroy(&pool->lock);
     free(pm);
+}
+
+TEST_F(ThreadTest, TestEventLoopResetEnqueuedRearmsOneshot)
+{
+    struct ProcessManager *pm = &g_processManager;
+    EventLoop savedLoop;
+    memcpy(&savedLoop, &pm->eventLoop, sizeof(savedLoop));
+    struct PidSlot slot;
+    memset(&slot, 0, sizeof(slot));
+    EnvMutexInit(&slot.attrLock);
+    int ep = epoll_create1(EPOLL_CLOEXEC);
+    ASSERT_GE(ep, 0);
+    int efd = eventfd(1, EFD_CLOEXEC | EFD_NONBLOCK); /* 计数非零：持续可读，模拟 freq_ready 未清零 */
+    ASSERT_GE(efd, 0);
+    pm->eventLoop.epfd = ep;
+    EnvAtomicSet(&pm->eventLoop.stop, 0);
+    slot.memFreqFd = efd;
+    EnvAtomicSet(&slot.state, PID_SLOT_INUSE);
+    EnvAtomicSet(&slot.eventEnqueued, 1);
+    struct epoll_event ev = {.events = EPOLLIN | EPOLLONESHOT, .data = {.ptr = &slot}};
+    ASSERT_EQ(0, epoll_ctl(ep, EPOLL_CTL_ADD, efd, &ev));
+
+    struct epoll_event out[1];
+    EXPECT_EQ(1, epoll_wait(ep, out, 1, 0));
+    // 派发后 oneshot 解除监听：排队期间不会反复返回同一 fd
+    EXPECT_EQ(0, epoll_wait(ep, out, 1, 0));
+    // worker 完成后复位去重标志并重新武装
+    EventLoopResetEnqueued(&slot);
+    EXPECT_EQ(0, EnvAtomicRead(&slot.eventEnqueued));
+    EXPECT_EQ(1, epoll_wait(ep, out, 1, 0));
+
+    close(efd);
+    close(ep);
+    EnvMutexDestroy(&slot.attrLock);
+    memcpy(&pm->eventLoop, &savedLoop, sizeof(savedLoop));
 }

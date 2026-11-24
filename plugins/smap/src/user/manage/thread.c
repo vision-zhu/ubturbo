@@ -22,9 +22,40 @@
 #include "smap_log_core.h"
 #include "smap_user_log.h"
 
-void EventLoopResetEnqueued(struct PidSlot *slot)
+/*
+ * mem_freq 以 EPOLLONESHOT 注册：事件派发一次后自动解除监听，直到该 pid 的派发
+ * 结束（worker 完成或入队失败）再重新武装。内核 freq_ready 要等 worker 读走窗口
+ * 数据才清零，水平触发下排队等待 worker 期间 epoll_wait 会持续返回该 fd，令事件
+ * 循环空转并与 worker 抢 attrLock。
+ */
+#define MEM_FREQ_EPOLL_EVENTS (EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLONESHOT)
+
+/* 须持 slot->attrLock：与注销（close fd）串行，避免对已关闭/被复用的 fd 号操作 */
+static void EventLoopRearmSlotLocked(struct PidSlot *slot)
+{
+    EventLoop *l = &GetProcessManager()->eventLoop;
+    if (slot->memFreqFd < 0 || l->epfd < 0 || EnvAtomicRead(&l->stop) ||
+        EnvAtomicRead(&slot->state) != PID_SLOT_INUSE) {
+        return;
+    }
+    struct epoll_event ev = { .events = MEM_FREQ_EPOLL_EVENTS, .data.ptr = slot };
+    if (epoll_ctl(l->epfd, EPOLL_CTL_MOD, slot->memFreqFd, &ev)) {
+        SMAP_LOGGER_WARNING("Rearm mem_freq event for pid %d failed: %d.", slot->pid, errno);
+    }
+}
+
+static void EventLoopResetEnqueuedLocked(struct PidSlot *slot)
 {
     EnvAtomicSet(&slot->eventEnqueued, 0);
+}
+
+/* 派发结束（worker 完成）：复位去重标志并重新武装 mem_freq 监听 */
+void EventLoopResetEnqueued(struct PidSlot *slot)
+{
+    EnvMutexLock(&slot->attrLock);
+    EventLoopResetEnqueuedLocked(slot);
+    EventLoopRearmSlotLocked(slot);
+    EnvMutexUnlock(&slot->attrLock);
 }
 
 void EventLoopUnregisterSlotLocked(struct PidSlot *slot)
@@ -37,7 +68,7 @@ void EventLoopUnregisterSlotLocked(struct PidSlot *slot)
         close(slot->memFreqFd);
         slot->memFreqFd = -1;
     }
-    EventLoopResetEnqueued(slot);
+    EventLoopResetEnqueuedLocked(slot);
 }
 
 void EventLoopUnregisterSlot(struct PidSlot *slot)
@@ -78,14 +109,14 @@ int EventLoopRegisterPid(pid_t pid)
         goto out;
     }
     /* 用槽位指针关联 mem_freq 的扫描完成及关闭事件。 */
-    struct epoll_event ev = { .events = EPOLLIN | EPOLLERR | EPOLLHUP, .data.ptr = slot };
+    struct epoll_event ev = { .events = MEM_FREQ_EPOLL_EVENTS, .data.ptr = slot };
     if (epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev)) {
-        close(fd);
         ret = -errno;
+        close(fd);
         goto out;
     }
     slot->memFreqFd = fd;
-    EventLoopResetEnqueued(slot);
+    EventLoopResetEnqueuedLocked(slot);
 out:
     EnvMutexUnlock(&slot->attrLock);
     PidSlotReleaseRefs(&slot, 1);
@@ -199,8 +230,9 @@ static void *EventLoopMain(void *arg)
                     EnvMutexUnlock(&slot->attrLock);
                     continue;
                 }
-                /* 入队失败（队列满）：复位去重标志；epoll 水平触发下次仍可读，事件不丢 */
-                EventLoopResetEnqueued(slot);
+                /* 入队失败（队列满）：复位去重标志并重新武装监听，数据仍可读，事件不丢 */
+                EventLoopResetEnqueuedLocked(slot);
+                EventLoopRearmSlotLocked(slot);
             }
             PidSlotReleaseRefs(&slot, 1);
             EnvMutexUnlock(&slot->attrLock);
