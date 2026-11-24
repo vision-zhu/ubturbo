@@ -912,10 +912,8 @@ static int UpdateManagedGroupedPolicy(pid_t pid, const NumaBitmap *nodeBitmap, c
     if (!attr->groupPolicy.enabled) {
         ret = -EINVAL;
     } else if (forcePending || attr->state == PROC_MIGRATE) {
-        attr->pendingGroupPolicy.valid = true;
-        (void)NumaBitmapCopy(&attr->pendingGroupPolicy.nodeBitmap, nodeBitmap);
-        attr->pendingGroupPolicy.policy = *policy;
-        staged = true;
+        ret = StagePendingGroupedPolicyLocked(attr, nodeBitmap, policy);
+        staged = (ret == 0);
     } else {
         SetGroupedProcessConfig(attr, pid, nodeBitmap, policy);
     }

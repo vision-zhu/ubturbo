@@ -260,42 +260,23 @@ int ProcessAddGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const Group
     return 0;
 }
 
-int ProcessSetPendingGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy)
+/*
+ * 暂存 grouped pending 策略的唯一实现，调用方须持该 attr 所属槽位的 attrLock（单测未注册槽位时无并发写者）。
+ * 先深拷贝位图，失败时不置 valid（避免带着旧位图应用）；成功后递增 pendingSeq，使 worker
+ * ApplyPendingGroupedPolicy 在锁外 apply 期间到达的新 pending 不会被旧快照的清除覆盖。
+ */
+int StagePendingGroupedPolicyLocked(ProcessAttr *attr, const NumaBitmap *nodeBitmap, const GroupMigrationPolicy *policy)
 {
-    if (!policy || !policy->enabled) {
-        SMAP_LOGGER_ERROR("pending grouped policy of pid %d is invalid.", pid);
+    if (!attr || !nodeBitmap || !policy || !policy->enabled) {
         return -EINVAL;
     }
-
-    struct PidSlot *slot = PidSlotGetRef(pid);
-    if (!slot) {
-        SMAP_LOGGER_ERROR("pid %d cannot save pending grouped policy.", pid);
-        return -EINVAL;
-    }
-    ProcessAttr *current = slot->attr;
-    /* 与 worker 的 ApplyPendingGroupedPolicy 快照/清除互斥：检查状态与写 pending 在同一临界区 */
-    EnvMutexLock(&slot->attrLock);
-    if (!current->groupPolicy.enabled || current->state != PROC_MIGRATE) {
-        EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
-        SMAP_LOGGER_ERROR("pid %d cannot save pending grouped policy.", pid);
-        return -EINVAL;
-    }
-
-    /* Only an already-managed grouped PID in PROC_MIGRATE can defer refresh. */
-    if (!NumaBitmapCopy(&current->pendingGroupPolicy.nodeBitmap, nodeBitmap)) {
-        EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
-        SMAP_LOGGER_ERROR("Copy pending grouped bitmap of pid %d failed.", pid);
+    if (!NumaBitmapCopy(&attr->pendingGroupPolicy.nodeBitmap, nodeBitmap)) {
+        SMAP_LOGGER_ERROR("Copy pending grouped bitmap of pid %d failed.", attr->pid);
         return -ENOMEM;
     }
-    current->pendingGroupPolicy.policy = *policy;
-    current->pendingGroupPolicy.valid = true;
-    /* 序号用于识别 apply 期间到达的新 pending，防止其被旧快照的清除覆盖 */
-    current->pendingSeq++;
-    EnvMutexUnlock(&slot->attrLock);
-    PidSlotReleaseRefs(&slot, 1);
-    SMAP_LOGGER_INFO("Save pending grouped policy for pid %d, group count %d.", pid, policy->groupCount);
+    attr->pendingGroupPolicy.policy = *policy;
+    attr->pendingGroupPolicy.valid = true;
+    attr->pendingSeq++;
     return 0;
 }
 
