@@ -917,8 +917,9 @@ static void RollbackGroupedManagerAdds(const pid_t *addedPids, int addedCnt)
             PutProcessAttr(attr);
             continue;
         }
-        PidSlotRemove(manager, attr->pid);
-        manager->nr[VM_TYPE]--;
+        if (PidSlotRemove(manager, attr->pid)) {
+            manager->nr[VM_TYPE]--;
+        }
         SMAP_LOGGER_INFO("rollback grouped pid %d from manager.", addedPids[i]);
         PutProcessAttr(attr);
     }
@@ -1805,8 +1806,9 @@ static void RecoverRemoveInvalidProcess(void)
 
     for (size_t k = 0; k < invalidCnt; k++) {
         pid_t pid = invalidPids[k];
-        PidSlotRemove(manager, pid);
-        manager->nr[invalidTypes[k]]--;
+        if (PidSlotRemove(manager, pid)) {
+            manager->nr[invalidTypes[k]]--;
+        }
         int ret = SyncAllProcessConfig();
         if (ret) {
             SMAP_LOGGER_WARNING("Synchronize pid %d config maybe failed: %d.", pid, ret);

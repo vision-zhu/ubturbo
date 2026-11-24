@@ -1964,6 +1964,39 @@ TEST_F(ManageTest, TestFreqWaiterCancelOnRemovingSlot)
     PidSlotDestroy(&g_processManager);
 }
 
+TEST_F(ManageTest, TestPidSlotRemoveSkipsStaleRemovingSlot)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr *oldAttr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ProcessAttr *newAttr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, oldAttr);
+    ASSERT_NE(nullptr, newAttr);
+    oldAttr->pid = newAttr->pid = 204;
+    /* 旧槽位已摘除但仍被 worker 引用（REMOVING，refs=1），同 pid 重新纳管落到更高下标 */
+    struct PidSlot *stale = &g_processManager.slots[0];
+    stale->pid = 204;
+    stale->attr = oldAttr;
+    EnvAtomicSet(&stale->refs, 1);
+    EnvAtomicSet(&stale->state, PID_SLOT_REMOVING);
+    struct PidSlot *fresh = &g_processManager.slots[1];
+    fresh->pid = 204;
+    fresh->attr = newAttr;
+    EnvAtomicSet(&fresh->refs, 1);
+    EnvAtomicSet(&fresh->state, PID_SLOT_INUSE);
+
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 204));
+    EXPECT_NE(PID_SLOT_INUSE, EnvAtomicRead(&fresh->state));
+    /* 已无 INUSE 槽位：重复移除不得报告成功 */
+    EXPECT_FALSE(PidSlotRemove(&g_processManager, 204));
+    EXPECT_EQ(PID_SLOT_REMOVING, EnvAtomicRead(&stale->state));
+
+    /* 归还旧槽位引用，触发回收 */
+    PidSlotReleaseRefs(&stale, 1);
+    EXPECT_EQ(PID_SLOT_FREE, EnvAtomicRead(&g_processManager.slots[0].state));
+    EXPECT_EQ(PID_SLOT_FREE, EnvAtomicRead(&g_processManager.slots[1].state));
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {
