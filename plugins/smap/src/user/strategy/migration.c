@@ -1597,38 +1597,57 @@ static void NumaSwapMemPool(ProcessAttr *current)
     }
 }
 
-static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
+/*
+ * 各远端 NUMA 的 UB 带宽限制快照：daemon 在 GetUbFluxMb 之后发布，PID worker 只读快照，
+ * 不直接读 daemon 正在 ioctl 回填的 currentFluxMb。
+ */
+static EnvMutex g_ubBwRestrictLock = { PTHREAD_MUTEX_INITIALIZER };
+static UbBwRestrictType g_ubBwRestrictSnap[SMAP_NODE_CAP_LIMIT];
+
+/* daemon 线程：按本周期带宽查询结果刷新快照；监控关闭或查询失败时全部恢复 NORMAL。 */
+static void PublishUbBwRestrict(struct ProcessManager *manager)
 {
+    UbBwRestrictType restrictSnap[SMAP_NODE_CAP_LIMIT] = { UB_BW_NORMAL };
     uint32_t threshold = manager->ubBwMonitor.ubBwThreshold;
-    if (!IsBwMonitorEnabled(manager)) {
-        return;
-    }
-    /* daemon 线程并发发布新数据：取一致快照，避免 len 与 flux[] 新旧混读 */
-    struct UbFluxMbStatistic *flux = calloc(1, sizeof(*flux));
-    if (flux == NULL || SnapshotUbFlux(manager, flux) != 0) {
-        free(flux);
-        return;
-    }
-
     int cap = (int)GetNumaCap();
-    for (int nid = 0; nid < cap; nid++)
-        current->strategyAttr.ubBwRestrict[nid] = UB_BW_NORMAL;
+    struct UbFluxMbStatistic *flux = NULL;
 
-    for (int i = 0; i < flux->len; i++) {
-        int nid = flux->flux[i].numaId;
-        if (nid < 0 || nid >= cap) {
-            SMAP_LOGGER_ERROR("UB BW: invalid numa id %d, skip.", nid);
-            continue;
-        }
-        uint32_t totalBw = flux->flux[i].readMb + flux->flux[i].writeMb;
-
-        if (totalBw >= threshold) {
-            current->strategyAttr.ubBwRestrict[nid] = UB_BW_SWAP_STOP;
-            SMAP_LOGGER_INFO("UB BW threshold: numa %d bw %uMB/s >= threshold %uMB/s, set UB_BW_SWAP_STOP flag.", nid,
-                             totalBw, threshold);
+    if (IsBwMonitorEnabled(manager)) {
+        flux = calloc(1, sizeof(*flux));
+    }
+    /* SnapshotUbFlux 取一致快照并把 len 限制在 SMAP_MAX_NUMNODES 内；查询失败时 len 为 0 */
+    if (flux != NULL && SnapshotUbFlux(manager, flux) == 0) {
+        for (int i = 0; i < flux->len; i++) {
+            int nid = flux->flux[i].numaId;
+            if (nid < 0 || nid >= cap) {
+                SMAP_LOGGER_ERROR("UB BW: invalid numa id %d, skip.", nid);
+                continue;
+            }
+            uint32_t totalBw = flux->flux[i].readMb + flux->flux[i].writeMb;
+            if (totalBw >= threshold) {
+                restrictSnap[nid] = UB_BW_SWAP_STOP;
+                SMAP_LOGGER_INFO("UB BW threshold: numa %d bw %uMB/s >= threshold %uMB/s, set UB_BW_SWAP_STOP flag.",
+                                 nid, totalBw, threshold);
+            }
         }
     }
     free(flux);
+
+    EnvMutexLock(&g_ubBwRestrictLock);
+    (void)memcpy_s(g_ubBwRestrictSnap, sizeof(g_ubBwRestrictSnap), restrictSnap, sizeof(restrictSnap));
+    EnvMutexUnlock(&g_ubBwRestrictLock);
+}
+
+/* PID worker：从快照拷贝本周期限制；上轮的 SWAP_STOP 在监控关闭或查询失败后随快照一起清除。 */
+static void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager)
+{
+    (void)manager;
+    int cap = (int)GetNumaCap();
+    EnvMutexLock(&g_ubBwRestrictLock);
+    for (int nid = 0; nid < cap; nid++) {
+        current->strategyAttr.ubBwRestrict[nid] = g_ubBwRestrictSnap[nid];
+    }
+    EnvMutexUnlock(&g_ubBwRestrictLock);
 }
 
 static void NumaMigReduceDeal(ProcessAttr *current)
@@ -2142,6 +2161,7 @@ int ManagerDaemonWork(struct ProcessManager *manager)
     CheckAndRemoveInvalidProcess();
     CalcMigrateNrPagesPerPidMultiNuma();
     GetUbFluxMb();
+    PublishUbBwRestrict(manager);
     // 根据内存使用情况更新配比
     ConfigRatios(manager);
     SMAP_LOGGER_DEBUG("Ratio configured.");
