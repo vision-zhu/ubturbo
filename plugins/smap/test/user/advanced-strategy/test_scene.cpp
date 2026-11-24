@@ -436,34 +436,67 @@ TEST_F(SceneTest, TestSetAdaptMem)
     EXPECT_EQ(false, g_adaptLocalMem);
 }
 extern "C" bool IsReadyForAdapt(ProcessAttr *attr);
-extern "C" void AdjustVmMemRatio(struct ProcessManager *manager, int64_t *surpluses, int len);
+typedef struct {
+    struct PidSlot *slot;
+    int pageIdx;
+    uint32_t nrPages;
+    uint32_t nrL1Guarantee;
+} TestVmRatioSnap;
+extern "C" void AdjustVmMemRatio(const TestVmRatioSnap snaps[], int64_t *surpluses, int len);
 TEST_F(SceneTest, TestAdjustVmMemRatio)
 {
     int64_t arr[2];
     int len = 1;
-    struct ProcessManager manager;
-    ProcessAttr current;
-    current.next = NULL;
-    memset(&manager.slots, 0, sizeof(manager.slots));
-    PidSlotAdd(&manager, &current);
-    manager.nr[1] = 1;
+    ProcessAttr current = {};
+    struct PidSlot slot = {};
+    slot.attr = &current;
     arr[0] = 1;
     arr[1] = 2;
     MOCKER(BalanceSurpluses).stubs();
     MOCKER(SetLocalMemStatus).stubs();
-    MOCKER(IsReadyForAdapt).stubs().will(returnValue(true));
     current.sceneInfo.pageInfoIndex = 0;
     current.sceneInfo.pageInfo[0].nrL1Guarantee = 2;
+    current.sceneInfo.pageInfo[0].nrPages = 10;
     current.sceneInfo.status = FULL_SATISFIED;
+    TestVmRatioSnap snap = {&slot, 0, 10, 2};
     MOCKER(UpdateMemRatio).stubs();
-    AdjustVmMemRatio(&manager, arr, len);
+    AdjustVmMemRatio(&snap, arr, len);
     EXPECT_EQ(LIGHT_STABLE_SCENE, current.sceneInfo.currScene);
     EXPECT_EQ(3, current.sceneInfo.pageInfo[0].nrL1Planed);
 
     current.sceneInfo.status = SATISFIED;
     current.sceneInfo.currScene = UNSTABLE_SCENE;
-    AdjustVmMemRatio(&manager, arr, len);
+    AdjustVmMemRatio(&snap, arr, len);
     EXPECT_EQ(HEAVY_STABLE_SCENE, current.sceneInfo.currScene);
+}
+
+/* 赤字超过保障量时 nrL1Planed 钳到 0，不回绕成约 4e9；快照后窗口被推进的 VM 本轮跳过 */
+TEST_F(SceneTest, TestAdjustVmMemRatioClampsAndSkipsStaleSnapshot)
+{
+    ProcessAttr current = {};
+    struct PidSlot slot = {};
+    slot.attr = &current;
+    MOCKER(BalanceSurpluses).stubs();
+    MOCKER(UpdateMemRatio).stubs();
+    current.sceneInfo.pageInfoIndex = 3;
+    current.sceneInfo.pageInfo[3].nrL1Guarantee = 5;
+    current.sceneInfo.pageInfo[3].nrPages = 100;
+    TestVmRatioSnap snap = {&slot, 3, 100, 5};
+    int64_t deficit = -50;
+    AdjustVmMemRatio(&snap, &deficit, 1);
+    EXPECT_EQ(0U, current.sceneInfo.pageInfo[3].nrL1Planed);
+
+    int64_t extra = 500;
+    AdjustVmMemRatio(&snap, &extra, 1);
+    EXPECT_EQ(100U, current.sceneInfo.pageInfo[3].nrL1Planed);
+
+    /* worker 已推进统计窗口：不回写 */
+    current.sceneInfo.pageInfoIndex = 4;
+    current.sceneInfo.pageInfo[4].nrL1Planed = 7;
+    int64_t surplus = 1;
+    AdjustVmMemRatio(&snap, &surplus, 1);
+    EXPECT_EQ(7U, current.sceneInfo.pageInfo[4].nrL1Planed);
+    EXPECT_EQ(100U, current.sceneInfo.pageInfo[3].nrL1Planed);
 }
 
 TEST_F(SceneTest, TestIsReadyForAdapt)
