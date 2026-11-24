@@ -36,6 +36,7 @@
 #include "manage_internal.h"
 #include "node_matrix.h"
 #include "smap_interface.h"
+#include "smap_inner_interface.h"
 
 #define UPDATE_CRITICAL_ERR_COUNT 5
 
@@ -2228,35 +2229,85 @@ static void RemoveManagedProcessRemoteNode(ProcessAttr *attr, int remoteNid)
     attr->remoteNumaCnt = attr->targetConfig.count;
 }
 
-static void ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *removed, bool *changed)
+#define PARTIAL_REMOVE_WAIT_POLL_MS 10
+#define PARTIAL_REMOVE_WAIT_MAX_MS (60 * 1000)
+
+/*
+ * 取 attr 所属槽位的 attrLock，且保证返回时 attr 不处于 PROC_MIGRATE：worker 在迁移期间
+ * 无锁读取 targetConfig/位图/方向矩阵做规划与结算，不能在此期间改写。worker 在 attrLock
+ * 下切换 IDLE<->MIGRATE，故持锁看到非 MIGRATE 即可安全改写直至解锁。
+ * 成功返回 0 并经 *slotOut 返回已加锁槽位（attr 未注册进槽位表时为 NULL，无并发写者）；
+ * 迁移长时间未结束或 SMAP 正在停止时返回 -EBUSY，未持锁。
+ */
+static int LockAttrSlotWhenNotMigrating(ProcessAttr *attr, struct PidSlot **slotOut)
 {
-    struct ProcessManager *manager = GetProcessManager();
+    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    *slotOut = NULL;
+    if (!slot) {
+        return 0;
+    }
+    uint32_t waitedMs = 0;
+    for (;;) {
+        EnvMutexLock(&slot->attrLock);
+        if (attr->state != PROC_MIGRATE) {
+            *slotOut = slot;
+            return 0;
+        }
+        EnvMutexUnlock(&slot->attrLock);
+        if (waitedMs >= PARTIAL_REMOVE_WAIT_MAX_MS || SmapStopRequested()) {
+            SMAP_LOGGER_ERROR("Pid %d is still migrating after %ums, skip partial remove.", attr->pid, waitedMs);
+            PidSlotReleaseRefs(&slot, 1);
+            return -EBUSY;
+        }
+        EnvMsleep(PARTIAL_REMOVE_WAIT_POLL_MS);
+        waitedMs += PARTIAL_REMOVE_WAIT_POLL_MS;
+    }
+}
+
+static int ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *removed, bool *changed)
+{
     ProcessAttr *attr = GetProcessAttr(payload->pid);
     if (!attr) {
         SMAP_LOGGER_WARNING("pid: %d, not exist, not need to remove.", payload->pid);
-        return;
+        return 0;
+    }
+    struct PidSlot *slot = NULL;
+    int ret = LockAttrSlotWhenNotMigrating(attr, &slot);
+    if (ret) {
+        PutProcessAttr(attr);
+        return ret;
     }
     for (int i = 0; i < payload->count; i++) {
         RemoveManagedProcessRemoteNode(attr, payload->nid[i]);
     }
+    bool noRemoteLeft = attr->remoteNumaCnt == 0;
+    if (slot) {
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&slot, 1);
+    }
     *changed = true;
-    if (attr->remoteNumaCnt == 0) {
+    if (noRemoteLeft) {
         ClearManagedWholeProcess(payload->pid, removed);
     }
     PutProcessAttr(attr);
+    return 0;
 }
 
 /* Keep manager state and persisted process config consistent after remove. */
-void ClearManagedProcess(int nr, struct RemovePayload *payload)
+int ClearManagedProcess(int nr, struct RemovePayload *payload)
 {
     bool removed = false;
     bool changed = false;
+    int firstError = 0;
 
     for (int i = 0; i < nr; i++) {
         if (IsRemoveWholeProcess(&payload[i])) {
             ClearManagedWholeProcess(payload[i].pid, &removed);
-        } else {
-            ClearManagedPartialRemoteNodes(&payload[i], &removed, &changed);
+            continue;
+        }
+        int ret = ClearManagedPartialRemoteNodes(&payload[i], &removed, &changed);
+        if (ret && firstError == 0) {
+            firstError = ret;
         }
     }
     if (removed || changed) {
@@ -2265,6 +2316,7 @@ void ClearManagedProcess(int nr, struct RemovePayload *payload)
             SMAP_LOGGER_WARNING("Synchronize process config maybe failed: %d.", ret);
         }
     }
+    return firstError;
 }
 
 void RemoveManagedProcess(int nr, pid_t *pidArr)

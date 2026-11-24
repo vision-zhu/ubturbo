@@ -2159,6 +2159,58 @@ TEST_F(ManageTest, TestClearManagedProcessSyncsWhenLaterPidUnmanaged)
     PidSlotDestroy(&g_processManager);
 }
 
+extern "C" void RemoveManagedProcessRemoteNode(ProcessAttr *attr, int remoteNid);
+extern "C" bool SmapStopRequested(void);
+static void *FinishMigrationThread(void *arg)
+{
+    struct PidSlot *slot = (struct PidSlot *)arg;
+    usleep(50000); /* 50ms 后 worker 结束本轮迁移 */
+    EnvMutexLock(&slot->attrLock);
+    slot->attr->state = PROC_IDLE;
+    EnvMutexUnlock(&slot->attrLock);
+    return nullptr;
+}
+
+TEST_F(ManageTest, TestPartialRemoveWaitsForMigrationEnd)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, attr);
+    attr->pid = 213;
+    attr->type = VM_TYPE;
+    attr->remoteNumaCnt = 2;
+    attr->state = PROC_MIGRATE;
+    int idx = PidSlotAdd(&g_processManager, attr);
+    ASSERT_GE(idx, 0);
+    struct RemovePayload payload = {};
+    payload.pid = 213;
+    payload.count = 1;
+    payload.nid[0] = 4;
+
+    /* 迁移中：等待 worker 把状态切回空闲后才在 attrLock 内改写 */
+    MOCKER(SmapStopRequested).stubs().will(returnValue(false));
+    MOCKER(RemoveManagedProcessRemoteNode).expects(once()).will(ignoreReturnValue());
+    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
+    pthread_t tid;
+    ASSERT_EQ(0, pthread_create(&tid, nullptr, FinishMigrationThread, &g_processManager.slots[idx]));
+    EXPECT_EQ(0, ClearManagedProcess(1, &payload));
+    pthread_join(tid, nullptr);
+    EXPECT_EQ(PROC_IDLE, attr->state);
+    GlobalMockObject::verify();
+
+    /* 一直处于迁移且 SMAP 正在停止：跳过并返回 -EBUSY，不改写 attr、不落盘 */
+    attr->state = PROC_MIGRATE;
+    MOCKER(SmapStopRequested).stubs().will(returnValue(true));
+    MOCKER(RemoveManagedProcessRemoteNode).expects(never());
+    MOCKER(SyncAllProcessConfig).expects(never());
+    EXPECT_EQ(-EBUSY, ClearManagedProcess(1, &payload));
+    GlobalMockObject::verify();
+
+    attr->state = PROC_IDLE;
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 213));
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

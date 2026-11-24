@@ -1640,7 +1640,7 @@ static int RemoveImpl(struct RemoveMsg *msg, int pageType)
         return ret;
     }
 
-    ClearManagedProcess(msg->count, msg->payload);
+    ret = ClearManagedProcess(msg->count, msg->payload);
     SMAP_LOGGER_INFO("smap remove result: %d.", ret);
     return ret;
 }
