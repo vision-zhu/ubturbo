@@ -970,6 +970,24 @@ static void PeriodConifgReset(void)
     }
 }
 
+/* 仅在 smap.period.file.config.switch=true 时由文件控制的字段，恢复为默认值 */
+static void ResetFileControlledConfig(StrategyConfig *cfg)
+{
+    cfg->scanPeriod = DEFAULT_SCAN_PERIOD;
+    cfg->migratePeriod = DEFAULT_MIGRATE_PERIOD;
+    cfg->remoteFreqPercentile = DEFAULT_REMOTE_FREQ_PERCENTILE;
+    cfg->slowThreshold = DEFAULT_SLOW_THRESHOLD;
+    cfg->freqWt = DEFAULT_FREQ_WT;
+    cfg->remoteHotThreshold = DEFAULT_REMOTE_HOT_THRESHOLD;
+    cfg->groupSwapRatio = DEFAULT_GROUP_SWAP_RATIO;
+    cfg->groupSwapMinRemoteFreq = DEFAULT_GROUP_SWAP_MIN_REMOTE_FREQ;
+    cfg->groupSwapMinFreqGain = DEFAULT_GROUP_SWAP_MIN_FREQ_GAIN;
+    cfg->groupSwapLocalWatermarkRatio = DEFAULT_GROUP_SWAP_LOCAL_WATERMARK_RATIO;
+    cfg->zeroFreqMigrateEnable = true;
+    cfg->adaptiveRatioEnable = true;
+    cfg->ubBwThreshold = DEFAULT_UB_BW_THRESHOLD;
+}
+
 static void InitStrategyConfig(void)
 {
     /* zero everything first (runtime flags default false), then assign per-member defaults */
@@ -981,21 +999,9 @@ static void InitStrategyConfig(void)
     g_strategyConfig.adaptiveFastMigratePeriod = DEFAULT_MIGRATE_PERIOD;
     g_strategyConfig.adaptiveSlowScanPeriod = DEFAULT_ADAPTIVE_SLOW_SCAN_PERIOD;
     g_strategyConfig.adaptiveSlowMigratePeriod = DEFAULT_ADAPTIVE_SLOW_MIGRATE_PERIOD;
-    g_strategyConfig.scanPeriod = DEFAULT_SCAN_PERIOD;
-    g_strategyConfig.migratePeriod = DEFAULT_MIGRATE_PERIOD;
-    g_strategyConfig.remoteFreqPercentile = DEFAULT_REMOTE_FREQ_PERCENTILE;
-    g_strategyConfig.slowThreshold = DEFAULT_SLOW_THRESHOLD;
-    g_strategyConfig.freqWt = DEFAULT_FREQ_WT;
-    g_strategyConfig.remoteHotThreshold = DEFAULT_REMOTE_HOT_THRESHOLD;
-    g_strategyConfig.groupSwapRatio = DEFAULT_GROUP_SWAP_RATIO;
-    g_strategyConfig.groupSwapMinRemoteFreq = DEFAULT_GROUP_SWAP_MIN_REMOTE_FREQ;
-    g_strategyConfig.groupSwapMinFreqGain = DEFAULT_GROUP_SWAP_MIN_FREQ_GAIN;
-    g_strategyConfig.groupSwapLocalWatermarkRatio = DEFAULT_GROUP_SWAP_LOCAL_WATERMARK_RATIO;
+    ResetFileControlledConfig(&g_strategyConfig);
     g_strategyConfig.migrateMode = DEFAULT_MIGRATE_MODE;
-    g_strategyConfig.zeroFreqMigrateEnable = true;
-    g_strategyConfig.adaptiveRatioEnable = true;
     g_strategyConfig.fileConfSwitch = false;
-    g_strategyConfig.ubBwThreshold = DEFAULT_UB_BW_THRESHOLD;
     g_strategyConfig.remoteScanMode = DEFAULT_REMOTE_SCAN_MODE;
     g_strategyConfig.scanCpuConfigured = false;
     g_strategyConfig.l3ColdThreshold = DEFAULT_L3_COLD_THRESHOLD;
@@ -1155,7 +1161,12 @@ static void UpdateSwapConfig(void)
 static bool UpdateStrategyConfigChanged(void)
 {
     if (!g_tmpStrategyConfig.fileConfSwitch) {
+        /* switch off: file values must stop taking effect, fall back to defaults */
+        if (g_strategyConfig.fileConfSwitch) {
+            SMAP_LOGGER_INFO("File config switch turned off, restore file-controlled config to defaults.");
+        }
         g_strategyConfig.fileConfSwitch = false;
+        ResetFileControlledConfig(&g_strategyConfig);
         return false;
     }
     g_strategyConfig.fileConfSwitch = true;
