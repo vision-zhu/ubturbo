@@ -899,6 +899,12 @@ static int UpdateManagedGroupedPolicy(pid_t pid, const NumaBitmap *nodeBitmap, c
     return 0;
 }
 
+/*
+ * 第一阶段：只纳管本批中的新 pid。任一失败即回滚本批已新增的 pid 并返回错误，此时已纳管
+ * 与 pending 的 pid 均未被改动，keepTracking 对它们为 true（内核跟踪在本次请求前已存在，
+ * 不得回滚），只有新 pid 为 false。已纳管 pid 的策略在全部新 pid 成功后由
+ * UpdateExistingGroupedProcesses 提交，保证失败时不会出现「部分已纳管 pid 已换新策略」。
+ */
 static int AddGroupedProcessesToGlobalManagerFiltered(struct GroupedMigrateOutMsg *msg, NumaBitmap *nodeBitmap,
                                                       GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT],
                                                       bool keepTracking[MAX_NR_GROUPED_MIGOUT],
@@ -906,41 +912,64 @@ static int AddGroupedProcessesToGlobalManagerFiltered(struct GroupedMigrateOutMs
 {
     pid_t addedPids[MAX_NR_GROUPED_MIGOUT] = { 0 };
     int addedCnt = 0;
-    bool succeeded[MAX_NR_GROUPED_MIGOUT] = { 0 };
     bool existedBefore[MAX_NR_GROUPED_MIGOUT] = { 0 };
 
     for (int i = 0; i < msg->count; i++) {
         if (pendingUpdate && pendingUpdate[i]) {
             /* Pending PIDs keep their current manager/tracking state until apply time. */
-            keepTracking[i] = true;
+            existedBefore[i] = true;
+        } else {
+            ProcessAttr *prev = GetProcessAttr(msg->payload[i].pid);
+            existedBefore[i] = (prev != NULL);
+            PutProcessAttr(prev);
+        }
+        keepTracking[i] = existedBefore[i];
+    }
+
+    for (int i = 0; i < msg->count; i++) {
+        if (existedBefore[i]) {
             continue;
         }
-        ProcessAttr *prev = GetProcessAttr(msg->payload[i].pid);
-        existedBefore[i] = (prev != NULL);
-        PutProcessAttr(prev);
-        int ret = existedBefore[i] ?
-                      UpdateManagedGroupedPolicy(msg->payload[i].pid, &nodeBitmap[i], &policies[i], false) :
-                      ProcessAddGroupedManage(msg->payload[i].pid, &nodeBitmap[i], &policies[i]);
+        int ret = ProcessAddGroupedManage(msg->payload[i].pid, &nodeBitmap[i], &policies[i]);
         if (ret) {
             SMAP_LOGGER_ERROR("add grouped process %d failed: %d.", msg->payload[i].pid, ret);
             RollbackGroupedManagerAdds(addedPids, addedCnt);
-            for (int j = 0; j < i; j++) {
-                if (pendingUpdate && pendingUpdate[j]) {
-                    /* Mixed batches must not rollback tracking for deferred existing PIDs. */
-                    keepTracking[j] = true;
-                    continue;
-                }
-                keepTracking[j] = succeeded[j] && existedBefore[j];
+            for (int j = 0; j < msg->count; j++) {
+                keepTracking[j] = existedBefore[j];
             }
             return ret;
         }
-        succeeded[i] = true;
-        if (!existedBefore[i]) {
-            addedPids[addedCnt++] = msg->payload[i].pid;
-        }
+        addedPids[addedCnt++] = msg->payload[i].pid;
         keepTracking[i] = true;
     }
     return 0;
+}
+
+/*
+ * 第二阶段：新 pid 全部纳管成功后，提交本次请求前已纳管（非 pending）pid 的新策略。
+ * 在 g_manageLock 下此处只会因 pid 被并发移除（进程退出后的清理）而失败：该 pid 已不再
+ * 受管，keepTracking 置 false 以撤销本次重新下发的内核跟踪；其余 pid 照常提交，返回首个错误。
+ */
+static int UpdateExistingGroupedProcesses(struct GroupedMigrateOutMsg *msg, NumaBitmap *nodeBitmap,
+                                          GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT],
+                                          bool keepTracking[MAX_NR_GROUPED_MIGOUT], const bool *existedBefore,
+                                          const bool *pendingUpdate)
+{
+    int firstError = 0;
+    for (int i = 0; i < msg->count; i++) {
+        if (!existedBefore[i] || pendingUpdate[i]) {
+            continue;
+        }
+        int ret = UpdateManagedGroupedPolicy(msg->payload[i].pid, &nodeBitmap[i], &policies[i], false);
+        if (ret) {
+            SMAP_LOGGER_ERROR("update grouped process %d failed: %d.", msg->payload[i].pid, ret);
+            keepTracking[i] = false;
+            if (firstError == 0) {
+                firstError = ret;
+            }
+        }
+    }
+    return firstError;
 }
 
 static void RollbackGroupedTrackingManage(struct GroupedMigrateOutMsg *msg, const bool *keepTracking)
@@ -1020,6 +1049,7 @@ static bool HasGroupedPendingUpdate(const bool *pendingUpdate, int count)
 static int SetPendingGroupedPolicies(struct GroupedMigrateOutMsg *msg, NumaBitmap *nodeBitmap,
                                      GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT], const bool *pendingUpdate)
 {
+    int firstError = 0;
     for (int i = 0; i < msg->count; i++) {
         if (!pendingUpdate[i]) {
             continue;
@@ -1029,10 +1059,12 @@ static int SetPendingGroupedPolicies(struct GroupedMigrateOutMsg *msg, NumaBitma
         int ret = UpdateManagedGroupedPolicy(msg->payload[i].pid, &nodeBitmap[i], &policies[i], true);
         if (ret) {
             SMAP_LOGGER_ERROR("Set pending grouped pid %d failed: %d.", msg->payload[i].pid, ret);
-            return ret;
+            if (firstError == 0) {
+                firstError = ret;
+            }
         }
     }
-    return 0;
+    return firstError;
 }
 
 static bool IsGroupedAttrByRemoteNid(ProcessAttr *attr, int remoteNid)
@@ -1287,6 +1319,7 @@ static int MigrateOutGroupedImpl(struct GroupedMigrateOutMsg *msg, int pageType)
     GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT] = { 0 };
     bool pendingUpdate[MAX_NR_GROUPED_MIGOUT] = { 0 };
     bool keepTracking[MAX_NR_GROUPED_MIGOUT] = { 0 };
+    bool existedBefore[MAX_NR_GROUPED_MIGOUT] = { 0 };
     bool hasPendingUpdate = false;
     int bmCount = 0;
     int i;
@@ -1311,6 +1344,9 @@ static int MigrateOutGroupedImpl(struct GroupedMigrateOutMsg *msg, int pageType)
 
     for (i = 0; i < msg->count; i++) {
         pendingUpdate[i] = IsGroupedPendingUpdate(msg->payload[i].pid);
+        ProcessAttr *prev = GetProcessAttr(msg->payload[i].pid);
+        existedBefore[i] = (prev != NULL);
+        PutProcessAttr(prev);
     }
     hasPendingUpdate = HasGroupedPendingUpdate(pendingUpdate, msg->count);
 
@@ -1330,11 +1366,17 @@ static int MigrateOutGroupedImpl(struct GroupedMigrateOutMsg *msg, int pageType)
               AddGroupedProcessesToGlobalManagerFiltered(msg, nodeBitmap, policies, keepTracking, pendingUpdate) :
               AddGroupedProcessesToGlobalManager(msg, nodeBitmap, policies, keepTracking);
     if (ret) {
+        /* 新 pid 纳管失败：仅撤销新 pid 的跟踪，请求前已纳管/pending 的 pid 保持原跟踪与策略 */
         RollbackGroupedTrackingManage(msg, keepTracking);
         goto out_free_bitmap;
     }
 
-    ret = SetPendingGroupedPolicies(msg, nodeBitmap, policies, pendingUpdate);
+    ret = UpdateExistingGroupedProcesses(msg, nodeBitmap, policies, keepTracking, existedBefore, pendingUpdate);
+    if (ret) {
+        RollbackGroupedTrackingManage(msg, keepTracking);
+    }
+    int pendingRet = SetPendingGroupedPolicies(msg, nodeBitmap, policies, pendingUpdate);
+    ret = ret ? ret : pendingRet;
 
 out_free_bitmap:
     for (i = 0; i < bmCount; i++) {

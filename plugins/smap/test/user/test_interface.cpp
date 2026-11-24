@@ -1399,8 +1399,8 @@ TEST_F(InterfaceTest, TestGroupedManageFailureKeepsExistingPidTracking)
     msg.payload[0].pid = 1234;
     msg.payload[1].pid = 5678;
     MOCKER(GetProcessAttr).stubs().will(returnValue(&existing)).then(returnValue((ProcessAttr *)nullptr));
-    /* 已纳管 pid 走 attrLock 内的策略更新，新 pid 走 ProcessAddGroupedManage */
-    MOCKER(UpdateManagedGroupedPolicy).expects(once()).will(returnValue(0));
+    /* 新 pid 先纳管；失败时已纳管 pid 的策略不得被提交，其内核跟踪保留 */
+    MOCKER(UpdateManagedGroupedPolicy).expects(never());
     MOCKER(ProcessAddGroupedManage).expects(once()).will(returnValue(-ENOMEM));
 
     int ret = AddGroupedProcessesToGlobalManager(&msg, nodeBitmap, policies, keepTracking);
@@ -1427,6 +1427,32 @@ TEST_F(InterfaceTest, TestGroupedManageFailureKeepsPendingPidTracking)
     EXPECT_EQ(-ENOMEM, ret);
     EXPECT_TRUE(keepTracking[0]);
     EXPECT_FALSE(keepTracking[1]);
+}
+
+TEST_F(InterfaceTest, TestGroupedManageFailureKeepsLaterExistingPidTracking)
+{
+    struct GroupedMigrateOutMsg msg = {};
+    NumaBitmap nodeBitmap[MAX_NR_GROUPED_MIGOUT] = {};
+    GroupMigrationPolicy policies[MAX_NR_GROUPED_MIGOUT] = {};
+    bool keepTracking[MAX_NR_GROUPED_MIGOUT] = {0};
+    bool pendingUpdate[MAX_NR_GROUPED_MIGOUT] = {false, false, true};
+    ProcessAttr existing = {};
+
+    /* [新 VM A, 已纳管 VM B, pending VM C]：A 失败时 B、C 的内核跟踪都不得被撤销 */
+    msg.count = 3;
+    msg.payload[0].pid = 1111;
+    msg.payload[1].pid = 2222;
+    msg.payload[2].pid = 3333;
+    MOCKER(GetProcessAttr).stubs().with(eq((pid_t)1111)).will(returnValue((ProcessAttr *)nullptr));
+    MOCKER(GetProcessAttr).stubs().with(eq((pid_t)2222)).will(returnValue(&existing));
+    MOCKER(UpdateManagedGroupedPolicy).expects(never());
+    MOCKER(ProcessAddGroupedManage).expects(once()).will(returnValue(-ESRCH));
+
+    int ret = AddGroupedProcessesToGlobalManagerFiltered(&msg, nodeBitmap, policies, keepTracking, pendingUpdate);
+    EXPECT_EQ(-ESRCH, ret);
+    EXPECT_FALSE(keepTracking[0]);
+    EXPECT_TRUE(keepTracking[1]);
+    EXPECT_TRUE(keepTracking[2]);
 }
 
 extern "C" void RollbackGroupedTrackingManage(struct GroupedMigrateOutMsg *msg, const bool *keepTracking);
