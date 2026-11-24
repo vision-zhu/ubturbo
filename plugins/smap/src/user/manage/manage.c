@@ -1680,6 +1680,14 @@ int PublishProcessManageCandidate(ProcessManageCandidate *candidate)
     struct PidSlot *slot = candidate->isNew ? NULL : candidate->slot;
     if (slot) {
         EnvMutexLock(&slot->attrLock);
+        /* Prepare 之后槽位可能已被移除（如 worker 远端清空自动移除）：不得向已摘除的 attr 发布并报成功 */
+        if (EnvAtomicRead(&slot->state) != PID_SLOT_INUSE) {
+            EnvMutexUnlock(&slot->attrLock);
+            SMAP_LOGGER_ERROR("Pid %d was removed before publishing its migration target.", prepared->pid);
+            PutProcessAttr(candidate->active);
+            DiscardProcessManageCandidate(candidate);
+            return -ESRCH;
+        }
     }
     bool stagePending = !candidate->isNew && (candidate->isPending || candidate->active->state == PROC_MIGRATE);
     if (stagePending) {
