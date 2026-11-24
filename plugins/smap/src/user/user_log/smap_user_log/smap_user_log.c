@@ -115,45 +115,52 @@ static void SmapUlogInner(int logLevel, const char *prefix, const char *msg)
 #endif
 }
 
+/* ToCoreLevel - SMAP_LOG_* 映射为日志核心级别，非法级别返回 -1 */
+static int ToCoreLevel(int logLevel)
+{
+    switch (logLevel) {
+        case SMAP_LOG_DEBUG:
+            return SMAP_LOG_CORE_DEBUG;
+        case SMAP_LOG_INFO:
+            return SMAP_LOG_CORE_INFO;
+        case SMAP_LOG_WARNING:
+            return SMAP_LOG_CORE_WARN;
+        case SMAP_LOG_ERROR:
+            return SMAP_LOG_CORE_ERROR;
+        default:
+            return -1;
+    }
+}
+
 void SMAP_Ulog(int logLevel, const char *funcName, int funcLine, const char *fileName, const char *format, ...)
 {
     int ret;
     va_list argPtr;
     char head[SMAP_LOG_BUF_LEN] = { 0 };
     char data[SMAP_LOG_BUF_LEN] = { 0 };
+    (void)funcName;
 
-    if (snprintf_s(head, sizeof(head), sizeof(head) - 1, "%s %d", fileName, funcLine) == 0) {
+    /* 先按级别过滤再格式化：被过滤的 DEBUG 日志不再付出 vsnprintf 开销（热路径） */
+    int coreLevel = ToCoreLevel(logLevel);
+    if (coreLevel < 0 || coreLevel < SmapLogCoreGetMinLogLevel()) {
+        return;
+    }
+
+    /* 超长内容截断保留（*_truncated_s 截断时返回 destMax - 1），而不是整条丢弃 */
+    if (snprintf_truncated_s(head, sizeof(head), "%s %d", fileName, funcLine) < 0) {
         return;
     }
     va_start(argPtr, format);
-    ret = vsnprintf_s(data, SMAP_LOG_BUF_LEN, sizeof(data) - 1, format, argPtr);
+    ret = vsnprintf_truncated_s(data, sizeof(data), format, argPtr);
+    va_end(argPtr);
     if (ret < 0) {
 #ifndef USE_DT
-        SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, head, "vsnprintf_s failed.");
+        SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, head, "vsnprintf_truncated_s failed.");
 #endif
-        va_end(argPtr);
         return;
     }
-    va_end(argPtr);
 
-    switch (logLevel) {
-        case SMAP_LOG_INFO:
-            SmapUlogInner(SMAP_LOG_CORE_INFO, head, data);
-            break;
-        case SMAP_LOG_WARNING:
-            SmapUlogInner(SMAP_LOG_CORE_WARN, head, data);
-            break;
-        case SMAP_LOG_ERROR:
-            SmapUlogInner(SMAP_LOG_CORE_ERROR, head, data);
-            break;
-        case SMAP_LOG_DEBUG:
-            SmapUlogInner(SMAP_LOG_CORE_DEBUG, head, data);
-            break;
-        default:
-            break;
-    }
-
-    return;
+    SmapUlogInner(coreLevel, head, data);
 }
 
 void SmapLoggerExit(void)

@@ -11,6 +11,7 @@
 
 #include "smap_log_core.h"
 #include "smap_user_log.h"
+#include "securec.h"
 
 using namespace std;
 
@@ -213,4 +214,24 @@ TEST_F(SmapUserLogTest, TestConcurrentLogAndLoggerExit)
         l.join();
     }
     SUCCEED();
+}
+
+TEST_F(SmapUserLogTest, TestLongMessageIsTruncatedNotDropped)
+{
+    UpstreamSubscribeLogger(MockLogCallback);
+    string longArg(2000, 'x');
+    SMAP_Ulog(SMAP_LOG_ERROR, "testFunc", 10, "test.c", "pid %d failed: %s", 4321, longArg.c_str());
+    EXPECT_EQ(1, g_logCallCount);
+    /* 原先 vsnprintf_s 截断返回 -1 整条丢弃；现在保留截断后的前缀（511 字节） */
+    EXPECT_EQ(0U, g_lastLogMsg.find("pid 4321 failed: xxx"));
+    EXPECT_EQ(511U, g_lastLogMsg.size());
+}
+
+TEST_F(SmapUserLogTest, TestFilteredLevelSkipsFormatting)
+{
+    UpstreamSubscribeLogger(MockLogCallback);
+    SmapLogCoreSetMinLogLevel(SMAP_LOG_CORE_INFO);
+    MOCKER(vsnprintf_truncated_s).expects(never());
+    SMAP_Ulog(SMAP_LOG_DEBUG, "testFunc", 10, "test.c", "debug %d", 1);
+    EXPECT_EQ(0, g_logCallCount);
 }

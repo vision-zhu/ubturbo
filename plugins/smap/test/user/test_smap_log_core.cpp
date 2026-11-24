@@ -331,3 +331,28 @@ TEST_F(SmapLogCoreTest, TestConcurrentWriteAndExit)
     SmapLogCoreExit();
     EXPECT_EQ(-EINVAL, SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, "prefix", "after exit"));
 }
+
+TEST_F(SmapLogCoreTest, TestLongLineIsTruncatedNotDropped)
+{
+    SmapLogConfig config;
+    strncpy(config.filePath, testLogFile.c_str(), SMAP_LOG_MAX_PATH_LEN - 1);
+    config.maxFileSize = 1024 * 1024;
+    config.maxFileCount = 2;
+    config.minLogLevel = SMAP_LOG_CORE_INFO;
+    ASSERT_EQ(0, SmapLogCoreInit(&config));
+
+    string prefix(500, 'p');
+    string msg(1000, 'm');
+    EXPECT_EQ(0, SmapLogCoreWrite(SMAP_LOG_CORE_ERROR, prefix.c_str(), msg.c_str()));
+    SmapLogCoreExit();
+
+    ifstream file(testLogFile);
+    string line;
+    string last;
+    while (getline(file, line)) {
+        last = line;
+    }
+    /* 截断后仍落盘，行长为缓冲区上限减去补回的换行 */
+    EXPECT_EQ((size_t)(SMAP_LOG_MAX_MSG_LEN * 2 - 2), last.size());
+    EXPECT_NE(string::npos, last.find(prefix));
+}
