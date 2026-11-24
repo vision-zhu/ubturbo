@@ -274,39 +274,41 @@ void MigratePagesToRemote(ProcessAttr *attr, int remoteNid, const uint64_t pages
     }
 }
 
+/*
+ * 只清目标量 memSize，保留账本：账本记录了远端页来自哪个本地节点，
+ * AccountExistingRemotePages 据此按原分布重新缩放（ByOldAccount）；清掉账本会
+ * 使其退化为按当前本地驻留比例重新分摊，丢失 local->remote 的来源信息。
+ */
 static void ClearSingleRemoteTarget(ProcessAttr *attr, int remoteNid, int nrLocalNuma)
 {
     for (int i = 0; i < nrLocalNuma; i++) {
         NM_AT(attr->strategyAttr.memSize, i, remoteNid) = 0;
-        NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid) = 0;
     }
 }
 
+/* 按原账本的 local 分布把远端已驻留页数重新缩放（覆盖全部本地行，保持来源信息） */
 static void AccountExistingRemotePagesByOldAccount(ProcessAttr *attr, int remoteNid, uint64_t remotePages,
                                                    uint64_t oldTotal, int nrLocalNuma)
 {
     uint64_t nrLeft = remotePages;
+    int lastLocal = NUMA_NO_NODE;
 
     for (int i = 0; i < nrLocalNuma; i++) {
-        if (!InAttrL1(attr, i)) {
+        uint64_t oldPages = NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid);
+        if (oldPages == 0) {
             continue;
         }
-
-        uint64_t oldPages = NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid);
         uint64_t nrPages = oldTotal == 0 ? 0 : remotePages * oldPages / oldTotal;
         if (nrPages > nrLeft) {
             nrPages = nrLeft;
         }
         NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid) = nrPages;
         nrLeft -= nrPages;
+        lastLocal = i;
     }
 
-    for (int i = nrLocalNuma - 1; i >= 0 && nrLeft > 0; i--) {
-        if (!InAttrL1(attr, i)) {
-            continue;
-        }
-        NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid) += nrLeft;
-        break;
+    if (nrLeft > 0 && lastLocal != NUMA_NO_NODE) {
+        NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, lastLocal, remoteNid) += nrLeft;
     }
 }
 
@@ -354,13 +356,16 @@ static void AccountExistingRemotePages(ProcessAttr *attr, int remoteNid, const u
     uint64_t oldTotal = 0;
 
     if (remotePages == 0) {
+        /* 远端已无驻留页：账本随观测清零 */
+        for (int i = 0; i < nrLocalNuma; i++) {
+            NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid) = 0;
+        }
         return;
     }
 
+    /* 统计全部本地行：页的来源本地节点可能已不在当前 L1 中 */
     for (int i = 0; i < nrLocalNuma; i++) {
-        if (InAttrL1(attr, i)) {
-            oldTotal += NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid);
-        }
+        oldTotal += NM_AT(attr->strategyAttr.remoteNrPagesAfterMigrate, i, remoteNid);
     }
 
     if (oldTotal > 0) {
