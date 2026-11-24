@@ -44,6 +44,9 @@
 #define REMOTE_NUMA_MEMORY_MAX (TIB / MIB)
 #define LOCAL_NUMA_BIT_MAP_MASK 0xF
 #define MIN_GROUP_QUOTA_SIZE_KB KB_PER_2MB
+/* grouped 本地预留/远端配额上限（1 PiB，单位 KB）：远超单机内存，只用于拒绝畸形值，
+ * 防止 KBToHugePageCeil 的 (size + pageKB - 1) 回绕为 0 把「尽量保留本地」反转为「全部可迁出」 */
+#define MAX_GROUP_SIZE_KB (1ULL << 40)
 
 #define UB_URMA_CTP_ROI_MASK (1 << 19)
 
@@ -628,6 +631,11 @@ static int CheckGroupedTarget(const struct MigrationGroup *group, int payloadIdx
                               group->targets[i].size);
             return -EINVAL;
         }
+        if (group->targets[i].size > MAX_GROUP_SIZE_KB) {
+            SMAP_LOGGER_ERROR("[%d:%d:%d] grouped target quota %lluKB is too large.", payloadIdx, groupIdx, i,
+                              group->targets[i].size);
+            return -EINVAL;
+        }
         targets[i] = nid;
     }
     if (HasDuplicateInt(targets, group->targetCount)) {
@@ -665,8 +673,9 @@ static int CheckGroupedPayload(struct GroupedMigrateOutPayload *payload, int pay
         }
         for (int j = 0; j < group->localCount; j++) {
             int nid = group->locals[j].nid;
-            if (group->locals[j].size == 0) {
-                SMAP_LOGGER_ERROR("[%d:%d:%d] grouped local reserve is zero.", payloadIdx, i, j);
+            if (group->locals[j].size == 0 || group->locals[j].size > MAX_GROUP_SIZE_KB) {
+                SMAP_LOGGER_ERROR("[%d:%d:%d] grouped local reserve %lluKB invalid.", payloadIdx, i, j,
+                                  group->locals[j].size);
                 return -EINVAL;
             }
             if (!IsLocalNidValid(nid) || nid < 0 || nid >= SMAP_MAX_NUMNODES) {
