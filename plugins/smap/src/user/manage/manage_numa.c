@@ -329,12 +329,12 @@ static void CalAvailBorrowPage(uint32_t *availPrivatePages, uint32_t availShared
     for (int j = nrLocalNuma; j < cap; j++) {
         if (rmi->sharedSize[j] > 0) {
             availSharedPages[j] = MBToPage(rmi->sharedSize[j]);
-            SMAP_LOGGER_DEBUG("availSharedPages[%d] %llu", j, availSharedPages[j]);
+            SMAP_LOGGER_DEBUG("availSharedPages[%d] %u", j, availSharedPages[j]);
         }
         for (int i = 0; i < nrLocalNuma && i < SMAP_MAX_NUMNODES; i++) {
             if (NM_AT(rmi->privateSize, i, j) > 0) {
                 NM_AT(availPrivatePages, i, j) = MBToPage(NM_AT(rmi->privateSize, i, j));
-                SMAP_LOGGER_DEBUG("availPrivatePages[%d][%d] %llu", i, j, NM_AT(availPrivatePages, i, j));
+                SMAP_LOGGER_DEBUG("availPrivatePages[%d][%d] %u", i, j, NM_AT(availPrivatePages, i, j));
             }
         }
     }
@@ -351,7 +351,7 @@ static void AllocPrivatePage(uint32_t *tmpMaxAllocNrPages, uint32_t *availPrivat
                 continue;
             }
             SMAP_LOGGER_DEBUG("tmpMaxAllocNrPages[%d][%d]=%u.", i, j, NM_AT(tmpMaxAllocNrPages, i, j));
-            SMAP_LOGGER_DEBUG("availPrivatePages 2 %llu.", NM_AT(availPrivatePages, i, j));
+            SMAP_LOGGER_DEBUG("availPrivatePages 2 %u.", NM_AT(availPrivatePages, i, j));
             if (NM_AT(availPrivatePages, i, j) == 0) {
                 continue;
             }
