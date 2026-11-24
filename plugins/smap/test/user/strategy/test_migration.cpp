@@ -59,6 +59,15 @@ static struct MigList *TestMlist(void)
 
 extern "C" struct ProcessManager g_processManager;
 
+extern "C" void PublishUbBwRestrict(struct ProcessManager *manager);
+/* UB 带宽限制快照为进程级静态量，用例结束时恢复为全 NORMAL，避免串扰后续用例 */
+static void ResetUbBwRestrictSnapshot(void)
+{
+    static struct ProcessManager idleManager;
+    memset(&idleManager, 0, sizeof(idleManager));
+    PublishUbBwRestrict(&idleManager);
+}
+
 class MigrationTest : public ::testing::Test {
 protected:
     void SetUp() override
@@ -72,6 +81,7 @@ protected:
         cout << "[Phase TearDown Begin]" << endl;
         GlobalMockObject::verify();
         memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+        ResetUbBwRestrictSnapshot();
         cout << "[Phase TearDown End]" << endl;
     }
 };
@@ -1951,6 +1961,7 @@ TEST_F(MigrationTest, TestApplyUbBwStopThresholdZero)
     NM_AT(current.strategyAttr.nrMigratePages, 0, 1) = 100;
     NM_AT(current.strategyAttr.nrMigratePages, 1, 0) = 200;
 
+    PublishUbBwRestrict(&manager);
     ApplyUbBwStop(&current, &manager);
     EXPECT_EQ(100, NM_AT(current.strategyAttr.nrMigratePages, 0, 1));
     EXPECT_EQ(200, NM_AT(current.strategyAttr.nrMigratePages, 1, 0));
@@ -1968,6 +1979,7 @@ TEST_F(MigrationTest, TestApplyUbBwStopFluxRetFailed)
     ASSERT_EQ(0, InitProcessAttrArrays(&current));
     NM_AT(current.strategyAttr.nrMigratePages, 0, 1) = 100;
 
+    PublishUbBwRestrict(&manager);
     ApplyUbBwStop(&current, &manager);
     EXPECT_EQ(100, NM_AT(current.strategyAttr.nrMigratePages, 0, 1));
     FreeProcessAttrArrays(&current);
@@ -1992,6 +2004,7 @@ TEST_F(MigrationTest, TestApplyUbBwStopBwExceedThreshold)
     NM_AT(current.strategyAttr.nrMigratePages, 2, 1) = 60;
     NM_AT(current.strategyAttr.nrMigratePages, 0, 1) = 300;
 
+    PublishUbBwRestrict(&manager);
     ApplyUbBwStop(&current, &manager);
     /* ApplyUbBwStop only sets ubBwRestrict flag; nrMigratePages cleared by strategy layer */
     EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[2]);
@@ -2014,6 +2027,7 @@ TEST_F(MigrationTest, TestApplyUbBwStopBwBelowThreshold)
     ASSERT_EQ(0, InitProcessAttrArrays(&current));
     NM_AT(current.strategyAttr.nrMigratePages, 0, 2) = 100;
 
+    PublishUbBwRestrict(&manager);
     ApplyUbBwStop(&current, &manager);
     EXPECT_EQ(100, NM_AT(current.strategyAttr.nrMigratePages, 0, 2));
     EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[2]);
@@ -2041,10 +2055,53 @@ TEST_F(MigrationTest, TestApplyUbBwStopMultipleNumaMixed)
     NM_AT(current.strategyAttr.nrMigratePages, 0, 3) = 50;
     NM_AT(current.strategyAttr.nrMigratePages, 3, 0) = 60;
 
+    PublishUbBwRestrict(&manager);
     ApplyUbBwStop(&current, &manager);
     /* ApplyUbBwStop only sets ubBwRestrict flag; nrMigratePages cleared by strategy layer */
     EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[1]);
     EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[3]);
+    FreeProcessAttrArrays(&current);
+}
+
+/* 节点被置为 SWAP_STOP 后关闭监控或查询失败：限制必须解除，不能沿用上一轮结果 */
+TEST_F(MigrationTest, TestApplyUbBwStopClearsAfterMonitorDisabledOrQueryFailed)
+{
+    ProcessAttr current = {};
+    struct ProcessManager manager;
+    memset(&manager, 0, sizeof(manager));
+    manager.ubBwMonitor.ubBwThreshold = 100;
+    manager.ubBwMonitor.currentFluxRet = 0;
+    manager.ubBwMonitor.currentFluxMb.len = 1;
+    manager.ubBwMonitor.currentFluxMb.flux[0].numaId = 2;
+    manager.ubBwMonitor.currentFluxMb.flux[0].readMb = 300;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    ASSERT_EQ(0, InitProcessAttrArrays(&current));
+
+    PublishUbBwRestrict(&manager);
+    ApplyUbBwStop(&current, &manager);
+    EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[2]);
+
+    manager.ubBwMonitor.ubBwThreshold = 0;
+    PublishUbBwRestrict(&manager);
+    ApplyUbBwStop(&current, &manager);
+    EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[2]);
+
+    manager.ubBwMonitor.ubBwThreshold = 100;
+    PublishUbBwRestrict(&manager);
+    ApplyUbBwStop(&current, &manager);
+    EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[2]);
+    manager.ubBwMonitor.currentFluxRet = -EIO;
+    PublishUbBwRestrict(&manager);
+    ApplyUbBwStop(&current, &manager);
+    EXPECT_EQ(UB_BW_NORMAL, current.strategyAttr.ubBwRestrict[2]);
+
+    /* len 超出数组上界时按 SMAP_MAX_NUMNODES 截断，不越界 */
+    manager.ubBwMonitor.currentFluxRet = 0;
+    manager.ubBwMonitor.currentFluxMb.len = SMAP_MAX_NUMNODES + 100;
+    PublishUbBwRestrict(&manager);
+    ApplyUbBwStop(&current, &manager);
+    EXPECT_EQ(UB_BW_SWAP_STOP, current.strategyAttr.ubBwRestrict[2]);
+
     FreeProcessAttrArrays(&current);
 }
 
