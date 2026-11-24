@@ -666,8 +666,15 @@ OUT:
     return ret;
 }
 
+/*
+ * 调用方持 attr 的 attrLock（或 attr 为私有候选）。pid 间仲裁与远端用量统计在 remoteNumaInfo.lock
+ * 内遍历各 pid 的 targetConfig/配置矩阵而不持其 attrLock，故整体替换按 attrLock → remoteNumaInfo.lock
+ * 持两把锁完成，避免仲裁读到 count 与 targets 不一致的中间态。
+ */
 void PublishProcessTargetCandidate(ProcessAttr *attr, const ProcessAttr *candidate)
 {
+    struct ProcessManager *manager = GetProcessManager();
+    EnvMutexLock(&manager->remoteNumaInfo.lock);
     ResetPidAdaptivePeriod(attr);
     attr->configEpoch++; /* 目标与本地观测整体替换：作废 worker 基于旧配置的快照派生结果 */
     attr->targetConfig = candidate->targetConfig;
@@ -701,6 +708,7 @@ void PublishProcessTargetCandidate(ProcessAttr *attr, const ProcessAttr *candida
     for (int i = 0; i < cap; i++) {
         attr->migrateParam[i] = candidate->migrateParam[i];
     }
+    EnvMutexUnlock(&manager->remoteNumaInfo.lock);
 }
 
 /*

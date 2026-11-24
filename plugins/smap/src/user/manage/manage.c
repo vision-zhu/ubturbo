@@ -2440,9 +2440,12 @@ static int ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *r
         PutProcessAttr(attr);
         return ret;
     }
+    /* 清账本与压缩目标须对 remoteNumaInfo.lock 内的 pid 间仲裁原子可见（锁序 attrLock → remoteNumaInfo.lock） */
+    EnvMutexLock(&g_processManager.remoteNumaInfo.lock);
     for (int i = 0; i < payload->count; i++) {
         RemoveManagedProcessRemoteNode(attr, payload->nid[i]);
     }
+    EnvMutexUnlock(&g_processManager.remoteNumaInfo.lock);
     /* 与 RemoveLeavesNoRemoteTarget 同一判定：pending 目标仍有远端时保留纳管 */
     bool noRemoteLeft = attr->remoteNumaCnt == 0 &&
                         (!attr->pendingTargetConfigValid || attr->pendingTargetConfig.count == 0);
