@@ -185,59 +185,66 @@ int AccessIoctlCreateProcfs(struct UserInfo *ui)
     return ret;
 }
 
-void IoctlUpdateUbDmaAvail(uint32_t value)
+int IoctlUpdateUbDmaAvail(uint32_t value)
 {
     struct ProcessManager *manager = GetProcessManager();
     uint32_t val = value;
 
     int ret = ioctl(manager->fds.migrate, SMAP_SET_UB_DMA_AVAIL, &val);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("ioctl update ub dma avail failed: %d, errno %d", ret, errno);
-        return;
+        ret = errno ? -errno : -EIO;
+        SMAP_LOGGER_ERROR("ioctl update ub dma avail failed: %d.", ret);
+        return ret;
     }
 
     SMAP_LOGGER_INFO("ioctl update ub dma avail: %u", val);
+    return 0;
 }
 
-void IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax)
+int IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax)
 {
     struct ProcessManager *manager = GetProcessManager();
     struct SmapScanCpuRange range = { cpuMin, cpuMax };
 
     int ret = ioctl(manager->fds.access, SMAP_ACCESS_SET_SCAN_CPU, &range);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("ioctl set scan cpu range failed: %d, errno %d.", ret, errno);
-        return;
+        ret = errno ? -errno : -EIO;
+        SMAP_LOGGER_ERROR("ioctl set scan cpu range failed: %d.", ret);
+        return ret;
     }
 
     SMAP_LOGGER_INFO("ioctl set scan cpu range=%u-%u", cpuMin, cpuMax);
+    return 0;
 }
 
-void IoctlSetRemoteScanMode(uint32_t mode)
+int IoctlSetRemoteScanMode(uint32_t mode)
 {
     struct ProcessManager *manager = GetProcessManager();
     int ret = ioctl(manager->fds.access, SMAP_IOCTL_SCAN_MODE_SET_CMD, mode);
 
     if (ret < 0) {
-        ret = -errno;
+        ret = errno ? -errno : -EIO;
         SMAP_LOGGER_ERROR("ioctl set remote scan mode failed: %s.", strerror(-ret));
-        return;
+        return ret;
     }
     SMAP_LOGGER_INFO("Set remote scan mode to %u success.", mode);
+    return 0;
 }
 
-void IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap)
+int IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap)
 {
     struct ProcessManager *manager = GetProcessManager();
     struct SmapSwapCfg cfg = { enable, l3ColdThreshold, hugetlbSwap };
 
     int ret = ioctl(manager->fds.access, SMAP_IOCTL_SWAP_CONFIG_CMD, &cfg);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("ioctl set swap config failed: %s.", strerror(errno));
-        return;
+        ret = errno ? -errno : -EIO;
+        SMAP_LOGGER_ERROR("ioctl set swap config failed: %s.", strerror(-ret));
+        return ret;
     }
     SMAP_LOGGER_INFO("Set swap config: enable=%u, l3ColdThreshold=%u, hugetlbSwap=%u.", enable, l3ColdThreshold,
                      hugetlbSwap);
+    return 0;
 }
 
 int AccessIoctlRestartPid(pid_t pid)

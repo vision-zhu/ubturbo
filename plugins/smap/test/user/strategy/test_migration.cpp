@@ -18,7 +18,7 @@
 extern "C" int CalcDurationUs(struct timeval start, struct timeval end);
 extern "C" void ApplyUbBwStop(ProcessAttr *current, struct ProcessManager *manager);
 extern "C" int AccessIoctlAddPid(int len, struct AccessAddPidPayload *payload);
-extern "C" void IoctlUpdateUbDmaAvail(uint32_t value);
+extern "C" int IoctlUpdateUbDmaAvail(uint32_t value);
 extern "C" uint32_t g_pageSizeHuge;
 #include "manage/thread.h"
 #include "strategy/migration.h"
@@ -1832,17 +1832,17 @@ TEST_F(MigrationTest, TestUpdateMigResultEight)
 }
 
 extern "C" void MigrationUpdateMigrateModeAndScanCpu(void);
-extern "C" void IoctlUpdateUbDmaAvail(uint32_t value);
-extern "C" void IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
+extern "C" int IoctlUpdateUbDmaAvail(uint32_t value);
+extern "C" int IoctlSetScanCpuRange(uint32_t cpuMin, uint32_t cpuMax);
 extern "C" bool GetRemoteScanModeChanged(void);
 extern "C" uint32_t GetRemoteScanModeConfig(void);
 extern "C" void SetRemoteScanModeChanged(bool val);
-extern "C" void IoctlSetRemoteScanMode(uint32_t mode);
+extern "C" int IoctlSetRemoteScanMode(uint32_t mode);
 TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuMigrateModeChanged)
 {
     MOCKER(GetMigrateModeChanged).stubs().will(returnValue(true));
     MOCKER(GetMigrateModeConfig).stubs().will(returnValue((uint32_t)2));
-    MOCKER(IoctlUpdateUbDmaAvail).stubs().will(ignoreReturnValue());
+    MOCKER(IoctlUpdateUbDmaAvail).stubs().will(returnValue(0));
     MOCKER(SetMigrateModeChanged).stubs().will(ignoreReturnValue());
     MOCKER(GetScanCpuChanged).stubs().will(returnValue(false));
     MOCKER(GetRemoteScanModeChanged).stubs().will(returnValue(false));
@@ -1855,7 +1855,7 @@ TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuScanCpuChanged)
     MOCKER(GetScanCpuChanged).stubs().will(returnValue(true));
     MOCKER(GetScanCpuMinConfig).stubs().will(returnValue((uint32_t)1));
     MOCKER(GetScanCpuMaxConfig).stubs().will(returnValue((uint32_t)3));
-    MOCKER(IoctlSetScanCpuRange).stubs().will(ignoreReturnValue());
+    MOCKER(IoctlSetScanCpuRange).stubs().will(returnValue(0));
     MOCKER(SetScanCpuChanged).stubs().will(ignoreReturnValue());
     MOCKER(GetRemoteScanModeChanged).stubs().will(returnValue(false));
 
@@ -1867,7 +1867,7 @@ TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuRemoteScanModeChanged)
     MOCKER(GetScanCpuChanged).stubs().will(returnValue(false));
     MOCKER(GetRemoteScanModeChanged).stubs().will(returnValue(true));
     MOCKER(GetRemoteScanModeConfig).stubs().will(returnValue((uint32_t)2));
-    MOCKER(IoctlSetRemoteScanMode).stubs().will(ignoreReturnValue());
+    MOCKER(IoctlSetRemoteScanMode).stubs().will(returnValue(0));
     MOCKER(SetRemoteScanModeChanged).stubs().will(ignoreReturnValue());
 
     MigrationUpdateMigrateModeAndScanCpu();
@@ -1889,7 +1889,7 @@ extern "C" uint32_t GetL3ColdThresholdConfig(void);
 extern "C" bool GetHugetlbSwapSupported(void);
 extern "C" void SetSwapEnableChanged(bool val);
 extern "C" void SetL3ColdThresholdChanged(bool val);
-extern "C" void IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap);
+extern "C" int IoctlSetSwapConfig(uint32_t enable, uint32_t l3ColdThreshold, uint32_t hugetlbSwap);
 
 TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuSwapOffStillDelivered)
 {
@@ -1905,9 +1905,38 @@ TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuSwapOffStillDelivered)
     // the staged cold pages, and swap_enable outlives the daemon
     MOCKER(IoctlSetSwapConfig)
         .expects(once())
-        .with(eq((uint32_t)0), eq((uint32_t)30), eq((uint32_t)0));
+        .with(eq((uint32_t)0), eq((uint32_t)30), eq((uint32_t)0))
+        .will(returnValue(0));
     MOCKER(SetSwapEnableChanged).stubs().will(ignoreReturnValue());
     MOCKER(SetL3ColdThresholdChanged).stubs().will(ignoreReturnValue());
+
+    MigrationUpdateMigrateModeAndScanCpu();
+}
+
+/* 下发失败时保留 Changed 标志，下一个 daemon 周期重试 */
+TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuKeepsChangedOnIoctlFailure)
+{
+    MOCKER(GetMigrateModeChanged).stubs().will(returnValue(true));
+    MOCKER(GetMigrateModeConfig).stubs().will(returnValue((uint32_t)2));
+    MOCKER(IoctlUpdateUbDmaAvail).stubs().will(returnValue(-EBUSY));
+    MOCKER(SetMigrateModeChanged).expects(never());
+    MOCKER(GetScanCpuChanged).stubs().will(returnValue(true));
+    MOCKER(GetScanCpuMinConfig).stubs().will(returnValue((uint32_t)1));
+    MOCKER(GetScanCpuMaxConfig).stubs().will(returnValue((uint32_t)3));
+    MOCKER(IoctlSetScanCpuRange).stubs().will(returnValue(-EINTR));
+    MOCKER(SetScanCpuChanged).expects(never());
+    MOCKER(GetRemoteScanModeChanged).stubs().will(returnValue(true));
+    MOCKER(GetRemoteScanModeConfig).stubs().will(returnValue((uint32_t)2));
+    MOCKER(IoctlSetRemoteScanMode).stubs().will(returnValue(-EIO));
+    MOCKER(SetRemoteScanModeChanged).expects(never());
+    MOCKER(GetSwapEnableChanged).stubs().will(returnValue(true));
+    MOCKER(GetL3ColdThresholdChanged).stubs().will(returnValue(false));
+    MOCKER(GetSwapEnableConfig).stubs().will(returnValue(false));
+    MOCKER(GetL3ColdThresholdConfig).stubs().will(returnValue((uint32_t)30));
+    MOCKER(GetHugetlbSwapSupported).stubs().will(returnValue(false));
+    MOCKER(IoctlSetSwapConfig).stubs().will(returnValue(-EBUSY));
+    MOCKER(SetSwapEnableChanged).expects(never());
+    MOCKER(SetL3ColdThresholdChanged).expects(never());
 
     MigrationUpdateMigrateModeAndScanCpu();
 }
