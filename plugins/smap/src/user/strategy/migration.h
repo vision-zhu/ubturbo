@@ -43,6 +43,8 @@ void UpdateMigResult(struct MigrateMsg *mMsg, struct ProcessManager *manager);
 int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager);
 
 int ManagerDaemonWork(struct ProcessManager *manager);
+/* 把 UB 带宽限制快照恢复为 NORMAL（start/stop 与无纳管 pid 时调用） */
+void ResetUbBwRestrict(void);
 void PidMigrationWork(struct ProcessManager *manager, struct PidSlot *slot, pid_t pid);
 
 int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg *msg);
