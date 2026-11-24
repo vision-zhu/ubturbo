@@ -63,6 +63,18 @@ static EnvMutex g_lifecycleLock = { PTHREAD_MUTEX_INITIALIZER };
  */
 static EnvMutex g_manageLock = { PTHREAD_MUTEX_INITIALIZER };
 
+/* worker 侧会改变内核跟踪/纳管集合的收尾动作（应用 grouped pending、自动移除）与上述接口串行；
+ * 只 trylock，接口正在执行时由调用方推迟到下一周期，worker 不阻塞在接口的长操作上 */
+bool SmapManageTryLock(void)
+{
+    return EnvMutexTryLock(&g_manageLock) == 0;
+}
+
+void SmapManageUnlock(void)
+{
+    EnvMutexUnlock(&g_manageLock);
+}
+
 #define STOP_DRAIN_POLL_MS 10
 #define STOP_DRAIN_LOG_INTERVAL_MS 1000
 

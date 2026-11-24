@@ -948,10 +948,10 @@ static void ResetGroupedSwapRuntimeLocked(ProcessAttr *process, bool freeze)
 }
 
 /* 对 grouped 运行态的写入与 IPC 线程整体覆写 groupPolicy 互斥：持该进程 slot 的 attrLock。
- * attr 未发布到槽表（单测）时 slot 为 NULL，退化为直接写。 */
+ * worker 持有槽位引用，按 attr 定位（不要求 INUSE）；attr 未发布到槽表（单测）时 slot 为 NULL，退化为直接写。 */
 static struct PidSlot *GroupedAttrLock(ProcessAttr *process)
 {
-    struct PidSlot *slot = PidSlotGetRefByAttr(process);
+    struct PidSlot *slot = PidSlotFindHeldByAttr(process);
     if (slot) {
         EnvMutexLock(&slot->attrLock);
     }
@@ -962,7 +962,6 @@ static void GroupedAttrUnlock(struct PidSlot *slot)
 {
     if (slot) {
         EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
     }
 }
 

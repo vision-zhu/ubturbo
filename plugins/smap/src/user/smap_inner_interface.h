@@ -44,6 +44,9 @@ struct VmRatioMsg {
 bool SmapApiEnter(void);
 void SmapApiExit(void);
 bool SmapStopRequested(void);
+/* g_manageLock（纳管集合变更锁）的 worker 侧入口：返回 true 表示已加锁，须配对 SmapManageUnlock */
+bool SmapManageTryLock(void);
+void SmapManageUnlock(void);
 
 int SmapEnableAdaptMem(int flag);
 int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg);

@@ -1214,11 +1214,12 @@ int RegisterFreqWaiter(ProcessAttr *attr, struct FreqWaiter *w)
  * 不会出现"已 take 但未 post"的中间态。
  */
 /*
- * 按 attr 定位宿主槽位，不要求 INUSE：调用方已持有该槽位引用（GetProcessAttr），
- * 槽位在引用归还前不会被回收，attr 指针稳定。槽位进入 REMOVING 后
- * PidSlotGetRefByAttr 取不到引用，但等待者仍挂在链表上，必须仍能摘除。
+ * 按 attr 定位宿主槽位，不要求 INUSE、不取引用：调用方已持有该槽位引用（GetProcessAttr /
+ * worker 流水的槽位引用），槽位在引用归还前不会被回收，attr 指针稳定。槽位进入 REMOVING 后
+ * PidSlotGetRefByAttr 取不到引用，但持有者仍须能加 attrLock 并据 state 识别「已被移除」
+ * （等待者摘除、worker 收尾放弃 pending 等）。返回 NULL 仅表示 attr 未注册进槽表（单测）。
  */
-static struct PidSlot *PidSlotFindHeldByAttr(const ProcessAttr *attr)
+struct PidSlot *PidSlotFindHeldByAttr(const ProcessAttr *attr)
 {
     for (int i = 0; i < MAX_PID_SLOTS; i++) {
         struct PidSlot *s = &g_processManager.slots[i];

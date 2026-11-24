@@ -909,7 +909,8 @@ int GroupedMigrationStrategy(ProcessAttr *process, struct MigList *mlist)
         free(work);
         return -ENOMEM;
     }
-    struct PidSlot *slot = PidSlotGetRefByAttr(process);
+    /* worker 持有槽位引用：不要求 INUSE，pid 被移除后仍与其它写者持同一把锁 */
+    struct PidSlot *slot = PidSlotFindHeldByAttr(process);
     if (slot) {
         EnvMutexLock(&slot->attrLock);
     }
@@ -945,9 +946,6 @@ int GroupedMigrationStrategy(ProcessAttr *process, struct MigList *mlist)
         EnvMutexUnlock(&slot->attrLock);
     }
 OUT:
-    if (slot) {
-        PidSlotReleaseRefs(&slot, 1);
-    }
     free(orig);
     free(work);
     return ret;

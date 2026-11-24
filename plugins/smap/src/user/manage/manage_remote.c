@@ -838,15 +838,24 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
         return 0;
     }
 
-    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
+    /* worker 持有槽位引用：按 attr 定位（不要求 INUSE），槽位被移除后仍能识别并放弃 pending；
+     * NULL 仅见于 attr 未注册进槽表的单测，无并发写者 */
+    struct PidSlot *slot = PidSlotFindHeldByAttr(attr);
     if (slot) {
         EnvMutexLock(&slot->attrLock);
     }
     if (!attr->pendingTargetConfigValid) {
         if (slot) {
             EnvMutexUnlock(&slot->attrLock);
-            PidSlotReleaseRefs(&slot, 1);
         }
+        return 0;
+    }
+    if (slot && EnvAtomicRead(&slot->state) != PID_SLOT_INUSE) {
+        ClearProcessTargetConfig(&attr->pendingTargetConfig);
+        attr->pendingTargetConfigValid = false;
+        attr->pendingIgnoreRemoteCapacity = false;
+        EnvMutexUnlock(&slot->attrLock);
+        SMAP_LOGGER_INFO("Pid %d removed, drop its pending migration target.", attr->pid);
         return 0;
     }
     ProcessTargetConfig config = attr->pendingTargetConfig;
@@ -859,9 +868,6 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
         EnvMutexUnlock(&slot->attrLock);
     }
     if (ret) {
-        if (slot) {
-            PidSlotReleaseRefs(&slot, 1);
-        }
         return ret;
     }
     ManagedLocalObservation observation;
@@ -873,9 +879,6 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
     }
     if (ret) {
         FreeTargetCandidate(&candidate);
-        if (slot) {
-            PidSlotReleaseRefs(&slot, 1);
-        }
         return ret;
     }
 
@@ -901,7 +904,6 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
     }
     if (slot) {
         EnvMutexUnlock(&slot->attrLock);
-        PidSlotReleaseRefs(&slot, 1);
     }
     FreeTargetCandidate(&candidate);
     ret = SyncAllProcessConfig();

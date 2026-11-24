@@ -104,6 +104,12 @@ static inline void EnvMutexUnlock(EnvMutex *mutex)
     pthread_mutex_unlock(&mutex->lock);
 }
 
+/* 返回 0 表示已加锁，非 0（EBUSY 等）表示未加锁 */
+static inline int EnvMutexTryLock(EnvMutex *mutex)
+{
+    return pthread_mutex_trylock(&mutex->lock);
+}
+
 /* COND */
 typedef struct {
     pthread_cond_t cond;
