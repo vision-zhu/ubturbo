@@ -1444,7 +1444,14 @@ int AddProcess(ProcessParam *param, PidType type)
     /* managedLocalMask 是 uint32_t 本地位掩码，需按位展开写入 256-bit NumaBitmap */
     NumaBitmapFromMask32(&attr->numaAttr.numaNodes, attr->managedLocalState.managedLocalMask);
     attr->scanTime = DEFAULT_SCAN_PERIOD;
-    PidSlotAdd(&g_processManager, attr);
+    ret = PidSlotAdd(&g_processManager, attr);
+    if (ret < 0) {
+        /* 无空闲槽位（REMOVING 槽位仍被引用占位）或 pid 已纳管：attr 未发布，由此释放 */
+        SMAP_LOGGER_ERROR("Add pid %d to slot failed: %d.", param->pid, ret);
+        FreeProcessAttrArrays(attr);
+        free(attr);
+        return ret;
+    }
     SMAP_LOGGER_INFO("Set pid %d scan cycle to %ums.", attr->pid, attr->scanTime);
 
     ret = SyncAllProcessConfig();
@@ -1568,10 +1575,10 @@ int PrepareProcessManageCandidate(ProcessParam *param, PidType type, ProcessMana
     return 0;
 }
 
-void PublishProcessManageCandidate(ProcessManageCandidate *candidate)
+int PublishProcessManageCandidate(ProcessManageCandidate *candidate)
 {
     if (!candidate || !candidate->prepared) {
-        return;
+        return -EINVAL;
     }
 
     ProcessAttr *prepared = candidate->prepared;
@@ -1599,11 +1606,17 @@ void PublishProcessManageCandidate(ProcessManageCandidate *candidate)
         SMAP_LOGGER_INFO("Stage pid %d migration target update.", prepared->pid);
         PutProcessAttr(candidate->active);
         DiscardProcessManageCandidate(candidate);
-        return;
+        return 0;
     }
 
     if (candidate->isNew) {
-        PidSlotAdd(&g_processManager, prepared);
+        int addRet = PidSlotAdd(&g_processManager, prepared);
+        if (addRet < 0) {
+            /* 未发布：prepared 仍归候选所有，由 Discard 释放；计数未变 */
+            SMAP_LOGGER_ERROR("Add pid %d to list failed: %d.", prepared->pid, addRet);
+            DiscardProcessManageCandidate(candidate);
+            return addRet;
+        }
         candidate->prepared = NULL;
         SMAP_LOGGER_INFO("Add pid %d to list done.", prepared->pid);
     } else {
@@ -1617,6 +1630,7 @@ void PublishProcessManageCandidate(ProcessManageCandidate *candidate)
     }
     PutProcessAttr(candidate->active);
     DiscardProcessManageCandidate(candidate);
+    return 0;
 }
 
 int SetLocalNumaByCpu(pid_t pid, uint32_t *nodeBitmap)

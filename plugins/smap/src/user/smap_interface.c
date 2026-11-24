@@ -1117,21 +1117,42 @@ static int TrackMigrateOutCandidates(ProcessManageCandidate *candidates, int cou
     return ret;
 }
 
-static void PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int count)
+static int PublishMigrateOutCandidates(ProcessManageCandidate *candidates, int count)
 {
+    int firstError = 0;
     for (int i = 0; i < count; i++) {
         ProcessAttr *prepared = candidates[i].prepared;
-        bool registerEvent = prepared && candidates[i].isNew && prepared->scanType == NORMAL_SCAN;
-        pid_t pid = registerEvent ? prepared->pid : 0;
+        if (!prepared) {
+            continue;
+        }
+        bool isNew = candidates[i].isNew;
+        bool registerEvent = isNew && prepared->scanType == NORMAL_SCAN;
+        pid_t pid = prepared->pid;
 
-        PublishProcessManageCandidate(&candidates[i]);
+        int ret = PublishProcessManageCandidate(&candidates[i]);
+        if (ret) {
+            SMAP_LOGGER_ERROR("Publish pid %d failed: %d.", pid, ret);
+            if (firstError == 0) {
+                firstError = ret;
+            }
+            if (isNew) {
+                /* 新 pid 已由 TrackMigrateOutCandidates 加入内核跟踪，用户态未纳管则回滚 */
+                struct AccessRemovePidPayload payload = { .pid = pid };
+                int rmRet = AccessIoctlRemovePid(1, &payload);
+                if (rmRet) {
+                    SMAP_LOGGER_WARNING("Rollback tracking of pid %d failed: %d.", pid, rmRet);
+                }
+            }
+            continue;
+        }
         if (registerEvent) {
-            int ret = EventLoopRegisterPid(pid);
-            if (ret) {
-                SMAP_LOGGER_WARNING("Register migration event for pid %d failed: %d.", pid, ret);
+            int regRet = EventLoopRegisterPid(pid);
+            if (regRet) {
+                SMAP_LOGGER_WARNING("Register migration event for pid %d failed: %d.", pid, regRet);
             }
         }
     }
+    return firstError;
 }
 
 static int MigrateOutWithCapacityPolicyLocked(struct MigrateOutMsg *msg, int pageType, bool ignoreRemoteCapacity)
@@ -1164,9 +1185,9 @@ static int MigrateOutWithCapacityPolicyLocked(struct MigrateOutMsg *msg, int pag
         return ret;
     }
 
-    PublishMigrateOutCandidates(candidates, msg->count);
+    int publishError = PublishMigrateOutCandidates(candidates, msg->count);
 
-    return prepareError;
+    return prepareError ? prepareError : publishError;
 }
 
 static int MigrateOutWithCapacityPolicy(struct MigrateOutMsg *msg, int pageType, bool ignoreRemoteCapacity)
