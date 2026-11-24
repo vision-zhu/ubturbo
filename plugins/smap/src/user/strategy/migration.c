@@ -36,6 +36,8 @@
 
 #define MAX_MIG_ADDR_PRINT_LEN 2
 #define MAX_GROUP_SWAP_COMP_PLANS (MAX_2M_PROCESSES_CNT * MAX_PER_PID_MIG_LIST_COUNT)
+/* 内核单条迁移列表的页数上限（smap_migrate_pages.h MAX_MIG_LIST_NR），超过则整个 ioctl 返回 -EINVAL */
+#define KERNEL_MAX_MIG_LIST_NR (1ULL << 28)
 
 typedef struct {
     pid_t pid;
@@ -58,7 +60,6 @@ typedef struct {
 
 static int AddMigListCapped(struct MigrateMsg *mMsg, struct MigList *mList, int cap)
 {
-    int i;
     if (!mMsg || !mList) {
         return 0;
     }
@@ -70,7 +71,13 @@ static int AddMigListCapped(struct MigrateMsg *mMsg, struct MigList *mList, int 
         return -ENOSPC;
     }
     SMAP_LOGGER_DEBUG("mList->nr: %lu.", mList->nr);
-    mMsg->migList[mMsg->cnt].addr = malloc(sizeof(uint64_t) * mList->nr);
+    /* 超出内核单条上限的部分本周期不下发，剩余量由下一周期重新规划 */
+    uint64_t nr = MIN(mList->nr, KERNEL_MAX_MIG_LIST_NR);
+    if (nr < mList->nr) {
+        SMAP_LOGGER_WARNING("Pid %d migration %d -> %d truncated from %llu to %llu pages.", mList->pid, mList->from,
+                            mList->to, mList->nr, nr);
+    }
+    mMsg->migList[mMsg->cnt].addr = malloc(sizeof(uint64_t) * nr);
     if (!mMsg->migList[mMsg->cnt].addr) {
         SMAP_LOGGER_ERROR("migList->addr malloc failed.");
         return -ENOMEM;
@@ -78,8 +85,8 @@ static int AddMigListCapped(struct MigrateMsg *mMsg, struct MigList *mList, int 
     mMsg->migList[mMsg->cnt].from = mList->from;
     mMsg->migList[mMsg->cnt].to = mList->to;
     mMsg->migList[mMsg->cnt].pid = mList->pid;
-    mMsg->migList[mMsg->cnt].nr = mList->nr;
-    for (i = 0; i < mList->nr; i++) {
+    mMsg->migList[mMsg->cnt].nr = nr;
+    for (uint64_t i = 0; i < nr; i++) {
         mMsg->migList[mMsg->cnt].addr[i] = mList->addr[i];
     }
     mMsg->cnt++;
@@ -791,8 +798,8 @@ static int BuildMigrationMsg(ProcessAttr *process, struct MigrateMsg *mMsg, uint
                 DestroyMigListMatrix(migList);
                 return ret;
             }
-            nrMigTotal += cells[c]->nr;
-            SMAP_LOGGER_INFO("Numa %d --> Numa %d, mig %d pages.", cells[c]->from, cells[c]->to, cells[c]->nr);
+            nrMigTotal += MIN(cells[c]->nr, KERNEL_MAX_MIG_LIST_NR);
+            SMAP_LOGGER_INFO("Numa %d --> Numa %d, mig %llu pages.", cells[c]->from, cells[c]->to, cells[c]->nr);
         }
     }
     if (deferred) {
