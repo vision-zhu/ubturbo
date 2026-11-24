@@ -347,7 +347,8 @@ TEST_F(InterfaceTest, TestInitAllThreadsProcessMode)
     EXPECT_EQ(0, ret);
 }
 
-extern "C" bool IsNidInNumastat(int nid);
+extern "C" bool IsNidOnline(int nid);
+extern "C" bool IsNidInNodeList(const char *list, int nid);
 extern "C" bool IsRemoteNidValid(int nid);
 extern "C" bool IsOnlineRemoteNidValid(int nid);
 TEST_F(InterfaceTest, IsRemoteNidValid)
@@ -391,45 +392,30 @@ TEST_F(InterfaceTest, IsRemoteNidValidThree)
     EXPECT_EQ(false, ret);
 }
 
-TEST_F(InterfaceTest, IsNidInNumastat)
+TEST_F(InterfaceTest, IsNidInNodeList)
 {
-    bool ret;
-    int nid = 0;
-    MOCKER(popen).stubs().will(returnValue(static_cast<FILE *>(nullptr)));
-    ret = IsNidInNumastat(nid);
-    EXPECT_EQ(false, ret);
+    /* 精确数值匹配：节点 1 离线、10/11 在线时不得把 1 判为在线 */
+    EXPECT_FALSE(IsNidInNodeList("0,10-11\n", 1));
+    EXPECT_TRUE(IsNidInNodeList("0,10-11\n", 0));
+    EXPECT_TRUE(IsNidInNodeList("0,10-11\n", 10));
+    EXPECT_TRUE(IsNidInNodeList("0,10-11\n", 11));
+    EXPECT_FALSE(IsNidInNodeList("0,10-11\n", 12));
+    EXPECT_TRUE(IsNidInNodeList("0-3\n", 2));
+    EXPECT_FALSE(IsNidInNodeList("", 0));
+    EXPECT_FALSE(IsNidInNodeList("abc", 0));
 }
 
-TEST_F(InterfaceTest, IsNidInNumastatOne)
+TEST_F(InterfaceTest, IsNidOnlineInvalid)
 {
-    bool ret;
-    int nid = -1;
-    ret = IsNidInNumastat(nid);
-    EXPECT_EQ(false, ret);
+    EXPECT_FALSE(IsNidOnline(-1));
+    MOCKER(fopen).stubs().will(returnValue(static_cast<FILE *>(nullptr)));
+    EXPECT_FALSE(IsNidOnline(0));
 }
 
-TEST_F(InterfaceTest, IsNidInNumastatTrue)
+TEST_F(InterfaceTest, IsNidOnlineNodeZero)
 {
-    bool ret;
-    FILE fp;
-    const char *stubNodeStr = "Node 0";
-    const char *stubCmdline = "Node 0          Node 1           Total";
-    char *nodeStr = (char *)calloc(1, strlen(stubNodeStr) + 1);
-    char *cmdline = (char *)calloc(1, strlen(stubCmdline) + 1);
-
-    memcpy(nodeStr, stubNodeStr, strlen(stubNodeStr));
-    memcpy(cmdline, stubCmdline, strlen(stubCmdline));
-
-    MOCKER((int (*)(char *, unsigned long, unsigned long, char const *, void *))snprintf_s)
-        .stubs()
-        .with(outBoundP(static_cast<char *>(nodeStr), sizeof(nodeStr)))
-        .will(returnValue(0));
-    MOCKER(fgets).stubs().with(outBoundP(static_cast<char *>(cmdline), sizeof(cmdline))).will(returnValue(cmdline));
-
-    ret = IsNidInNumastat(0);
-    EXPECT_EQ(true, ret);
-    free(nodeStr);
-    free(cmdline);
+    /* 运行 UT 的主机至少有节点 0 在线 */
+    EXPECT_TRUE(IsNidOnline(0));
 }
 
 extern "C" bool IsMigParaValid(struct MigrateOutPayload *payload);
@@ -740,7 +726,7 @@ TEST_F(InterfaceTest, TestCheckMigrateOutMsgInvalidDestNid)
     g_processManager.nr[VM_TYPE] = 0;
     g_processManager.nrLocalNuma = 4;
 
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(GetPidTypeFromComm).stubs().will(returnValue((int)VM_TYPE));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)true));
 
@@ -775,7 +761,7 @@ TEST_F(InterfaceTest, TestCheckMigrateOutMsgInvalidMigrateMode)
     processes.numaAttr.numaNodes = BmFromWord(0x10);
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots)); PidSlotAdd(&g_processManager, &processes);
 
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(IsNodeForbidden).stubs().will(returnValue(true));
     MOCKER(GetPidTypeFromComm).stubs().will(returnValue((int)VM_TYPE));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)true));
@@ -2950,7 +2936,7 @@ TEST_F(InterfaceTest, CheckMigrateNumaMsgFail)
     EXPECT_EQ(-EINVAL, ret);
 
     // src is invalid 1
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     msg.srcNid = 1;
     g_processManager.nrLocalNuma = 4;
     ret = CheckMigrateNumaMsg(&msg);
@@ -3001,7 +2987,7 @@ TEST_F(InterfaceTest, CheckMigrateNumaMsgSuccess)
     msg.destNid = 6;
     msg.count = 1;
     g_processManager.nrLocalNuma = 4;
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(IsRemoteNumaMoveAllowed).stubs().will(returnValue(1));
     int ret = CheckMigrateNumaMsg(&msg);
     EXPECT_EQ(0, ret);
@@ -3207,7 +3193,7 @@ TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvaliDestNid)
 
     EnvAtomicSet(&g_status, 1);
     g_processManager.nrLocalNuma = 4;
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     // destnid less than nrLocalNuma
     int ret = ubturbo_smap_pid_remote_numa_migrate(&msg);
     EXPECT_EQ(-EINVAL, ret);
@@ -3227,7 +3213,7 @@ TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvalidLenPid)
     msg.payload[0].srcNid = 4;
     msg.payload[0].destNid = 5;
     EnvAtomicSet(&g_status, 1);
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     // len = 0
     int ret = ubturbo_smap_pid_remote_numa_migrate(&msg);
     EXPECT_EQ(-EINVAL, ret);
@@ -3258,7 +3244,7 @@ TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaInvalidScan)
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots)); PidSlotAdd(&g_processManager, &attr);
 
     EnvAtomicSet(&g_status, 1);
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(PidIsValid).stubs().will(returnValue(true));
 
     int ret = ubturbo_smap_pid_remote_numa_migrate(&msg);
@@ -3282,7 +3268,7 @@ TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrRemoteNumaMatchFail)
     memset(&g_processManager.slots, 0, sizeof(g_processManager.slots)); PidSlotAdd(&g_processManager, &attr);
 
     EnvAtomicSet(&g_status, 1);
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(PidIsValid).stubs().will(returnValue(true));
 
     // 0b01100000 not eq 4 5
@@ -3311,7 +3297,7 @@ TEST_F(InterfaceTest, TestSmapMigratePidRemoteNumaIsPidArrIsPidArrInStateFail)
     PidSlotAdd(&g_processManager, &attr);
 
     EnvAtomicSet(&g_status, 1);
-    MOCKER(IsNidInNumastat).stubs().will(returnValue(true));
+    MOCKER(IsNidOnline).stubs().will(returnValue(true));
     MOCKER(PidIsValid).stubs().will(returnValue(true));
 
     int ret = ubturbo_smap_pid_remote_numa_migrate(&msg);

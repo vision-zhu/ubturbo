@@ -232,52 +232,70 @@ static bool IsLocalNidValid(int nid)
     return true;
 }
 
-static bool IsNidInNumastat(int nid)
-{
-    int ret;
-    FILE *fp;
-    char line[MAX_LINE_LENGTH];
-    int nodeExists = 0;
-    char nodeStr[DEFAULT_NODE_NUMBER_SIZE];
+#define NODE_ONLINE_PATH "/sys/devices/system/node/online"
+#define NODE_LIST_BUF_LEN 4096
+#define DECIMAL_BASE 10
 
+/*
+ * 判断 nid 是否在内核节点列表（如 "0-3,5,10-11"）中，精确按数值比较。
+ * 原 numastat 方案用 strstr("Node 1") 匹配表头，会被 "Node 10".."Node 19" 误命中。
+ */
+static bool IsNidInNodeList(const char *list, int nid)
+{
+    const char *p = list;
+    while (p != NULL && *p != '\0' && *p != '\n') {
+        char *end = NULL;
+        errno = 0;
+        long first = strtol(p, &end, DECIMAL_BASE);
+        if (end == p || errno != 0) {
+            return false;
+        }
+        long last = first;
+        p = end;
+        if (*p == '-') {
+            p++;
+            last = strtol(p, &end, DECIMAL_BASE);
+            if (end == p || errno != 0) {
+                return false;
+            }
+            p = end;
+        }
+        if (nid >= first && nid <= last) {
+            return true;
+        }
+        if (*p != ',') {
+            break;
+        }
+        p++;
+    }
+    return false;
+}
+
+/* 读取 sysfs 在线节点列表判断 nid 是否在线，替代每次 fork/exec numastat */
+static bool IsNidOnline(int nid)
+{
     if (nid < 0) {
         return false;
     }
-
-    fp = popen("numastat -cvm", "r");
+    FILE *fp = fopen(NODE_ONLINE_PATH, "r");
     if (fp == NULL) {
-        SMAP_LOGGER_ERROR("Failed to execute numastat.");
+        SMAP_LOGGER_ERROR("Open %s failed: %d.", NODE_ONLINE_PATH, errno);
         return false;
     }
-
-    ret = snprintf_s(nodeStr, sizeof(nodeStr), (DEFAULT_NODE_NUMBER_SIZE - 1), "Node %d", nid);
-    if (ret < 0) {
-        SMAP_LOGGER_ERROR("Error: snprintf failed.");
-        pclose(fp);
-        return false;
-    }
-
-    while (fgets(line, MAX_LINE_LENGTH, fp) != NULL) {
-        if (strstr(line, nodeStr) != NULL) {
-            SMAP_LOGGER_INFO("numastat info: %s.", line);
-            nodeExists = 1;
-            break;
-        }
-    }
-
-    pclose(fp);
-
-    return nodeExists == 1;
+    char list[NODE_LIST_BUF_LEN];
+    bool online = fgets(list, sizeof(list), fp) != NULL && IsNidInNodeList(list, nid);
+    (void)fclose(fp);
+    return online;
 }
 
-/* Validate that a remote nid is in range and currently visible in numastat. */
+/* Validate that a remote nid is in range and currently online. */
 static bool IsOnlineRemoteNidValid(int nid)
 {
     if (!IsRemoteNidValid(nid)) {
         return false;
     }
 
-    return IsNidInNumastat(nid);
+    return IsNidOnline(nid);
 }
 
 static bool IsPidArrValid(pid_t *pidArr, int len, bool ignoreUnmanaged)
