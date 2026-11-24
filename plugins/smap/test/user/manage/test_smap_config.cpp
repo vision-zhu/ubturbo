@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 #include "gtest/gtest.h"
@@ -53,7 +54,7 @@ static ProcessAttr *PmNthAttr(struct ProcessManager *pm, int n)
     return nullptr;
 }
 
-/* 按运行期 cap 构造一条 V3 序列化记录（定长头 + 变长位图 + 目标数组），返回记录字节数 */
+/* 按运行期 cap 构造一条当前格式（V4）序列化记录（定长头 + 变长位图 + 目标数组），返回记录字节数 */
 static size_t BuildV3Record(char *buf, pid_t pid, uint8_t scanType, uint8_t type, uint8_t state,
                             uint8_t migrateMode, uint32_t scanTime, const int *bits, int nrBits,
                             const struct PersistRemoteTarget *targets, int nrTargets)
@@ -83,6 +84,9 @@ static size_t BuildV3Record(char *buf, pid_t pid, uint8_t scanType, uint8_t type
     return CONFIG_PROC_HEADER_LEN + (size_t)nrWords * sizeof(unsigned long) +
            (size_t)nrTargets * sizeof(struct PersistRemoteTarget);
 }
+
+/* 当前格式（V4）记录、无文件时间：不做 pid 复用判定，保持原有用例语义 */
+static const struct ConfigRecoverCtx kCurRecoverCtx = { CONFIG_PROC_HEADER_LEN, 0 };
 
 class SmapConfigTest : public ::testing::Test {
 protected:
@@ -586,7 +590,7 @@ TEST_F(SmapConfigTest, TestPersistedRemoteNidBeyondCapRejected)
 }
 
 extern "C" size_t CalcNumaConfigLen(void);
-extern "C" bool IsProcessConfigValid(char *processBase, size_t totalLen);
+extern "C" bool IsProcessConfigValid(char *processBase, size_t totalLen, size_t recHeaderLen);
 TEST_F(SmapConfigTest, TestIsProcessConfigValid)
 {
     size_t numaConfigLen = 10;
@@ -603,10 +607,10 @@ TEST_F(SmapConfigTest, TestIsProcessConfigValid)
     ph->count = 0;
 
     size_t totalLen = (size_t)header->len + PAYLOAD_HEADER_LEN + CONFIG_HEADER_LEN + numaConfigLen;
-    EXPECT_TRUE(IsProcessConfigValid(buf, totalLen));
+    EXPECT_TRUE(IsProcessConfigValid(buf, totalLen, CONFIG_PROC_HEADER_LEN));
 
     header->len--;
-    EXPECT_FALSE(IsProcessConfigValid(buf, totalLen));
+    EXPECT_FALSE(IsProcessConfigValid(buf, totalLen, CONFIG_PROC_HEADER_LEN));
     free(buf);
 }
 
@@ -627,7 +631,7 @@ TEST_F(SmapConfigTest, TestHasProcessConfig)
 }
 
 extern "C" char *JumpToProcessPayload(char *processBase);
-extern "C" int RecoverProcessConfig(char *processBase);
+extern "C" int RecoverProcessConfig(char *processBase, const struct ConfigRecoverCtx *ctx);
 TEST_F(SmapConfigTest, TestRecoverProcessConfig)
 {
     int ret;
@@ -652,7 +656,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfig)
     MOCKER(InitProcessMigrationTargetState).expects(exactly(nrProcess));
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
-    ret = RecoverProcessConfig((char *)&header);
+    ret = RecoverProcessConfig((char *)&header, &kCurRecoverCtx);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(nrProcess, manager.nr[PROCESS_TYPE]);
     EXPECT_EQ(1025, PmHeadAttr(&manager)->pid);
@@ -683,7 +687,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigTwo)
     MOCKER(calloc).stubs().will(returnValue(static_cast<void *>(nullptr)));
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
-    ret = RecoverProcessConfig((char *)&header);
+    ret = RecoverProcessConfig((char *)&header, &kCurRecoverCtx);
     EXPECT_EQ(-ENOMEM, ret);
     ASSERT_EQ(nullptr, PmHeadAttr(&manager));
 }
@@ -706,7 +710,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigPidNotExist)
     MOCKER(InitProcessMigrationTargetState).expects(never());
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue(-ESRCH));
-    ret = RecoverProcessConfig((char *)&header);
+    ret = RecoverProcessConfig((char *)&header, &kCurRecoverCtx);
     EXPECT_EQ(0, ret);
     ASSERT_EQ(nullptr, PmHeadAttr(&manager));
 }
@@ -732,7 +736,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigRestoresPairMultiRemoteTarget)
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
 
-    EXPECT_EQ(0, RecoverProcessConfig((char *)&header));
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header, &kCurRecoverCtx));
     ASSERT_NE(nullptr, PmHeadAttr(&manager));
     EXPECT_EQ(2U, PmHeadAttr(&manager)->targetConfig.count);
     EXPECT_EQ(MIG_MEMSIZE_MODE, PmHeadAttr(&manager)->targetConfig.migrateMode);
@@ -772,7 +776,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigSkipsDuplicatedPid)
     MOCKER(IsHugeMode).stubs().will(returnValue(false));
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
 
-    EXPECT_EQ(0, RecoverProcessConfig((char *)&header));
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header, &kCurRecoverCtx));
     EXPECT_EQ(1, manager.nr[PROCESS_TYPE]);
     ASSERT_NE(nullptr, PmHeadAttr(&manager));
     EXPECT_EQ(nullptr, PmNthAttr(&manager, 1));
@@ -798,7 +802,7 @@ TEST_F(SmapConfigTest, TestRecoverProcessConfigNoFreeSlot)
     MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
     MOCKER(PidSlotAdd).stubs().will(returnValue(-1));
 
-    EXPECT_EQ(0, RecoverProcessConfig((char *)&header));
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header, &kCurRecoverCtx));
     EXPECT_EQ(0, manager.nr[PROCESS_TYPE]);
     EXPECT_EQ(0, manager.nr[VM_TYPE]);
     EXPECT_EQ(nullptr, PmHeadAttr(&manager));
@@ -1268,7 +1272,7 @@ extern "C" int RecoverFromConfigLocked(void);
 extern "C" void WriteNumaConfig(char *base);
 extern "C" void RecoverRunMode(RunMode runMode);
 extern "C" int RecoverNumaConfig(char *numaBase);
-extern "C" int RecoverProcessConfig(char *processBase);
+extern "C" int RecoverProcessConfig(char *processBase, const struct ConfigRecoverCtx *ctx);
 
 /* WriteNumaConfig 依赖 remoteNumaInfo 二维数组；这里只写出合法的 NUMA 配置长度，载荷保持为 0 */
 static void FakeWriteNumaConfig(char *base)
@@ -1753,4 +1757,180 @@ TEST_F(SmapConfigTest, TestSmapConfigPathPrefersPrivateDir)
     GlobalMockObject::verify();
 
     g_smapConfigPath = saved;
+}
+
+/* ---------------- 进程身份（CF-6） ---------------- */
+extern "C" int ConfigReadProcStartTime(pid_t pid, uint64_t *startTime);
+extern "C" bool ConfigProcStartedAfter(uint64_t startTime, time_t t);
+extern "C" bool IsPersistedProcessSame(pid_t pid, uint64_t savedStart, time_t fileMtime);
+extern "C" void FreeProcessPayloadBitmaps(struct ProcessPayload *payload, int len);
+
+TEST_F(SmapConfigTest, TestConfigReadProcStartTime)
+{
+    uint64_t st = 0;
+    ASSERT_EQ(0, ConfigReadProcStartTime(getpid(), &st));
+    EXPECT_NE(0ULL, st);
+    uint64_t again = 0;
+    ASSERT_EQ(0, ConfigReadProcStartTime(getpid(), &again));
+    EXPECT_EQ(st, again);
+    EXPECT_NE(0, ConfigReadProcStartTime(0, &st));
+    EXPECT_NE(0, ConfigReadProcStartTime(0x3ffffff0, &st));
+}
+
+TEST_F(SmapConfigTest, TestIsPersistedProcessSame)
+{
+    uint64_t st = 0;
+    ASSERT_EQ(0, ConfigReadProcStartTime(getpid(), &st));
+    time_t now = time(nullptr);
+
+    /* 无任何身份信息：保持旧行为 */
+    EXPECT_TRUE(IsPersistedProcessSame(getpid(), 0, 0));
+    /* V4：启动时间精确比对 */
+    EXPECT_TRUE(IsPersistedProcessSame(getpid(), st, 0));
+    EXPECT_FALSE(IsPersistedProcessSame(getpid(), st + 1, now));
+    /* V3：配置写入晚于进程启动 -> 同一进程；配置写入早于进程启动（很久以前）-> pid 已复用 */
+    EXPECT_TRUE(IsPersistedProcessSame(getpid(), 0, now + 100));
+    EXPECT_FALSE(IsPersistedProcessSame(getpid(), 0, 1));
+    EXPECT_FALSE(ConfigProcStartedAfter(st, now + 100));
+    EXPECT_TRUE(ConfigProcStartedAfter(st, 1));
+    /* 进程不存在 */
+    EXPECT_FALSE(IsPersistedProcessSame(0x3ffffff0, st, now));
+}
+
+TEST_F(SmapConfigTest, TestRecoverProcessConfigSkipsReusedPid)
+{
+    struct ProcessManager manager; memset(&manager, 0, sizeof(manager));
+    struct PersistRemoteTarget t0[1] = {{ .nid = 4, .ratio = 25, .memSize = 0 }};
+    const int bits0[] = {0, 4};
+    alignas(8) char buf[512] = {};
+    size_t off = BuildV3Record(buf, 1025, NORMAL_SCAN, PROCESS_TYPE, PROC_IDLE, MIG_RATIO_MODE, 200, bits0, 2,
+                               t0, 1);
+    reinterpret_cast<struct ProcessPayloadHeader *>(buf)->startTime = 12345;
+    struct PayloadHeader header = {.len = (uint32_t)off};
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(static_cast<char *>(buf)));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
+    MOCKER(IsPersistedProcessSame).expects(once()).will(returnValue(false));
+    MOCKER(InitProcessMigrationTargetState).expects(never());
+
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header, &kCurRecoverCtx));
+    EXPECT_EQ(0, manager.nr[PROCESS_TYPE]);
+    EXPECT_EQ(nullptr, PmHeadAttr(&manager));
+}
+
+TEST_F(SmapConfigTest, TestRecoverProcessConfigReadsV3Records)
+{
+    struct ProcessManager manager; memset(&manager, 0, sizeof(manager));
+    struct PersistRemoteTarget t0[1] = {{ .nid = 4, .ratio = 25, .memSize = 0 }};
+    struct PersistRemoteTarget t1[1] = {{ .nid = 5, .ratio = 15, .memSize = 0 }};
+    const int bits0[] = {0, 4};
+    const int bits1[] = {0, 5};
+    /* 先按 V4 构造，再去掉每条记录头末尾的 startTime 得到 V3 布局 */
+    alignas(8) char v4[1024] = {};
+    size_t s0 = BuildV3Record(v4, 1025, NORMAL_SCAN, PROCESS_TYPE, PROC_IDLE, MIG_RATIO_MODE, 200, bits0, 2, t0, 1);
+    size_t s1 = BuildV3Record(v4 + s0, 1026, NORMAL_SCAN, VM_TYPE, PROC_IDLE, MIG_RATIO_MODE, 300, bits1, 2, t1, 1);
+    size_t cut = CONFIG_PROC_HEADER_LEN - CONFIG_PROC_HEADER_LEN_V3;
+    alignas(8) char v3[1024] = {};
+    memcpy(v3, v4, CONFIG_PROC_HEADER_LEN_V3);
+    memcpy(v3 + CONFIG_PROC_HEADER_LEN_V3, v4 + CONFIG_PROC_HEADER_LEN, s0 - CONFIG_PROC_HEADER_LEN);
+    size_t off = s0 - cut;
+    memcpy(v3 + off, v4 + s0, CONFIG_PROC_HEADER_LEN_V3);
+    memcpy(v3 + off + CONFIG_PROC_HEADER_LEN_V3, v4 + s0 + CONFIG_PROC_HEADER_LEN, s1 - CONFIG_PROC_HEADER_LEN);
+    off += s1 - cut;
+    struct PayloadHeader header = {.len = (uint32_t)off};
+    struct ConfigRecoverCtx v3Ctx = { CONFIG_PROC_HEADER_LEN_V3, 0 };
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(static_cast<char *>(v3)));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(IsPidUsingHugePages).stubs().will(returnValue((int)false));
+
+    EXPECT_EQ(0, RecoverProcessConfig((char *)&header, &v3Ctx));
+    EXPECT_EQ(1, manager.nr[PROCESS_TYPE]);
+    EXPECT_EQ(1, manager.nr[VM_TYPE]);
+    ASSERT_NE(nullptr, PmNthAttr(&manager, 1));
+    EXPECT_EQ(1026, PmNthAttr(&manager, 1)->pid);
+    EXPECT_EQ(VM_TYPE, PmNthAttr(&manager, 1)->type);
+    EXPECT_EQ(5, PmNthAttr(&manager, 1)->targetConfig.targets[0].remoteNid);
+    EXPECT_TRUE(NumaBitmapTest(&PmNthAttr(&manager, 1)->numaAttr.numaNodes, 5));
+    while (PmHeadAttr(&manager) != nullptr) {
+        PidSlotRemove(&manager, PmHeadAttr(&manager)->pid);
+    }
+
+    struct PayloadHeader v3Header = {.len = (uint32_t)off};
+    memcpy(v4, &v3Header, sizeof(v3Header));
+    memcpy(v4 + PAYLOAD_HEADER_LEN, v3, off);
+    EXPECT_TRUE(IsProcessConfigValid(v4, CONFIG_HEADER_LEN + CalcNumaConfigLen() + PAYLOAD_HEADER_LEN + off,
+                                     CONFIG_PROC_HEADER_LEN_V3));
+    EXPECT_FALSE(IsProcessConfigValid(v4, CONFIG_HEADER_LEN + CalcNumaConfigLen() + PAYLOAD_HEADER_LEN + off,
+                                      CONFIG_PROC_HEADER_LEN));
+}
+
+TEST_F(SmapConfigTest, TestBuildAllProcessPayloadRecordsStartTime)
+{
+    struct ProcessManager manager;
+    memset(&manager, 0, sizeof(manager));
+    ProcessAttr self = {};
+    ProcessAttr gone = {};
+    struct ProcessPayload *payload = nullptr;
+    int len = 0;
+    self.type = PROCESS_TYPE;
+    self.pid = getpid();
+    self.targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    gone.type = PROCESS_TYPE;
+    gone.pid = 0x3ffffff0;
+    gone.targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    PidSlotAdd(&manager, &self);
+    PidSlotAdd(&manager, &gone);
+
+    MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    ASSERT_EQ(0, BuildAllProcessPayload(&payload, &len));
+    ASSERT_EQ(2, len);
+    uint64_t st = 0;
+    ASSERT_EQ(0, ConfigReadProcStartTime(getpid(), &st));
+    EXPECT_EQ(st, payload[0].startTime);
+    EXPECT_EQ(0ULL, payload[1].startTime);
+
+    struct PayloadHeader header = {};
+    uint32_t nrWords = NumaWordsForCap();
+    size_t stride = CONFIG_PROC_HEADER_LEN + (size_t)nrWords * sizeof(unsigned long);
+    char *recs = (char *)calloc(2, stride);
+    ASSERT_NE(nullptr, recs);
+    MOCKER(JumpToProcessPayload).stubs().will(returnValue(recs));
+    EXPECT_EQ(0, WriteProcessConfig((char *)&header, payload, len));
+    EXPECT_EQ(st, reinterpret_cast<struct ProcessPayloadHeader *>(recs)->startTime);
+    free(recs);
+    FreeProcessPayloadBitmaps(payload, len);
+    free(payload);
+}
+
+TEST_F(SmapConfigFileTest, LoadAcceptsV3AndRecordsMtime)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    EXPECT_EQ(SMAP_CONFIG_VER_V4, reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver);
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver = SMAP_CONFIG_VER_V3;
+    WriteRaw(img.data, img.len);
+    FreeConfigImage(&img);
+
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    struct stat st;
+    ASSERT_EQ(0, stat(path.c_str(), &st));
+    EXPECT_EQ(st.st_mtime, img.mtime);
+
+    /* 同步进程配置后整体升级为 V4 */
+    struct ProcessPayload p[1] = {};
+    p[0].pid = 4321;
+    p[0].srcNid = NUMA_NO_NODE;
+    p[0].startTime = 99;
+    ASSERT_EQ(0, ChangeProcessConfig(&img, p, 1));
+    EXPECT_EQ(SMAP_CONFIG_VER_V4, reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver);
+    char *processBase = JumpToProcessConfig(img.data);
+    EXPECT_EQ(99ULL, reinterpret_cast<struct ProcessPayloadHeader *>(JumpToProcessPayload(processBase))->startTime);
+    FreeConfigImage(&img);
 }

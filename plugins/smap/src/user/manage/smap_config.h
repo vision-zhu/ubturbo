@@ -11,7 +11,9 @@
 #ifndef __CONFIG_FILE_H__
 #define __CONFIG_FILE_H__
 
+#include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "manage.h"
 
@@ -35,19 +37,23 @@
  * Layout of config is as follows:
  * | VER | HEADER_LEN | TOTAL_LEN | = 2B + 2B + 4B
  * | NUMA_PAYLOAD_LEN | NUMA_PAYLOAD | = 4B + 4B * nrLocalNuma * SMAP_MAX_NUMNODES
- * | PROCESS_PAYLOAD_LEN | PROCESS_PAYLOAD | = 4B + Σ V3 记录字节数
+ * | PROCESS_PAYLOAD_LEN | PROCESS_PAYLOAD | = 4B + Σ 进程记录字节数（V3/V4）
  *
  * V2 起进程记录为定长；V3 起改为「定长头 + 尾部柔性区」，节点位图不再按
  * 编译期 NUMA_NODES_BIT_WORDS 定宽，字数由写入侧运行期 cap 折算。
+ * V4 在进程记录定长头末尾追加 startTime（进程身份），其余布局与 V3 相同；读取侧兼容 V3。
  */
 #define SMAP_CONFIG_VER_V1 1
 #define SMAP_CONFIG_VER_V2 2
 #define SMAP_CONFIG_VER_V3 3
-#define SMAP_CONFIG_VER SMAP_CONFIG_VER_V3
+#define SMAP_CONFIG_VER_V4 4
+#define SMAP_CONFIG_VER SMAP_CONFIG_VER_V4
 #define CONFIG_HEADER_LEN sizeof(struct SmapConfigHeader)
 #define PAYLOAD_HEADER_LEN sizeof(struct PayloadHeader)
 #define CONFIG_NUMA_LEN sizeof(struct NumaPayload)
 #define CONFIG_PROC_HEADER_LEN sizeof(struct ProcessPayloadHeader)
+/* V3 记录定长头不含 startTime */
+#define CONFIG_PROC_HEADER_LEN_V3 offsetof(struct ProcessPayloadHeader, startTime)
 
 struct SmapConfigHeader {
     uint8_t ver;
@@ -86,10 +92,10 @@ struct PersistRemoteTarget {
 };
 
 /*
- * V3 记录定长头（32B，8 字节对齐）。尾部柔性区依次为：
+ * V4 记录定长头（40B，8 字节对齐；V3 为不含 startTime 的前 32B）。尾部柔性区依次为：
  *   unsigned long numaNodes[nrWords]                          // 变长节点位图
  *   struct PersistRemoteTarget migrateParam[count]            // 活跃 Pair 目标
- * 单条记录字节数 = CONFIG_PROC_HEADER_LEN + nrWords * 8 + count * sizeof(struct PersistRemoteTarget)。
+ * 单条记录字节数 = 定长头长度 + nrWords * 8 + count * sizeof(struct PersistRemoteTarget)。
  */
 struct ProcessPayloadHeader {
     pid_t pid;
@@ -105,6 +111,9 @@ struct ProcessPayloadHeader {
     uint8_t ignoreRemoteCapacity; // sync 旁路容量标记
     /* 对齐填充：定长头保持 8 字节对齐，尾部柔性区（unsigned long 位图）起始地址仍 8 字节对齐 */
     uint8_t reserved[3];
+    /* V4：/proc/<pid>/stat 第 22 字段 starttime（开机以来的 clock tick），0 表示写入时未知。
+     * 恢复时与当前同 pid 进程比对，防止 pid 复用后接管无关进程 */
+    uint64_t startTime;
 };
 
 /* 进程内构建载荷（含变长位图句柄）；序列化后落盘为 V3 记录 */
@@ -121,6 +130,7 @@ struct ProcessPayload {
     int count;
     struct PersistRemoteTarget migrateParam[SMAP_MAX_NUMNODES];
     uint8_t ignoreRemoteCapacity; /* 新增：sync 旁路容量标记 */
+    uint64_t startTime; /* 进程启动时间（clock tick），0 表示未知 */
 };
 
 /*
@@ -130,6 +140,13 @@ struct ProcessPayload {
 struct SmapConfigImage {
     char *data;
     size_t len; /* == header.totalLen */
+    time_t mtime; /* 读入时文件的最后修改时间，新建映像为 0 */
+};
+
+/* 解析进程记录所需的上下文 */
+struct ConfigRecoverCtx {
+    size_t recHeaderLen; /* 进程记录定长头长度：V3 为 CONFIG_PROC_HEADER_LEN_V3，V4 为 CONFIG_PROC_HEADER_LEN */
+    time_t fileMtime; /* 配置文件最后写入时间，用于无 startTime 记录的 pid 复用判定；0 表示未知 */
 };
 
 int RecoverFromConfig(void);

@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/stat.h>
 
 #include "securec.h"
@@ -27,6 +28,14 @@
 #include "smap_config.h"
 
 #define NORMAL_ERR (-1)
+
+#define SMAP_PROC_STAT_PATH_LEN 64
+#define SMAP_PROC_STAT_BUF_LEN 2048
+/* /proc/<pid>/stat 中 ')' 之后跳过 20 个空格分隔即到第 22 字段 starttime */
+#define SMAP_PROC_STAT_STARTTIME_SKIP 20
+#define SMAP_DECIMAL_BASE 10
+/* 墙上时间换算误差容忍（clock tick 截断、时钟取样先后） */
+#define SMAP_PROC_START_SLACK_SEC 2
 
 /*
  * 配置文件读写全局互斥：IPC 线程与线程池 worker 会并发调用 Sync*，
@@ -65,11 +74,16 @@ static inline size_t CalcNumaConfigLen(void)
     return PAYLOAD_HEADER_LEN + CalcNumaPayloadLen();
 }
 
-/* CalcProcessPayloadStride - Calculate single V3 record byte size */
+/* CalcRecordStride - Calculate single process record byte size for a given record header length */
+static inline size_t CalcRecordStride(size_t recHeaderLen, uint32_t nrWords, int count)
+{
+    return recHeaderLen + (size_t)nrWords * sizeof(unsigned long) + (size_t)count * sizeof(struct PersistRemoteTarget);
+}
+
+/* CalcProcessPayloadStride - Calculate single record byte size in the current (V4) format */
 static inline size_t CalcProcessPayloadStride(uint32_t nrWords, int count)
 {
-    return CONFIG_PROC_HEADER_LEN + (size_t)nrWords * sizeof(unsigned long) +
-           (size_t)count * sizeof(struct PersistRemoteTarget);
+    return CalcRecordStride(CONFIG_PROC_HEADER_LEN, nrWords, count);
 }
 
 /* CalcProcessPayloadBytes - Calculate total serialized process payload bytes */
@@ -210,12 +224,18 @@ static inline bool IsRunModeValid(RunMode runMode)
 /*
  * IsConfigVersionSupported - 可恢复的持久化格式版本
  *
- * V3 是 1.2.x 起发布的格式。更早的 V1/V2（编译期定宽 NUMA 布局）无法可靠换算到运行期 cap 布局，
+ * V3 是 1.2.x 起发布的格式，V4 仅在进程记录头末尾追加 startTime，读取时兼容 V3。更早的 V1/V2（编译期定宽 NUMA 布局）无法可靠换算到运行期 cap 布局，
  * 不做就地转换：由调用方把旧文件改名备份并告警后重建，绝不静默删除。
  */
 static inline bool IsConfigVersionSupported(uint8_t ver)
 {
-    return ver == SMAP_CONFIG_VER_V3;
+    return ver == SMAP_CONFIG_VER_V3 || ver == SMAP_CONFIG_VER_V4;
+}
+
+/* ConfigRecordHeaderLen - 进程记录定长头长度：V3 不含 startTime */
+static inline size_t ConfigRecordHeaderLen(uint8_t ver)
+{
+    return ver == SMAP_CONFIG_VER_V3 ? CONFIG_PROC_HEADER_LEN_V3 : CONFIG_PROC_HEADER_LEN;
 }
 
 static bool IsConfigHeaderValid(struct SmapConfigHeader *header)
@@ -254,6 +274,7 @@ static void FreeConfigImage(struct SmapConfigImage *img)
     free(img->data);
     img->data = NULL;
     img->len = 0;
+    img->mtime = 0;
 }
 
 /* SmapConfigLegacyPath - 旧版本使用的配置位置（全局可写的 /dev/shm） */
@@ -436,6 +457,7 @@ static int LoadConfigImage(const char *path, struct SmapConfigImage *img)
     SMAP_LOGGER_INFO("ver: %hu, header len: %hu, total len: %u.", header.ver, header.headerLen, header.totalLen);
     img->data = buf;
     img->len = header.totalLen;
+    img->mtime = st.st_mtime;
     return 0;
 }
 
@@ -703,8 +725,9 @@ static int AssignProcessAttr(ProcessAttr *attr, const struct ProcessPayloadHeade
  *
  * @processBase: process config processBase addr
  * @totalLen: smap config total length
+ * @recHeaderLen: fixed record header length of the file's format version
  */
-static bool IsProcessConfigValid(char *processBase, size_t totalLen)
+static bool IsProcessConfigValid(char *processBase, size_t totalLen, size_t recHeaderLen)
 {
     struct PayloadHeader *header = (struct PayloadHeader *)processBase;
     size_t processConfigLen = GetProcessConfigLen(header);
@@ -719,7 +742,7 @@ static bool IsProcessConfigValid(char *processBase, size_t totalLen)
     char *cur = JumpToProcessPayload(processBase);
     size_t remaining = header->len;
     while (remaining > 0) {
-        if (remaining < CONFIG_PROC_HEADER_LEN) {
+        if (remaining < recHeaderLen) {
             SMAP_LOGGER_ERROR("Process config truncated, remaining %zu.", remaining);
             return false;
         }
@@ -728,7 +751,7 @@ static bool IsProcessConfigValid(char *processBase, size_t totalLen)
             SMAP_LOGGER_ERROR("Process config invalid record: nrWords %u, count %d.", h->nrWords, h->count);
             return false;
         }
-        size_t stride = CalcProcessPayloadStride(h->nrWords, h->count);
+        size_t stride = CalcRecordStride(recHeaderLen, h->nrWords, h->count);
         if (stride > remaining) {
             SMAP_LOGGER_ERROR("Process config record overflows: %zu > %zu.", stride, remaining);
             return false;
@@ -757,7 +780,96 @@ static bool IsPidRecovered(struct ProcessManager *manager, pid_t pid)
     return false;
 }
 
-static int RecoverProcessConfig(char *processBase)
+/*
+ * ConfigReadProcStartTime - read field 22 (starttime, clock ticks since boot) of /proc/<pid>/stat
+ *
+ * Returns 0 and fills @startTime on success, negative errno otherwise (e.g. -ENOENT if the process does not exist).
+ */
+static int ConfigReadProcStartTime(pid_t pid, uint64_t *startTime)
+{
+    char path[SMAP_PROC_STAT_PATH_LEN];
+    char buf[SMAP_PROC_STAT_BUF_LEN];
+
+    if (pid <= 0 || snprintf_s(path, sizeof(path), sizeof(path) - 1, "/proc/%d/stat", pid) < 0) {
+        return -EINVAL;
+    }
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd == NORMAL_ERR) {
+        return -errno;
+    }
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    int err = errno;
+    (void)close(fd);
+    if (n <= 0) {
+        return n < 0 ? -err : -EIO;
+    }
+    buf[n] = '\0';
+
+    /* comm 可含空格与 ')'，从最后一个 ')' 之后开始数：其后第 1 个空格起为第 3 字段，第 20 个空格后为第 22 字段 */
+    char *p = strrchr(buf, ')');
+    if (p == NULL) {
+        return -EINVAL;
+    }
+    for (int i = 0; i < SMAP_PROC_STAT_STARTTIME_SKIP; i++) {
+        p = strchr(p, ' ');
+        if (p == NULL) {
+            return -EINVAL;
+        }
+        p++;
+    }
+    char *end = NULL;
+    errno = 0;
+    unsigned long long val = strtoull(p, &end, SMAP_DECIMAL_BASE);
+    if (end == p || errno != 0) {
+        return -EINVAL;
+    }
+    *startTime = (uint64_t)val;
+    return 0;
+}
+
+/* ConfigProcStartedAfter - whether a process that started @startTime ticks after boot started after wall time @t */
+static bool ConfigProcStartedAfter(uint64_t startTime, time_t t)
+{
+    struct timespec boot;
+    struct timespec real;
+    long hz = sysconf(_SC_CLK_TCK);
+
+    if (hz <= 0 || clock_gettime(CLOCK_BOOTTIME, &boot) != 0 || clock_gettime(CLOCK_REALTIME, &real) != 0) {
+        return false;
+    }
+    /* 进程已运行的秒数 = 开机至今 - 开机到进程启动；换算为墙上时间的启动时刻 */
+    int64_t ageSec = (int64_t)boot.tv_sec - (int64_t)(startTime / (uint64_t)hz);
+    int64_t startWall = (int64_t)real.tv_sec - ageSec;
+    return startWall > (int64_t)t + SMAP_PROC_START_SLACK_SEC;
+}
+
+/*
+ * IsPersistedProcessSame - whether the live process @pid is the one recorded in the config
+ *
+ * @savedStart: starttime recorded with the pid (V4), 0 if unknown
+ * @fileMtime: last write time of the config file, 0 if unknown
+ *
+ * With a recorded starttime the live one must match exactly. Without it (V3 records, or the value could not be read
+ * when writing), a process that started after the config was last written cannot be the managed one, because the
+ * record was written while the managed process was alive: such a pid has been reused.
+ */
+static bool IsPersistedProcessSame(pid_t pid, uint64_t savedStart, time_t fileMtime)
+{
+    uint64_t cur = 0;
+
+    if (savedStart == 0 && fileMtime == 0) {
+        return true;
+    }
+    if (ConfigReadProcStartTime(pid, &cur) != 0) {
+        return false;
+    }
+    if (savedStart != 0) {
+        return cur == savedStart;
+    }
+    return !ConfigProcStartedAfter(cur, fileMtime);
+}
+
+static int RecoverProcessConfig(char *processBase, const struct ConfigRecoverCtx *ctx)
 {
     struct PayloadHeader *header = (struct PayloadHeader *)processBase;
     struct ProcessManager *manager = GetProcessManager();
@@ -768,23 +880,36 @@ static int RecoverProcessConfig(char *processBase)
     /* V3 记录变长：按定长头 + 尾部柔性区逐条解码 */
     char *cur = JumpToProcessPayload(processBase);
     size_t remaining = header->len;
-    while (remaining >= CONFIG_PROC_HEADER_LEN) {
-        struct ProcessPayloadHeader *h = (struct ProcessPayloadHeader *)cur;
-        size_t stride = CalcProcessPayloadStride(h->nrWords, h->count);
+    size_t recHeaderLen = ctx->recHeaderLen;
+    while (remaining >= recHeaderLen) {
+        /* 按文件版本的定长头长度拷出记录头：V3 头不含 startTime，缺失字段保持 0 */
+        struct ProcessPayloadHeader rec = { 0 };
+        struct ProcessPayloadHeader *h = &rec;
+        if (recHeaderLen > sizeof(rec) || memcpy_s(&rec, sizeof(rec), cur, recHeaderLen) != EOK) {
+            errFlag = true;
+            break;
+        }
+        size_t stride = CalcRecordStride(recHeaderLen, h->nrWords, h->count);
         if (h->nrWords == 0 || stride > remaining) {
             SMAP_LOGGER_ERROR("Corrupted process record, remaining %zu.", remaining);
             errFlag = true;
             break;
         }
         NumaBitmap numaNodes;
-        NumaBitmapBind(&numaNodes, (unsigned long *)(cur + CONFIG_PROC_HEADER_LEN), h->nrWords);
+        NumaBitmapBind(&numaNodes, (unsigned long *)(cur + recHeaderLen), h->nrWords);
         const struct PersistRemoteTarget *targets =
-            (const struct PersistRemoteTarget *)((unsigned long *)(cur + CONFIG_PROC_HEADER_LEN) + h->nrWords);
+            (const struct PersistRemoteTarget *)((unsigned long *)(cur + recHeaderLen) + h->nrWords);
         cur += stride;
         remaining -= stride;
 
         if (IsPidRecovered(manager, h->pid)) {
             SMAP_LOGGER_WARNING("Duplicated persisted process %d, skip recover.", h->pid);
+            continue;
+        }
+        /* 身份校验：daemon 停止期间受管进程退出且 pid 被复用时，不得接管并迁移无关进程 */
+        if (!IsPersistedProcessSame(h->pid, h->startTime, ctx->fileMtime)) {
+            SMAP_LOGGER_WARNING("pid %d is not the persisted process (start time %llu), skip recover.", h->pid,
+                                (unsigned long long)h->startTime);
             continue;
         }
 
@@ -892,6 +1017,7 @@ static int WriteProcessConfig(char *processBase, const struct ProcessPayload *p,
         h->nrWords = nrWords;
         h->count = p[i].count;
         h->ignoreRemoteCapacity = p[i].ignoreRemoteCapacity;
+        h->startTime = p[i].startTime;
 
         unsigned long *bits = (unsigned long *)(cur + CONFIG_PROC_HEADER_LEN);
         if (p[i].numaNodes.bits != NULL && p[i].numaNodes.nWords > 0) {
@@ -1033,6 +1159,13 @@ static int BuildAllProcessPayload(struct ProcessPayload **payload, int *len)
         return ret;
     }
 
+    /* 进程身份在锁外读取（/proc 文件 I/O 不放在 attrLock 内）；读不到（进程已退出）记 0 */
+    for (int i = 0; i < nrPayload; i++) {
+        if (ConfigReadProcStartTime(p[i].pid, &p[i].startTime) != 0) {
+            p[i].startTime = 0;
+        }
+    }
+
     SMAP_LOGGER_DEBUG("BuildAllProcessPayload nrPayload %d.", nrPayload);
     *payload = p;
     *len = nrPayload;
@@ -1114,12 +1247,16 @@ static int ParseConfig(const struct SmapConfigImage *img)
         SMAP_LOGGER_DEBUG("Exit ParseConfig.");
         return 0;
     }
+    struct ConfigRecoverCtx ctx = {
+        .recHeaderLen = ConfigRecordHeaderLen(header.ver),
+        .fileMtime = img->mtime,
+    };
     processBase = JumpToProcessConfig(img->data);
-    if (!IsProcessConfigValid(processBase, totalLen)) {
+    if (!IsProcessConfigValid(processBase, totalLen, ctx.recHeaderLen)) {
         SMAP_LOGGER_ERROR("Detected invalid process config.");
         return -EINVAL;
     }
-    ret = RecoverProcessConfig(processBase);
+    ret = RecoverProcessConfig(processBase, &ctx);
     if (ret) {
         SMAP_LOGGER_ERROR("Parse process config failed: %d.", ret);
         return ret;
