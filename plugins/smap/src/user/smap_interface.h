@@ -46,6 +46,8 @@ extern "C" {
 enum {
     SLEEP = 0,
     RUNNING = 1,
+    STARTING = 2, /* ubturbo_smap_start 初始化中，接口一律拒绝 */
+    STOPPING = 3, /* ubturbo_smap_stop 已拒绝新调用，正在等待在途调用退出并销毁 */
 };
 
 enum {

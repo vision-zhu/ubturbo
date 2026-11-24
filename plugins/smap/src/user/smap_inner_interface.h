@@ -36,6 +36,15 @@ struct VmRatioMsg {
     struct VmRatio vr[MAX_2M_PROCESSES_CNT];
 };
 
+/*
+ * 接口生命周期门：每个对外接口进入时 SmapApiEnter()（仅 RUNNING 时成功并计入在途），
+ * 返回前 SmapApiExit()；ubturbo_smap_stop 先切 STOPPING 拒绝新调用，再等在途计数归零才销毁。
+ * 接口内的长等待循环须周期性检查 SmapStopRequested() 并及时退出，避免 stop 长时间阻塞。
+ */
+bool SmapApiEnter(void);
+void SmapApiExit(void);
+bool SmapStopRequested(void);
+
 int SmapEnableAdaptMem(int flag);
 int SmapQueryVmMemRatio(struct VmRatioMsg *vrMsg);
 int SmapSetLogLevel(int level);

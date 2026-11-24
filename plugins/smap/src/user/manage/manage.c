@@ -2168,9 +2168,28 @@ void RemoveAllManagedProcess(void)
     g_processManager.nr[VM_TYPE] = g_processManager.nr[PROCESS_TYPE] = 0;
 }
 
+/*
+ * 销毁前兜底：此时接口在途调用已排空、扫描/迁移线程已 join，正常情况下所有槽位
+ * 均已回收为 FREE；仍残留 attr 说明有引用未归还，释放之以免 memset 后永久泄漏。
+ */
+static void PidSlotReclaimLeftovers(struct ProcessManager *manager)
+{
+    for (int i = 0; i < MAX_PID_SLOTS; i++) {
+        struct PidSlot *s = &manager->slots[i];
+        if (s->attr == NULL) {
+            continue;
+        }
+        SMAP_LOGGER_WARNING("Slot %d pid %d still holds %d refs in state %d at destroy, reclaim it.", i, s->pid,
+                            EnvAtomicRead(&s->refs), EnvAtomicRead(&s->state));
+        FreeProceccesAttr(s->attr);
+        s->attr = NULL;
+    }
+}
+
 int DestroyProcessManager(void)
 {
     RemoveAllManagedProcess();
+    PidSlotReclaimLeftovers(&g_processManager);
     PidSlotDestroy(&g_processManager);
     EnvMutexDestroy(&g_processManager.threadLock);
     EnvMutexDestroy(&g_processManager.remoteNumaInfo.lock);
