@@ -31,11 +31,17 @@ typedef enum {
 
 typedef void (*Logfunc)(int level, const char *str, const char *moduleName);
 
+/* 订阅回调可被 SmapLoggerExit 并发置空：统一原子读写，调用前先读到局部变量，避免两次读取之间被置空 */
 static Logfunc g_subscribers;
+
+static inline Logfunc LoadSubscriber(void)
+{
+    return __atomic_load_n(&g_subscribers, __ATOMIC_ACQUIRE);
+}
 
 void UpstreamSubscribeLogger(Logfunc extlog)
 {
-    g_subscribers = extlog;
+    __atomic_store_n(&g_subscribers, extlog, __ATOMIC_RELEASE);
 }
 
 int SmapStartULog(const char *ulogPath)
@@ -93,14 +99,15 @@ static void SmapUlogInner(int logLevel, const char *prefix, const char *msg)
     if (logLevel < SmapLogCoreGetMinLogLevel()) {
         return;
     }
-    if (g_subscribers != NULL) {
+    Logfunc subscriber = LoadSubscriber();
+    if (subscriber != NULL) {
         int level = LogLevelMapping(logLevel);
         char exLogMsg[SMAP_LOG_BUF_LEN] = SMAP_LOG_MODULE_NAME;
         errno_t ret = strncat_s(exLogMsg, sizeof(exLogMsg), prefix, SMAP_LOG_BUF_LEN - 1);
         if (ret) {
             return;
         }
-        g_subscribers(level, msg, exLogMsg);
+        subscriber(level, msg, exLogMsg);
         return;
     }
 #ifndef USE_DT
@@ -151,9 +158,7 @@ void SMAP_Ulog(int logLevel, const char *funcName, int funcLine, const char *fil
 
 void SmapLoggerExit(void)
 {
-    if (g_subscribers != NULL) {
-        g_subscribers = NULL;
-    }
+    __atomic_store_n(&g_subscribers, NULL, __ATOMIC_RELEASE);
 #ifndef USE_DT
     SmapLogCoreExit();
 #endif

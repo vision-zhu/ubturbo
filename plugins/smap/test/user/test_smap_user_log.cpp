@@ -3,6 +3,9 @@
  */
 #include <cstring>
 #include <string>
+#include <thread>
+#include <vector>
+#include <atomic>
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
 
@@ -177,4 +180,37 @@ TEST_F(SmapUserLogTest, TestLevelFilterErrorPassAtWarn)
     SmapLogCoreSetMinLogLevel(SMAP_LOG_CORE_WARN);
     SMAP_Ulog(SMAP_LOG_ERROR, "testFunc", 10, "test.c", "should pass");
     EXPECT_EQ(1, g_logCallCount);
+}
+
+static std::atomic<int> g_concurrentCalls(0);
+static void CountingLogCallback(int level, const char *str, const char *moduleName)
+{
+    (void)level;
+    (void)str;
+    (void)moduleName;
+    g_concurrentCalls++;
+}
+
+TEST_F(SmapUserLogTest, TestConcurrentLogAndLoggerExit)
+{
+    /* SmapLoggerExit 并发置空订阅回调：日志线程不得调用到 NULL */
+    std::atomic<bool> stop(false);
+    std::vector<std::thread> loggers;
+    g_concurrentCalls = 0;
+    for (int t = 0; t < 4; t++) {
+        loggers.emplace_back([&stop]() {
+            while (!stop.load()) {
+                SMAP_Ulog(SMAP_LOG_ERROR, "testFunc", 10, "test.c", "concurrent %d", 1);
+            }
+        });
+    }
+    for (int i = 0; i < 2000; i++) {
+        UpstreamSubscribeLogger(CountingLogCallback);
+        SmapLoggerExit();
+    }
+    stop = true;
+    for (auto &l : loggers) {
+        l.join();
+    }
+    SUCCEED();
 }
