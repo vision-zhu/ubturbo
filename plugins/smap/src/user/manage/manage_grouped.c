@@ -240,7 +240,6 @@ int ProcessAddGroupedManage(pid_t pid, const NumaBitmap *nodeBitmap, const Group
     }
     SetGroupedProcessConfig(attr, pid, nodeBitmap, policy);
     PidSlotAdd(GetProcessManager(), attr);
-    GetProcessManager()->nr[VM_TYPE]++;
     SMAP_LOGGER_INFO("Add grouped pid %d success, group count %d.", pid, policy->groupCount);
     ret = SyncAllProcessConfig();
     if (ret) {
