@@ -2017,6 +2017,30 @@ TEST_F(ManageTest, TestPidSlotNrCountedOnlyOnRealAddRemove)
     PidSlotDestroy(&g_processManager);
 }
 
+TEST_F(ManageTest, TestPidSlotAddKeepsTransientReaderRef)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, attr);
+    attr->pid = 206;
+    attr->type = VM_TYPE;
+    /* 模拟读者在回收读到 refs==0 后对空闲槽位做了瞬时 +1（尚未发现 pid 不符而 -1） */
+    EnvAtomicSet(&g_processManager.slots[0].refs, 1);
+    ASSERT_EQ(0, PidSlotAdd(&g_processManager, attr));
+    EXPECT_EQ(2, EnvAtomicRead(&g_processManager.slots[0].refs));
+    /* 读者复查 pid 不符后归还瞬时引用，基础引用保持 */
+    struct PidSlot *slot = &g_processManager.slots[0];
+    PidSlotReleaseRefs(&slot, 1);
+    EXPECT_EQ(1, EnvAtomicRead(&g_processManager.slots[0].refs));
+    EXPECT_EQ(PID_SLOT_INUSE, EnvAtomicRead(&g_processManager.slots[0].state));
+    /* 按其他 pid 查找不得返回该槽位 */
+    EXPECT_EQ(nullptr, PidSlotGetRef(207));
+    EXPECT_EQ(1, EnvAtomicRead(&g_processManager.slots[0].refs));
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 206));
+    EXPECT_EQ(PID_SLOT_FREE, EnvAtomicRead(&g_processManager.slots[0].state));
+    PidSlotDestroy(&g_processManager);
+}
+
 /* 模拟 scan worker 线程：延迟后预填 actcData + InvokeFreqCallbacks */
 static void *FillAndInvokeThread(void *arg)
 {

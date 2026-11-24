@@ -795,7 +795,9 @@ int PidSlotAdd(struct ProcessManager *manager, ProcessAttr *attr)
         }
         s->pid = attr->pid;
         s->attr = attr;
-        EnvAtomicSet(&s->refs, 1);
+        /* 基础引用用 +1 而非直接置 1：读者可能在回收读到 refs==0 之后、此处之前对本槽位
+         * 做了瞬时 +1（随后发现 pid/state 不符会 -1），直接置 1 会吞掉该次 +1 导致计数失衡 */
+        AtomicIncrease(&s->refs, 1);
         EnvAtomicSet(&s->eventEnqueued, 0);
         s->freqWaiters = NULL;
         EnvAtomicSet(&s->state, PID_SLOT_INUSE);
@@ -870,7 +872,8 @@ struct PidSlot *PidSlotGetRef(pid_t pid)
             continue;
         }
         AtomicIncrease(&s->refs, 1);
-        if (EnvAtomicRead(&s->state) != PID_SLOT_INUSE) {
+        /* 取引用后同时复查 state 与 pid：检查与 +1 之间槽位可能已被回收并复用给其他 pid */
+        if (EnvAtomicRead(&s->state) != PID_SLOT_INUSE || s->pid != pid) {
             if (AtomicDecrease(&s->refs, 1) == 1) {
                 PidSlotTryReclaim(&g_processManager, i);
             }
