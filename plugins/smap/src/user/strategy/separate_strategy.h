@@ -29,13 +29,6 @@ typedef enum {
     SEPARATE_HDT,
 } SeparateStrategyType;
 
-typedef struct {
-    uint64_t nrMig;
-    MigrateDirection dir;
-} RemoteMigInfo;
-
-int SeparateStrategy(ProcessAttr *process, struct MigList *mlist);
-int SeparateStrategyMultiNumaVm(ProcessAttr *process, struct MigList *mlist);
 void FindThreshold(const SelectionMode mode, uint64_t nrMig, const uint32_t *buckets, int *thresholdFreq,
                    uint32_t *takeAtThreshold);
 int PairMigrationStrategy(ProcessAttr *process, struct MigList *mlist);
