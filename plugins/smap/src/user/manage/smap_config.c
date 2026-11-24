@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 
@@ -25,6 +26,18 @@
 #include "smap_config.h"
 
 #define NORMAL_ERR (-1)
+
+/*
+ * 配置文件读写全局互斥：IPC 线程与线程池 worker 会并发调用 Sync*，
+ * 快照内存状态到落盘必须整体串行，否则交错写会产生不一致文件、越过 EOF 写入或把已移除的 pid 写回。
+ * 锁序：remoteNumaInfo.lock（SetRemoteNumaInfo 持有）-> g_smapConfigLock。运行期持本锁时不得再取 attrLock /
+ * remoteNumaInfo.lock（已有 attrLock -> remoteNumaInfo.lock 的路径，反向会成环）；进程快照因此在锁外完成，
+ * 用序号丢弃过期快照。仅启动恢复（worker 未运行）会在本锁内操作新建槽位。
+ */
+static pthread_mutex_t g_smapConfigLock = PTHREAD_MUTEX_INITIALIZER;
+/* SyncAllProcessConfig 快照序号（原子递增）与已落盘的最大序号（g_smapConfigLock 保护） */
+static uint64_t g_smapConfigSyncSeq = 0;
+static uint64_t g_smapConfigWrittenSeq = 0;
 
 /*
  * Functions to calculate config/payload length
@@ -924,12 +937,15 @@ static int MapAndWriteProcessConfig(int fd, size_t mapLen, struct ProcessPayload
     return 0;
 }
 
-static int ChangeProcessConfig(int fd)
+/*
+ * ChangeProcessConfig - rewrite process config with a payload snapshot built by the caller
+ *
+ * @payload/@nrPayload: snapshot from BuildAllProcessPayload, owned by the caller
+ */
+static int ChangeProcessConfig(int fd, struct ProcessPayload *payload, int nrPayload)
 {
     int ret, err;
-    int nrPayload;
     size_t oldConfigLen, newConfigLen;
-    struct ProcessPayload *payload = NULL;
     struct SmapConfigHeader header;
 
     SMAP_LOGGER_DEBUG("Enter ReadConfig.");
@@ -940,12 +956,6 @@ static int ChangeProcessConfig(int fd)
     }
     oldConfigLen = header.totalLen;
 
-    ret = BuildAllProcessPayload(&payload, &nrPayload);
-    if (ret) {
-        SMAP_LOGGER_ERROR("Build all process payload failed: %d.", ret);
-        return ret;
-    }
-
     newConfigLen = CalcConfigLen(CalcProcessPayloadBytes(payload, nrPayload));
     SMAP_LOGGER_DEBUG("New config length with %d processes: %zu.", nrPayload, newConfigLen);
 
@@ -955,8 +965,6 @@ static int ChangeProcessConfig(int fd)
         ret = TruncateConfig(fd, newConfigLen);
         if (ret) {
             SMAP_LOGGER_ERROR("Extend smap config to %zu failed: %d.", newConfigLen, ret);
-            FreeProcessPayloadBitmaps(payload, nrPayload);
-            free(payload);
             return ret;
         }
     }
@@ -964,8 +972,6 @@ static int ChangeProcessConfig(int fd)
     ret = MapAndWriteProcessConfig(fd, newConfigLen, payload, nrPayload);
     if (ret) {
         SMAP_LOGGER_ERROR("Map and write process config failed: %d.", ret);
-        FreeProcessPayloadBitmaps(payload, nrPayload);
-        free(payload);
         return ret;
     }
 
@@ -977,9 +983,6 @@ static int ChangeProcessConfig(int fd)
             SMAP_LOGGER_WARNING("Shrink smap config to %zu failed: %d.", newConfigLen, err);
         }
     }
-
-    FreeProcessPayloadBitmaps(payload, nrPayload);
-    free(payload);
     return ret;
 }
 
@@ -1123,7 +1126,7 @@ static int ChangeOneNumaConfig(int fd, struct NumaPayload *payload)
     return 0;
 }
 
-int RecoverFromConfig(void)
+static int RecoverFromConfigLocked(void)
 {
     int ret;
     int fd;
@@ -1165,7 +1168,7 @@ int RecoverFromConfig(void)
     return ret;
 }
 
-int SyncRunMode(RunMode runMode)
+static int SyncRunModeLocked(RunMode runMode)
 {
     int ret;
     int fd;
@@ -1207,7 +1210,7 @@ int SyncRunMode(RunMode runMode)
     return ret;
 }
 
-int SyncOneNumaConfig(int local, int remote, size_t size)
+static int SyncOneNumaConfigLocked(int local, int remote, size_t size)
 {
     int ret;
     int fd;
@@ -1254,7 +1257,7 @@ int SyncOneNumaConfig(int local, int remote, size_t size)
     return ret;
 }
 
-int SyncAllProcessConfig(void)
+static int SyncAllProcessConfigLocked(struct ProcessPayload *payload, int nrPayload)
 {
     int ret;
     int fd;
@@ -1280,12 +1283,69 @@ int SyncAllProcessConfig(void)
         SMAP_LOGGER_INFO("Init smap config done.");
     }
 
-    ret = ChangeProcessConfig(fd);
+    ret = ChangeProcessConfig(fd, payload, nrPayload);
     if (ret) {
         SMAP_LOGGER_ERROR("Change process config failed: %d.", ret);
     } else {
         SMAP_LOGGER_INFO("Change process config done.");
     }
     close(fd);
+    return ret;
+}
+
+int RecoverFromConfig(void)
+{
+    pthread_mutex_lock(&g_smapConfigLock);
+    int ret = RecoverFromConfigLocked();
+    pthread_mutex_unlock(&g_smapConfigLock);
+    return ret;
+}
+
+int SyncRunMode(RunMode runMode)
+{
+    pthread_mutex_lock(&g_smapConfigLock);
+    int ret = SyncRunModeLocked(runMode);
+    pthread_mutex_unlock(&g_smapConfigLock);
+    return ret;
+}
+
+int SyncOneNumaConfig(int local, int remote, size_t size)
+{
+    pthread_mutex_lock(&g_smapConfigLock);
+    int ret = SyncOneNumaConfigLocked(local, remote, size);
+    pthread_mutex_unlock(&g_smapConfigLock);
+    return ret;
+}
+
+int SyncAllProcessConfig(void)
+{
+    struct ProcessPayload *payload = NULL;
+    int nrPayload = 0;
+    /* 先领序号再快照：序号越大，快照开始得越晚，反映的内存状态越新 */
+    uint64_t seq = __atomic_add_fetch(&g_smapConfigSyncSeq, 1, __ATOMIC_SEQ_CST);
+
+    /* 快照在配置锁外进行（只取 attrLock），避免引入 g_smapConfigLock -> attrLock 锁序 */
+    int ret = BuildAllProcessPayload(&payload, &nrPayload);
+    if (ret) {
+        SMAP_LOGGER_ERROR("Build all process payload failed: %d.", ret);
+        return ret;
+    }
+
+    pthread_mutex_lock(&g_smapConfigLock);
+    if (seq < g_smapConfigWrittenSeq) {
+        /* 更新的快照已经落盘，旧快照不得覆盖（否则可能把已移除的 pid 写回） */
+        SMAP_LOGGER_INFO("Skip stale process config snapshot %llu < %llu.", (unsigned long long)seq,
+                         (unsigned long long)g_smapConfigWrittenSeq);
+        ret = 0;
+    } else {
+        ret = SyncAllProcessConfigLocked(payload, nrPayload);
+        if (ret == 0) {
+            g_smapConfigWrittenSeq = seq;
+        }
+    }
+    pthread_mutex_unlock(&g_smapConfigLock);
+
+    FreeProcessPayloadBitmaps(payload, nrPayload);
+    free(payload);
     return ret;
 }
