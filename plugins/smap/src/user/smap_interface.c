@@ -41,6 +41,7 @@
 #include "smap_interface.h"
 #include "smap_inner_interface.h"
 #define DEFAULT_NODE_NUMBER_SIZE 16
+#define CTIME_BUF_LEN 32
 #define REMOTE_NUMA_MEMORY_MAX (TIB / MIB)
 #define LOCAL_NUMA_BIT_MAP_MASK 0xF
 #define MIN_GROUP_QUOTA_SIZE_KB KB_PER_2MB
@@ -2383,7 +2384,9 @@ static int CheckQueryVMFreqMsgValid(int pid, uint16_t *data, uint32_t lengthIn, 
     if (time(&currentTime) == (time_t)-1) {
         SMAP_LOGGER_ERROR("get time error");
     }
-    SMAP_LOGGER_INFO("Current time: %s\n", ctime(&currentTime));
+    char timeBuf[CTIME_BUF_LEN] = { 0 };
+    /* ctime 返回静态缓冲区，多 IPC 线程并发调用会相互覆盖；用可重入的 ctime_r */
+    SMAP_LOGGER_INFO("Current time: %s\n", ctime_r(&currentTime, timeBuf) ? timeBuf : "unknown");
     if (dataSource == STATISTIC_DATA_SOURCE && (currentTime - attr->scanStart < attr->duration)) {
         SMAP_LOGGER_ERROR("pid %d scan duaration did not meet the expected threshold\n", pid);
         PutProcessAttr(attr);
@@ -2413,8 +2416,10 @@ static int QueryVMFreqFromKernel(int pid, uint16_t *data, uint32_t lengthIn, uin
         free(tmpData);
         return -EBADF;
     }
-    *lengthOut = payload.length;
-    for (uint32_t i = 0; i < payload.length; i++) {
+    /* 内核回填的长度不可信：拷贝上界取 min(payload.length, lengthIn)，避免越界写调用方缓冲 */
+    uint32_t copyLen = payload.length < lengthIn ? payload.length : lengthIn;
+    *lengthOut = copyLen;
+    for (uint32_t i = 0; i < copyLen; i++) {
         data[i] = tmpData[i];
     }
     free(tmpData);

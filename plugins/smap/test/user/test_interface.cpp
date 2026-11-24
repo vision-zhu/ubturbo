@@ -2407,6 +2407,18 @@ TEST_F(InterfaceTest, TestSmapQueryVmFreqAbnormalTwo)
     EXPECT_EQ(-EINVAL, ret);
 }
 
+static int FakeTrackingIoctlOverlong(int fd, unsigned long cmd, void *arg)
+{
+    (void)fd;
+    (void)cmd;
+    struct TrakingInfoPayload *payload = (struct TrakingInfoPayload *)arg;
+    for (uint32_t i = 0; i < payload->length; i++) {
+        payload->data[i] = 7;
+    }
+    payload->length += 1; /* 模拟异常内核回填超长长度（不写越界数据） */
+    return 0;
+}
+
 TEST_F(InterfaceTest, TestQueryVMFreqFromKernel)
 {
     uint16_t data;
@@ -2421,6 +2433,17 @@ TEST_F(InterfaceTest, TestQueryVMFreqFromKernel)
     ret = QueryVMFreqFromKernel(1, &data, 1, &lengthOut);
     EXPECT_EQ(0, ret);
     EXPECT_EQ(1, lengthOut);
+    GlobalMockObject::verify();
+
+    /* 内核回填长度超过调用方缓冲：只拷贝 lengthIn 个 */
+    uint16_t buf[3] = {0, 0, 0x5a5a};
+    MOCKER(reinterpret_cast<int (*)(int, unsigned long, void *)>(ioctl))
+        .stubs()
+        .will(invoke(FakeTrackingIoctlOverlong));
+    ret = QueryVMFreqFromKernel(1, buf, 2, &lengthOut);
+    EXPECT_EQ(0, ret);
+    EXPECT_EQ(2U, lengthOut);
+    EXPECT_EQ(0x5a5a, buf[2]);
 }
 
 extern "C" void PidSlotInit(struct ProcessManager *manager);

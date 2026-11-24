@@ -39,6 +39,7 @@
 #include "smap_inner_interface.h"
 
 #define UPDATE_CRITICAL_ERR_COUNT 5
+#define CTIME_BUF_LEN 32
 
 static struct ProcessManager g_processManager;
 
@@ -1366,7 +1367,9 @@ void SetBasicProcessConfig(ProcessAttr *attr, ProcessParam *param)
     }
 
     int localNumaCnt = NumaGetL1Count(&attr->numaAttr.numaNodes, GetNrLocalNuma());
-    SMAP_LOGGER_INFO("attr->scanStart time: %s", ctime(&attr->scanStart));
+    char timeBuf[CTIME_BUF_LEN] = { 0 };
+    /* 多 IPC 线程并发纳管：ctime 的静态缓冲区会被相互覆盖，用可重入的 ctime_r */
+    SMAP_LOGGER_INFO("attr->scanStart time: %s", ctime_r(&attr->scanStart, timeBuf) ? timeBuf : "unknown");
     SMAP_LOGGER_INFO("Pid: %d local numa cnt: %d, remote numa cnt: %d.", attr->pid, localNumaCnt, attr->remoteNumaCnt);
 }
 
