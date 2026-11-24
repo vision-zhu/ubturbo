@@ -530,6 +530,12 @@ static bool ProcessMultiNumaVmNode(ProcessAttr *process)
     return false;
 }
 
+/* memsize 模式（含全部 grouped VM）和多 NUMA VM 不按比例自适应，不参与同组余量分配 */
+static bool IsExcludedFromRatioAdapt(ProcessAttr *process)
+{
+    return process->migrateMode == MIG_MEMSIZE_MODE || process->groupPolicy.enabled || IsMultiNumaVm(process);
+}
+
 static void ConfigMultiVmRatioInGroups(struct ProcessManager *manager)
 {
     int maxL1node = 0, maxL2node = 0;
@@ -568,7 +574,7 @@ static void ConfigMultiVmRatioInGroups(struct ProcessManager *manager)
         processed[l1 * l2Span + l2] = true;
         for (size_t b = 0; b < n; b++) {
             ProcessAttr *tmp = all[b]->attr;
-            if (tmp->scanType != NORMAL_SCAN) {
+            if (tmp->scanType != NORMAL_SCAN || IsExcludedFromRatioAdapt(tmp)) {
                 continue;
             }
             if (EqualToAttrL1(tmp, l1) && EqualToAttrL2(tmp, l2)) {
