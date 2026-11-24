@@ -33,6 +33,7 @@ struct SubMigrateCtx {
     int ret;
     uint32_t cpuMin;
     uint32_t cpuMax;
+    bool cpuConfigured;
 };
 
 int AddMigList(struct MigrateMsg *mMsg, struct MigList *mList);

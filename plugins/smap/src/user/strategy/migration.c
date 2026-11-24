@@ -1248,7 +1248,7 @@ static void *SubMigrateThreadFn(void *arg)
     struct SubMigrateCtx *ctx = arg;
 
     /* scan.cpu unset: no affinity, scheduler free (same as old all-cpu pinning) */
-    if (GetScanCpuConfigured()) {
+    if (ctx->cpuConfigured) {
         cpu_set_t cpuset;
         CPU_ZERO(&cpuset);
         for (uint32_t c = ctx->cpuMin; c <= ctx->cpuMax; c++) {
@@ -1382,11 +1382,16 @@ static int RunMultiThreadedMigrate(struct MigrateMsg *mMsg, struct ProcessManage
         free(tids);
         return buildRet;
     }
+    uint32_t cpuMin;
+    uint32_t cpuMax;
+    bool cpuConfigured;
+    GetScanCpuRangeConfig(&cpuMin, &cpuMax, &cpuConfigured);
     for (int i = 0; i < nrThreads; i++) {
         subs[i].fd = manager->fds.migrate;
         subs[i].ret = 0;
-        subs[i].cpuMin = GetScanCpuMinConfig();
-        subs[i].cpuMax = GetScanCpuMaxConfig();
+        subs[i].cpuMin = cpuMin;
+        subs[i].cpuMax = cpuMax;
+        subs[i].cpuConfigured = cpuConfigured;
         int pr = pthread_create(&tids[i], NULL, SubMigrateThreadFn, &subs[i]);
         if (pr != 0) {
             SMAP_LOGGER_ERROR("pthread_create %d failed: %d.", i, pr);

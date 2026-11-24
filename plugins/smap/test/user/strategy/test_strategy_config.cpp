@@ -878,6 +878,23 @@ TEST_F(PeriodConfigTest, TestUpdatePeriodConfigSwitchOffRestoresDefaults)
     g_strategyConfig = saved;
 }
 
+/* scan.cpu 范围与 configured 一次取齐 */
+TEST_F(PeriodConfigTest, TestGetScanCpuRangeConfigSnapshot)
+{
+    StrategyConfig saved = g_strategyConfig;
+    g_strategyConfig.scanCpuMin = 4;
+    g_strategyConfig.scanCpuMax = 9;
+    g_strategyConfig.scanCpuConfigured = true;
+    uint32_t cpuMin = 0;
+    uint32_t cpuMax = 0;
+    bool configured = false;
+    GetScanCpuRangeConfig(&cpuMin, &cpuMax, &configured);
+    EXPECT_EQ(4U, cpuMin);
+    EXPECT_EQ(9U, cpuMax);
+    EXPECT_TRUE(configured);
+    g_strategyConfig = saved;
+}
+
 extern "C" void StrategyConfigRead(void);
 extern "C" int ConfigReadReadFile(const char *configFile);
 
