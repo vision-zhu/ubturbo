@@ -2420,13 +2420,62 @@ static void *FinishMigrationThread(void *arg)
     return nullptr;
 }
 
-TEST_F(ManageTest, TestPartialRemoveWaitsForMigrationEnd)
+/* 部分移除在 g_manageLock 外取得迁移保持并等待迁移结束；超时/停止时释放保持返回 -EBUSY */
+TEST_F(ManageTest, TestPartialRemoveHoldsWaitForMigrationEnd)
 {
     PidSlotInit(&g_processManager);
     ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
     ASSERT_NE(nullptr, attr);
     attr->pid = 213;
     attr->type = VM_TYPE;
+    attr->scanType = STATISTIC_SCAN;
+    attr->state = PROC_MIGRATE;
+    int idx = PidSlotAdd(&g_processManager, attr);
+    ASSERT_GE(idx, 0);
+    struct RemoveMsg msg = {};
+    msg.count = 2;
+    msg.payload[0].pid = 213;
+    msg.payload[0].count = 1;
+    msg.payload[0].nid[0] = 4;
+    msg.payload[1].pid = 214; /* 整进程移除与未纳管 pid 不取保持 */
+
+    MOCKER(SmapStopRequested).stubs().will(returnValue(false));
+    pthread_t tid;
+    ASSERT_EQ(0, pthread_create(&tid, nullptr, FinishMigrationThread, &g_processManager.slots[idx]));
+    struct PartialRemoveHolds holds = {};
+    EXPECT_EQ(0, AcquirePartialRemoveHolds(&msg, &holds));
+    pthread_join(tid, nullptr);
+    EXPECT_EQ(1, holds.count);
+    EXPECT_EQ(1U, attr->migrateHoldRefs);
+    EXPECT_EQ(0, CheckPartialRemoveReady(&msg));
+    ReleasePartialRemoveHolds(&holds);
+    EXPECT_EQ(0U, attr->migrateHoldRefs);
+    /* 没有保持（worker 可能随时进入迁移）：g_manageLock 内的复核不放行 */
+    EXPECT_EQ(-EBUSY, CheckPartialRemoveReady(&msg));
+    GlobalMockObject::verify();
+
+    /* 一直处于迁移且 SMAP 正在停止：释放保持并返回 -EBUSY */
+    attr->state = PROC_MIGRATE;
+    MOCKER(SmapStopRequested).stubs().will(returnValue(true));
+    EXPECT_EQ(-EBUSY, AcquirePartialRemoveHolds(&msg, &holds));
+    EXPECT_EQ(0, holds.count);
+    EXPECT_EQ(0U, attr->migrateHoldRefs);
+    GlobalMockObject::verify();
+
+    attr->state = PROC_IDLE;
+    EXPECT_TRUE(PidSlotRemove(&g_processManager, 213));
+    PidSlotDestroy(&g_processManager);
+}
+
+/* g_manageLock 内的部分移除不再等待：仍在迁移时直接返回 -EBUSY，不改写 attr、不落盘 */
+TEST_F(ManageTest, TestPartialRemoveDoesNotWaitWhenMigrating)
+{
+    PidSlotInit(&g_processManager);
+    ProcessAttr *attr = (ProcessAttr *)calloc(1, sizeof(ProcessAttr));
+    ASSERT_NE(nullptr, attr);
+    attr->pid = 213;
+    attr->type = VM_TYPE;
+    attr->scanType = STATISTIC_SCAN;
     attr->remoteNumaCnt = 2;
     attr->state = PROC_MIGRATE;
     int idx = PidSlotAdd(&g_processManager, attr);
@@ -2436,26 +2485,18 @@ TEST_F(ManageTest, TestPartialRemoveWaitsForMigrationEnd)
     payload.count = 1;
     payload.nid[0] = 4;
 
-    /* 迁移中：等待 worker 把状态切回空闲后才在 attrLock 内改写 */
-    MOCKER(SmapStopRequested).stubs().will(returnValue(false));
-    MOCKER(RemoveManagedProcessRemoteNode).expects(once()).will(ignoreReturnValue());
-    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
-    pthread_t tid;
-    ASSERT_EQ(0, pthread_create(&tid, nullptr, FinishMigrationThread, &g_processManager.slots[idx]));
-    EXPECT_EQ(0, ClearManagedProcess(1, &payload));
-    pthread_join(tid, nullptr);
-    EXPECT_EQ(PROC_IDLE, attr->state);
-    GlobalMockObject::verify();
-
-    /* 一直处于迁移且 SMAP 正在停止：跳过并返回 -EBUSY，不改写 attr、不落盘 */
-    attr->state = PROC_MIGRATE;
-    MOCKER(SmapStopRequested).stubs().will(returnValue(true));
+    MOCKER(SmapStopRequested).expects(never());
     MOCKER(RemoveManagedProcessRemoteNode).expects(never());
     MOCKER(SyncAllProcessConfig).expects(never());
     EXPECT_EQ(-EBUSY, ClearManagedProcess(1, &payload));
     GlobalMockObject::verify();
 
     attr->state = PROC_IDLE;
+    MOCKER(RemoveManagedProcessRemoteNode).expects(once()).will(ignoreReturnValue());
+    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
+    EXPECT_EQ(0, ClearManagedProcess(1, &payload));
+    GlobalMockObject::verify();
+
     EXPECT_TRUE(PidSlotRemove(&g_processManager, 213));
     PidSlotDestroy(&g_processManager);
 }

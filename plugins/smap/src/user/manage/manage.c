@@ -1141,9 +1141,9 @@ struct PidSlot *PidSlotGetRefByAttr(const ProcessAttr *attr)
 }
 
 /*
- * 取得 attr 所属槽位并加 attrLock（引用+1），仅用于 freqWaiters 等待者链表的
- * 注册/摘除/遍历（RegisterFreqWaiter、CancelFreqWaiter、InvokeFreqCallbacks）。
- * attr 未注册进槽表时（单测场景）返回 NULL，调用方退化为无操作；释放时须
+ * 取得 attr 所属（INUSE）槽位并加 attrLock（引用+1），用于 freqWaiters 等待者链表的
+ * 注册/遍历与接口线程的部分移除。
+ * attr 未注册进槽表时（单测场景）返回 NULL，调用方退化为无锁操作；释放时须
  * 配对调用 ProcessAttrLockPut。锁持有期间不得再取 attrLock（非递归锁）。
  */
 static struct PidSlot *ProcessAttrLockTake(const ProcessAttr *attr)
@@ -2150,17 +2150,11 @@ static int AccessRemovePid(pid_t pid)
     return ret;
 }
 
-/*
- * Decide whether removing the requested remote nodes leaves the process
- * without any remote target. The kernel tracks pages per node without a
- * numa_nodes bitmap, so no tracking-scope update is needed; the result only
- * decides whether kernel tracking should be torn down entirely.
- */
-static bool RemoveLeavesNoRemoteTarget(ProcessAttr *attr, const struct RemovePayload *payload)
+static uint32_t CountRemainingRemoteTargets(const ProcessTargetConfig *config, const struct RemovePayload *payload)
 {
-    int remaining = 0;
-    for (uint32_t i = 0; i < attr->targetConfig.count; i++) {
-        int nid = attr->targetConfig.targets[i].remoteNid;
+    uint32_t remaining = 0;
+    for (uint32_t i = 0; i < config->count; i++) {
+        int nid = config->targets[i].remoteNid;
         bool removedNow = false;
         for (int j = 0; j < payload->count; j++) {
             if (payload->nid[j] == nid) {
@@ -2172,7 +2166,23 @@ static bool RemoveLeavesNoRemoteTarget(ProcessAttr *attr, const struct RemovePay
             remaining++;
         }
     }
-    return remaining == 0;
+    return remaining;
+}
+
+/*
+ * Decide whether removing the requested remote nodes leaves the process
+ * without any remote target. The kernel tracks pages per node without a
+ * numa_nodes bitmap, so no tracking-scope update is needed; the result only
+ * decides whether kernel tracking should be torn down entirely. A pending
+ * target that still has remote nodes keeps the pid managed (and tracked):
+ * the same rule is used by ClearManagedPartialRemoteNodes. Caller holds attrLock.
+ */
+static bool RemoveLeavesNoRemoteTarget(ProcessAttr *attr, const struct RemovePayload *payload)
+{
+    if (CountRemainingRemoteTargets(&attr->targetConfig, payload) != 0) {
+        return false;
+    }
+    return !attr->pendingTargetConfigValid || CountRemainingRemoteTargets(&attr->pendingTargetConfig, payload) == 0;
 }
 
 /* Apply remove requests to kernel access tracking before changing manager state. */
@@ -2199,7 +2209,11 @@ int IoctlRemoveProcess(struct RemoveMsg *msg)
             PutProcessAttr(attr);
             continue;
         }
-        if (RemoveLeavesNoRemoteTarget(attr, payload)) {
+        /* CheckPartialRemoveReady 已保证该 attr 不在迁移且被保持，目标配置在本次移除期间不变 */
+        struct PidSlot *slot = ProcessAttrLockTake(attr);
+        bool noRemoteLeft = RemoveLeavesNoRemoteTarget(attr, payload);
+        ProcessAttrLockPut(slot);
+        if (noRemoteLeft) {
             int ret = AccessRemovePid(pid);
             if (ret) {
                 PutProcessAttr(attr);
@@ -2286,35 +2300,122 @@ static void RemoveManagedProcessRemoteNode(ProcessAttr *attr, int remoteNid)
 #define PARTIAL_REMOVE_WAIT_MAX_MS (60 * 1000)
 
 /*
- * 取 attr 所属槽位的 attrLock，且保证返回时 attr 不处于 PROC_MIGRATE：worker 在迁移期间
- * 无锁读取 targetConfig/位图/方向矩阵做规划与结算，不能在此期间改写。worker 在 attrLock
- * 下切换 IDLE<->MIGRATE，故持锁看到非 MIGRATE 即可安全改写直至解锁。
- * 成功返回 0 并经 *slotOut 返回已加锁槽位（attr 未注册进槽位表时为 NULL，无并发写者）；
- * 迁移长时间未结束或 SMAP 正在停止时返回 -EBUSY，未持锁。
+ * 部分移除要改写 targetConfig/位图/方向矩阵，而 worker 在 PROC_MIGRATE 期间无锁读取它们做
+ * 规划与结算。等待迁移结束不能放在 g_manageLock 内（会阻塞所有纳管接口），因此分两步：
+ * 1) g_manageLock 之外：对每个部分移除 pid 在 attrLock 下 migrateHoldRefs++（worker 在同一把锁下
+ *    看到持有即不再进入 PROC_MIGRATE），再轮询直到这些 pid 都不处于 PROC_MIGRATE；
+ * 2) g_manageLock 之内：CheckPartialRemoveReady 复核（不等待），随后内核与用户态的修改都在
+ *    「不在迁移且被保持」的前提下进行，判定与修改之间目标配置不会被 worker 改写。
+ * 超时或 SMAP 停止时释放保持并返回 -EBUSY，此时尚未做任何内核或用户态修改。
  */
-static int LockAttrSlotWhenNotMigrating(ProcessAttr *attr, struct PidSlot **slotOut)
+static bool IsPartialRemovePayload(const struct RemovePayload *payload)
 {
-    struct PidSlot *slot = PidSlotGetRefByAttr(attr);
-    *slotOut = NULL;
-    if (!slot) {
-        return 0;
+    return !IsRemoveWholeProcess(payload);
+}
+
+static bool PartialRemoveHoldsSettled(const struct PartialRemoveHolds *holds)
+{
+    for (int i = 0; i < holds->count; i++) {
+        struct PidSlot *slot = holds->slot[i];
+        EnvMutexLock(&slot->attrLock);
+        bool migrating = slot->attr->state == PROC_MIGRATE;
+        EnvMutexUnlock(&slot->attrLock);
+        if (migrating) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int AcquirePartialRemoveHolds(const struct RemoveMsg *msg, struct PartialRemoveHolds *holds)
+{
+    holds->count = 0;
+    if (!msg || msg->count <= 0 || msg->count > MAX_NR_REMOVE) {
+        return 0; /* 由 RemoveImpl 的参数校验报错 */
+    }
+    for (int i = 0; i < msg->count; i++) {
+        if (!IsPartialRemovePayload(&msg->payload[i])) {
+            continue;
+        }
+        struct PidSlot *slot = PidSlotGetRef(msg->payload[i].pid);
+        if (!slot) {
+            continue;
+        }
+        EnvMutexLock(&slot->attrLock);
+        slot->attr->migrateHoldRefs++;
+        EnvMutexUnlock(&slot->attrLock);
+        holds->slot[holds->count++] = slot;
     }
     uint32_t waitedMs = 0;
-    for (;;) {
-        EnvMutexLock(&slot->attrLock);
-        if (attr->state != PROC_MIGRATE) {
-            *slotOut = slot;
-            return 0;
-        }
-        EnvMutexUnlock(&slot->attrLock);
+    while (!PartialRemoveHoldsSettled(holds)) {
         if (waitedMs >= PARTIAL_REMOVE_WAIT_MAX_MS || SmapStopRequested()) {
-            SMAP_LOGGER_ERROR("Pid %d is still migrating after %ums, skip partial remove.", attr->pid, waitedMs);
-            PidSlotReleaseRefs(&slot, 1);
+            SMAP_LOGGER_ERROR("Partial remove: pids still migrating after %ums, nothing removed.", waitedMs);
+            ReleasePartialRemoveHolds(holds);
             return -EBUSY;
         }
         EnvMsleep(PARTIAL_REMOVE_WAIT_POLL_MS);
         waitedMs += PARTIAL_REMOVE_WAIT_POLL_MS;
     }
+    return 0;
+}
+
+void ReleasePartialRemoveHolds(struct PartialRemoveHolds *holds)
+{
+    for (int i = 0; i < holds->count; i++) {
+        struct PidSlot *slot = holds->slot[i];
+        EnvMutexLock(&slot->attrLock);
+        if (slot->attr->migrateHoldRefs > 0) {
+            slot->attr->migrateHoldRefs--;
+        }
+        EnvMutexUnlock(&slot->attrLock);
+        PidSlotReleaseRefs(&holds->slot[i], 1);
+    }
+    holds->count = 0;
+}
+
+/*
+ * 持 g_manageLock 调用，不等待：每个部分移除 pid 的当前 attr 须不在迁移且有保持
+ * （保持期间 worker 不会进入迁移）。保持之后 pid 被重新纳管为新 attr 等极端情况返回 -EBUSY，
+ * 此时尚未做任何修改。
+ */
+int CheckPartialRemoveReady(const struct RemoveMsg *msg)
+{
+    for (int i = 0; i < msg->count; i++) {
+        if (!IsPartialRemovePayload(&msg->payload[i])) {
+            continue;
+        }
+        ProcessAttr *attr = GetProcessAttr(msg->payload[i].pid);
+        if (!attr) {
+            continue;
+        }
+        struct PidSlot *slot = ProcessAttrLockTake(attr);
+        bool ready = attr->state != PROC_MIGRATE && (!slot || attr->migrateHoldRefs > 0);
+        ProcessAttrLockPut(slot);
+        PutProcessAttr(attr);
+        if (!ready) {
+            SMAP_LOGGER_ERROR("Pid %d is migrating, skip partial remove.", msg->payload[i].pid);
+            return -EBUSY;
+        }
+    }
+    return 0;
+}
+
+/*
+ * 取 attr 所属槽位的 attrLock（attr 未注册进槽位表时 *slotOut 为 NULL，无并发写者）。
+ * 调用方已经 AcquirePartialRemoveHolds/CheckPartialRemoveReady 保证不在迁移；此处只做防御
+ * 性复核，处于 PROC_MIGRATE 时返回 -EBUSY 且不持锁，不再等待。
+ */
+static int LockAttrSlotWhenNotMigrating(ProcessAttr *attr, struct PidSlot **slotOut)
+{
+    struct PidSlot *slot = ProcessAttrLockTake(attr);
+    *slotOut = NULL;
+    if (attr->state == PROC_MIGRATE) {
+        ProcessAttrLockPut(slot);
+        SMAP_LOGGER_ERROR("Pid %d is migrating, skip partial remove.", attr->pid);
+        return -EBUSY;
+    }
+    *slotOut = slot;
+    return 0;
 }
 
 static int ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *removed, bool *changed)
@@ -2333,7 +2434,9 @@ static int ClearManagedPartialRemoteNodes(struct RemovePayload *payload, bool *r
     for (int i = 0; i < payload->count; i++) {
         RemoveManagedProcessRemoteNode(attr, payload->nid[i]);
     }
-    bool noRemoteLeft = attr->remoteNumaCnt == 0;
+    /* 与 RemoveLeavesNoRemoteTarget 同一判定：pending 目标仍有远端时保留纳管 */
+    bool noRemoteLeft = attr->remoteNumaCnt == 0 &&
+                        (!attr->pendingTargetConfigValid || attr->pendingTargetConfig.count == 0);
     if (slot) {
         EnvMutexUnlock(&slot->attrLock);
         PidSlotReleaseRefs(&slot, 1);

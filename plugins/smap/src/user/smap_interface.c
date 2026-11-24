@@ -1734,6 +1734,11 @@ static int RemoveImpl(struct RemoveMsg *msg, int pageType)
         SMAP_LOGGER_ERROR("Check grouped pid for smap remove failed: %d.", ret);
         return ret;
     }
+    /* 部分移除的 pid 须不在迁移（保持已在 g_manageLock 外取得）；不满足时不做任何修改 */
+    ret = CheckPartialRemoveReady(msg);
+    if (ret) {
+        return ret;
+    }
     // send ioctl to remove pid
     ret = IoctlRemoveProcess(msg);
     if (ret) {
@@ -1748,9 +1753,16 @@ static int RemoveImpl(struct RemoveMsg *msg, int pageType)
 
 static int RemoveImplManaged(struct RemoveMsg *msg, int pageType)
 {
+    /* 部分移除需等待迁移结束：在 g_manageLock 之外取得迁移保持并等待，避免阻塞其它纳管接口 */
+    struct PartialRemoveHolds holds = { 0 };
+    int ret = AcquirePartialRemoveHolds(msg, &holds);
+    if (ret) {
+        return ret;
+    }
     EnvMutexLock(&g_manageLock);
-    int ret = RemoveImpl(msg, pageType);
+    ret = RemoveImpl(msg, pageType);
     EnvMutexUnlock(&g_manageLock);
+    ReleasePartialRemoveHolds(&holds);
     return ret;
 }
 
