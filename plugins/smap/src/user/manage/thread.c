@@ -92,21 +92,23 @@ out:
     return ret;
 }
 
-static int EventLoopRegisterExistingPids(struct ProcessManager *manager)
+/*
+ * 单个 pid 注册失败（进程刚退出、mem_freq 节点缺失等）不影响服务启动：
+ * ManagerDaemonWork 每个周期经 EventLoopEnsureRegistered 重试，仅告警。
+ */
+static void EventLoopRegisterExistingPids(struct ProcessManager *manager)
 {
     struct PidSlot *slots[MAX_PID_SLOTS];
     size_t count = PidSlotCollectRefs(manager, slots, MAX_PID_SLOTS);
-    int ret = 0;
 
     for (size_t i = 0; i < count; i++) {
         int registerRet = EventLoopRegisterPid(slots[i]->pid);
-
-        if (registerRet && ret == 0) {
-            ret = registerRet;
+        if (registerRet) {
+            SMAP_LOGGER_WARNING("Register mem_freq event for pid %d failed: %d, retry later.", slots[i]->pid,
+                                registerRet);
         }
     }
     PidSlotReleaseRefs(slots, count);
-    return ret;
 }
 
 /* 为尚未注册 mem_freq 的普通扫描 PID 重试事件监听。 */
@@ -305,12 +307,7 @@ int InitEventLoop(struct ProcessManager *m)
         return -ret;
     }
     l->inited = true;
-    ret = EventLoopRegisterExistingPids(m);
-    if (ret) {
-        EventLoopStopAndJoin(l);
-        EventLoopCloseFds(l);
-        return ret;
-    }
+    EventLoopRegisterExistingPids(m);
     return 0;
 }
 
