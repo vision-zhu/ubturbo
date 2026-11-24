@@ -294,6 +294,8 @@ int BuildPidData(ProcessAttr *attr)
     int nrLocalNuma = GetProcessManager()->nrLocalNuma;
     if (!NumaBitmapAlloc(&numaNodes)) {
         SMAP_LOGGER_ERROR("Alloc numaNodes for pid %d failed.", attr->pid);
+        /* 与其他错误出口一致：释放 freq_query 等待者，避免其白等满超时 */
+        InvokeFreqCallbacks(attr);
         return -ENOMEM;
     }
     for (int nid = 0; nid < nrLocalNuma; nid++) {
