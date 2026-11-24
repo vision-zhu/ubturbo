@@ -426,6 +426,7 @@ struct ProcessAttribute {
     ProcessTargetConfig pendingTargetConfig;
     bool pendingTargetConfigValid;
     uint32_t pendingSeq; // 防止应用期间的新配置被旧快照清除
+    uint32_t migrateHoldRefs; // 部分移除等待/执行中的持有数，attrLock 保护；>0 时 worker 不开始新的迁移周期
     ManagedLocalState managedLocalState;
     SeparateParam separateParam;
     NumaAttribute numaAttr;
@@ -734,6 +735,14 @@ struct RemovePayload;
 int IoctlRemoveProcess(struct RemoveMsg *msg);
 /* 返回 0 成功；部分节点移除因进程长时间处于迁移中被跳过时返回 -EBUSY（其余 payload 照常处理） */
 int ClearManagedProcess(int nr, struct RemovePayload *payload);
+/* 部分移除（payload.count > 0）在 g_manageLock 之外取得的迁移保持：阻止 worker 开始新的迁移周期 */
+struct PartialRemoveHolds {
+    struct PidSlot *slot[MAX_NR_REMOVE];
+    int count;
+};
+int AcquirePartialRemoveHolds(const struct RemoveMsg *msg, struct PartialRemoveHolds *holds);
+void ReleasePartialRemoveHolds(struct PartialRemoveHolds *holds);
+int CheckPartialRemoveReady(const struct RemoveMsg *msg);
 
 int MigrateMemoryBack(pid_t pid, int srcNid, int desNid, uint64_t paStart, uint64_t paEnd);
 

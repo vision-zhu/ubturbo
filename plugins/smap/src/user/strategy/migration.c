@@ -2215,7 +2215,8 @@ static int ProcessPidScanMigrate(struct ProcessManager *manager, struct PidSlot 
     ApplyUbBwStop(attr, manager);
     /* 候选切换（attrLock 双检），与 API 线程状态读写序列化 */
     EnvMutexLock(&slot->attrLock);
-    if (attr->state != PROC_IDLE) {
+    /* 部分移除持有迁移保持时不开始新的迁移周期，等其改写完目标配置 */
+    if (attr->state != PROC_IDLE || attr->migrateHoldRefs > 0) {
         EnvMutexUnlock(&slot->attrLock);
         goto enable;
     }

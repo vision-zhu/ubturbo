@@ -5134,6 +5134,14 @@ TEST_F(InterfaceTest, TestRemoveLeavesNoRemoteTarget)
     ProcessAttr otherAttr = attr;
     struct RemovePayload other = {.count = 1, .nid = {6}};
     EXPECT_FALSE(RemoveLeavesNoRemoteTarget(&otherAttr, &other));
+
+    /* A pending target that still has a remote node keeps the pid tracked. */
+    lastAttr.pendingTargetConfigValid = true;
+    lastAttr.pendingTargetConfig.count = 1;
+    lastAttr.pendingTargetConfig.targets[0] = {6, 25, 0};
+    EXPECT_FALSE(RemoveLeavesNoRemoteTarget(&lastAttr, &last));
+    lastAttr.pendingTargetConfig.targets[0] = {5, 25, 0};
+    EXPECT_TRUE(RemoveLeavesNoRemoteTarget(&lastAttr, &last));
 }
 
 extern "C" int CheckSmapRemoveGroupedPidLocked(struct RemoveMsg *msg);
