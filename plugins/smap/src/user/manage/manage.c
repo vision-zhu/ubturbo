@@ -1628,8 +1628,9 @@ int PrepareProcessManageCandidate(ProcessParam *param, PidType type, ProcessMana
 /*
  * 发布前用 active 的当前值覆盖候选中的运行期状态：候选是 Prepare 时的快照，期间 worker
  * 可能已更新这些字段，整体回写会丢失其更新。只有目标配置类字段以候选为准。须持 attrLock。
+ * 凡在锁外准备、重新加锁后经 PublishProcessTargetCandidate 发布的候选都须先调用本函数。
  */
-static void RefreshCandidateRuntimeStateLocked(ProcessAttr *prepared, const ProcessAttr *active)
+void RefreshCandidateRuntimeStateLocked(ProcessAttr *prepared, const ProcessAttr *active)
 {
     StrategyAttribute *ps = &prepared->strategyAttr;
     const StrategyAttribute *as = &active->strategyAttr;

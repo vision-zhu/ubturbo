@@ -88,6 +88,8 @@ int ApplyProcessTargetConfig(ProcessAttr *attr, const ProcessTargetConfig *confi
 int StagePendingMigrationTargets(ProcessAttr *attr, const ProcessTargetConfig *config, bool ignoreRemoteCapacity);
 int SetProcessConfig(ProcessAttr *attr, ProcessParam *param, bool skipRemoteResidencyCheck);
 void PublishProcessTargetCandidate(ProcessAttr *attr, const ProcessAttr *candidate);
+/* 须持 attrLock：发布锁外准备的候选前，把运行期字段（周期、sync-wait 保护、带宽限制等）刷新为 active 当前值 */
+void RefreshCandidateRuntimeStateLocked(ProcessAttr *prepared, const ProcessAttr *active);
 void SetBasicProcessConfig(ProcessAttr *attr, ProcessParam *param);
 void SetMultiNumaConfig(ProcessAttr *attr, ProcessParam *param, int nrLocalNuma);
 
