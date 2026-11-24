@@ -891,10 +891,11 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
         EnvMutexLock(&slot->attrLock);
     }
     bool stageUnchanged = attr->pendingSeq == pendingSeq;
+    /* 候选克隆后在锁外准备期间，接口线程可能已改写 sync-wait 引用计数、SmapSetPidPeriod 周期等
+     * 运行期字段；与 PublishProcessManageCandidate 一致，发布前刷新为 active 当前值，
+     * 同时在 sync-wait 保护下把快照标记置为无效（须等新一轮快照再判定远端是否清空） */
+    RefreshCandidateRuntimeStateLocked(&candidate, attr);
     PublishProcessTargetCandidate(attr, &candidate);
-    if (attr->syncWaitRemoteEmpty) {
-        attr->syncWaitRemoteEmptySnapshotValid = false;
-    }
     if (stageUnchanged) {
         ClearProcessTargetConfig(&attr->pendingTargetConfig);
         attr->pendingTargetConfigValid = false;

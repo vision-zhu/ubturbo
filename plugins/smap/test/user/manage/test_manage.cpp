@@ -775,6 +775,57 @@ TEST_F(ManageTest, TestApplyPendingMigrationTargetsKeepsRestagedConfig)
     FreeProcessAttrArrays(&attr);
 }
 
+static ProcessAttr *g_runtimeChangedAttr = nullptr;
+/* 模拟 worker 锁外准备候选期间接口线程改写运行期字段：sync-wait 保护解除、SmapSetPidPeriod 设周期 */
+static int ChangeRuntimeDuringObservation(pid_t pid, bool hugeFlag, uint32_t *residentLocalMask,
+                                          uint64_t numaPages[SMAP_MAX_NUMNODES])
+{
+    g_runtimeChangedAttr->syncWaitRemoteEmptyRefs = 0;
+    g_runtimeChangedAttr->syncWaitRemoteEmpty = false;
+    g_runtimeChangedAttr->syncWaitRemoteEmptySnapshotValid = false;
+    g_runtimeChangedAttr->scanTime = 300;
+    g_runtimeChangedAttr->migPeriod = 3000;
+    return AddEmptyCandidateResidentForTest(pid, hugeFlag, residentLocalMask, numaPages);
+}
+
+/* 发布锁外准备的候选时，运行期字段以 active 当前值为准，不得被克隆时的旧值覆盖 */
+TEST_F(ManageTest, TestApplyPendingMigrationTargetsKeepsRuntimeState)
+{
+    ProcessAttr attr = {};
+    attr.pid = 123;
+    attr.type = VM_TYPE;
+    attr.state = PROC_MIGRATE;
+    attr.syncWaitRemoteEmptyRefs = 1;
+    attr.syncWaitRemoteEmpty = true;
+    attr.scanTime = 200;
+    attr.migPeriod = 2000;
+    attr.pendingTargetConfig.migrateMode = MIG_MEMSIZE_MODE;
+    attr.pendingTargetConfig.sourceLocalNid = NUMA_NO_NODE;
+    attr.pendingTargetConfig.count = 1;
+    attr.pendingTargetConfig.targets[0] = {5, 0, 4096};
+    attr.pendingTargetConfigValid = true;
+
+    g_processManager.nrLocalNuma = 4;
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+    attr.numaAttr.numaNodes = BmFromWord(0x1);
+    g_pageSizeNormal = PAGESIZE_4K;
+    g_pageSizeHuge = PAGESIZE_2M;
+    g_processManager.tracking.pageSize = PAGESIZE_4K;
+    g_runtimeChangedAttr = &attr;
+    MOCKER(SetLocalNumaByCpu).expects(once()).will(invoke(AddAffinityLocalForTest));
+    MOCKER(GetProcessNumaMapsObservation).expects(once()).will(invoke(ChangeRuntimeDuringObservation));
+    MOCKER(SyncAllProcessConfig).expects(once()).will(returnValue(0));
+
+    EXPECT_EQ(0, ApplyPendingMigrationTargets(&attr));
+    g_runtimeChangedAttr = nullptr;
+    EXPECT_EQ(5, attr.targetConfig.targets[0].remoteNid);
+    EXPECT_FALSE(attr.syncWaitRemoteEmpty);
+    EXPECT_EQ(0U, attr.syncWaitRemoteEmptyRefs);
+    EXPECT_EQ(300U, attr.scanTime);
+    EXPECT_EQ(3000U, attr.migPeriod);
+    FreeProcessAttrArrays(&attr);
+}
+
 /* 准备失败（单本地+单远端缺驻留观测）时，active 的共享矩阵与位图不得被候选改写 */
 TEST_F(ManageTest, TestApplyPendingMigrationTargetsFailureKeepsActiveArrays)
 {
