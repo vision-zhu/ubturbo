@@ -84,8 +84,8 @@
 
 #define MAX_CONFIG_VAL_LEN 64
 
-/* read valid cpu range from /sys/devices/system/cpu/possible */
-static void GetSystemCpuRange(uint32_t *cpuMin, uint32_t *cpuMax)
+/* read valid cpu range from /sys/devices/system/cpu/possible; returns false (range 0-0) on failure */
+static bool GetSystemCpuRange(uint32_t *cpuMin, uint32_t *cpuMax)
 {
     *cpuMin = 0;
     *cpuMax = 0;
@@ -93,14 +93,14 @@ static void GetSystemCpuRange(uint32_t *cpuMin, uint32_t *cpuMax)
     FILE *fp = fopen(SYS_CPU_POSSIBLE, "r");
     if (fp == NULL) {
         SMAP_LOGGER_ERROR("Open %s failed, use default cpu range 0-0.", SYS_CPU_POSSIBLE);
-        return;
+        return false;
     }
 
     char buf[64] = { 0 };
     if (fgets(buf, sizeof(buf), fp) == NULL) {
         SMAP_LOGGER_ERROR("Read %s failed, use default cpu range 0-0.", SYS_CPU_POSSIBLE);
         (void)fclose(fp);
-        return;
+        return false;
     }
     (void)fclose(fp);
 
@@ -108,12 +108,13 @@ static void GetSystemCpuRange(uint32_t *cpuMin, uint32_t *cpuMax)
     uint32_t min = 0, max = 0;
     if (sscanf_s(buf, "%u-%u", &min, &max) != 2) {
         SMAP_LOGGER_ERROR("Parse %s failed, content:%s, use default cpu range 0-0.", SYS_CPU_POSSIBLE, buf);
-        return;
+        return false;
     }
 
     *cpuMin = min;
     *cpuMax = max;
     SMAP_LOGGER_DEBUG("System cpu range: %u-%u.", *cpuMin, *cpuMax);
+    return true;
 }
 
 /* struct StrategyConfig is defined in strategy_config.h (single source) */
@@ -649,7 +650,7 @@ static int32_t ConfigScanCpu(char *substr, char *value)
      * affinity falls through (min<=max checked above, so min<sysMin and
      * max>sysMax cover the whole range) */
     uint32_t sysCpuMin, sysCpuMax;
-    GetSystemCpuRange(&sysCpuMin, &sysCpuMax);
+    (void)GetSystemCpuRange(&sysCpuMin, &sysCpuMax);
     if (scanCpuMin < sysCpuMin || scanCpuMax > sysCpuMax) {
         SMAP_LOGGER_ERROR("Config scan cpu range(%u-%u) out of system possible cpu range(%u-%u), key:%s.", scanCpuMin,
                           scanCpuMax, sysCpuMin, sysCpuMax, substr);
@@ -1056,6 +1057,43 @@ static void LogStrategyConfigValueChanges(const StrategyConfig *old)
     }
 }
 
+static bool IsConfigKeySeen(const char *key)
+{
+    size_t num = sizeof(g_strategyConfigRead) / sizeof(StrategyConfigReadElem);
+    for (size_t index = 0; index < num; index++) {
+        if (strcmp(g_strategyConfigRead[index].substr, key) == 0) {
+            return g_strategyConfigRead[index].seen;
+        }
+    }
+    return false;
+}
+
+/*
+ * smap.scan.cpu absent or empty means unset. When it goes from set to unset the
+ * kernel scan thread must be released from the old range: the candidate range
+ * becomes the system possible range, which UpdateMigrateModeAndScanCpu then
+ * pushes down. If that range cannot be read, stay configured and retry next round.
+ */
+static void PrepareScanCpuUnset(void)
+{
+    if (!IsConfigKeySeen("smap.scan.cpu")) {
+        g_tmpStrategyConfig.scanCpuConfigured = false;
+    }
+    if (g_tmpStrategyConfig.scanCpuConfigured || !g_strategyConfig.scanCpuConfigured) {
+        return;
+    }
+    uint32_t sysCpuMin, sysCpuMax;
+    if (!GetSystemCpuRange(&sysCpuMin, &sysCpuMax)) {
+        SMAP_LOGGER_WARNING("Unset scan cpu deferred: system cpu range unavailable.");
+        g_tmpStrategyConfig.scanCpuConfigured = true;
+        g_tmpStrategyConfig.scanCpuMin = g_strategyConfig.scanCpuMin;
+        g_tmpStrategyConfig.scanCpuMax = g_strategyConfig.scanCpuMax;
+        return;
+    }
+    g_tmpStrategyConfig.scanCpuMin = sysCpuMin;
+    g_tmpStrategyConfig.scanCpuMax = sysCpuMax;
+}
+
 static void UpdateMigrateModeAndScanCpu(void)
 {
     uint32_t oldMigrateMode = g_strategyConfig.migrateMode;
@@ -1068,14 +1106,18 @@ static void UpdateMigrateModeAndScanCpu(void)
         SMAP_LOGGER_INFO("Update migrate mode from %u to %u.", oldMigrateMode, g_tmpStrategyConfig.migrateMode);
     }
 
-    g_strategyConfig.scanCpuConfigured = g_tmpStrategyConfig.scanCpuConfigured;
-    if (g_strategyConfig.scanCpuMin != g_tmpStrategyConfig.scanCpuMin ||
+    /* set <-> unset is a change too: unsetting pushes the system possible range
+     * (prepared by PrepareScanCpuUnset) so the kernel scan thread is unbound again */
+    if (g_strategyConfig.scanCpuConfigured != g_tmpStrategyConfig.scanCpuConfigured ||
+        g_strategyConfig.scanCpuMin != g_tmpStrategyConfig.scanCpuMin ||
         g_strategyConfig.scanCpuMax != g_tmpStrategyConfig.scanCpuMax) {
+        g_strategyConfig.scanCpuConfigured = g_tmpStrategyConfig.scanCpuConfigured;
         g_strategyConfig.scanCpuMin = g_tmpStrategyConfig.scanCpuMin;
         g_strategyConfig.scanCpuMax = g_tmpStrategyConfig.scanCpuMax;
         g_strategyConfig.scanCpuChanged = true;
         g_tmpStrategyConfig.scanCpuChanged = true; /* keep flag through whole-struct assign, same as above */
-        SMAP_LOGGER_INFO("Update scan cpu range %u-%u.", g_strategyConfig.scanCpuMin, g_strategyConfig.scanCpuMax);
+        SMAP_LOGGER_INFO("Update scan cpu range %u-%u (configured %d).", g_strategyConfig.scanCpuMin,
+                         g_strategyConfig.scanCpuMax, g_strategyConfig.scanCpuConfigured);
     }
 }
 
@@ -1171,6 +1213,7 @@ void StrategyConfigRead(void)
         SMAP_LOGGER_ERROR("Review period config failed, ret(%d).", ret);
         return;
     }
+    PrepareScanCpuUnset();
 
     /* The automatic-period switch is independent of the fixed file-period switch. */
     g_strategyConfig.adaptivePeriodEnable = g_tmpStrategyConfig.adaptivePeriodEnable;

@@ -359,10 +359,94 @@ TEST_F(PeriodConfigTest, TestUpdateMigrateModeAndScanCpuNoChange)
     g_strategyConfig.scanCpuMax = 3;
     g_tmpStrategyConfig.scanCpuMin = 1;
     g_tmpStrategyConfig.scanCpuMax = 3;
+    g_strategyConfig.scanCpuConfigured = true;
+    g_tmpStrategyConfig.scanCpuConfigured = true;
+    g_tmpStrategyConfig.migrateMode = g_strategyConfig.migrateMode;
 
     UpdateMigrateModeAndScanCpu();
     EXPECT_EQ(false, g_strategyConfig.migrateModeChanged);
     EXPECT_EQ(false, g_strategyConfig.scanCpuChanged);
+}
+
+/* 取消 smap.scan.cpu（范围不变，仅 configured 变化）也必须视为变更并下发 */
+TEST_F(PeriodConfigTest, TestUpdateMigrateModeAndScanCpuUnsetIsChange)
+{
+    g_strategyConfig.scanCpuChanged = false;
+    g_strategyConfig.scanCpuConfigured = true;
+    g_strategyConfig.scanCpuMin = 0;
+    g_strategyConfig.scanCpuMax = 3;
+    g_tmpStrategyConfig = g_strategyConfig;
+    g_tmpStrategyConfig.scanCpuConfigured = false;
+
+    UpdateMigrateModeAndScanCpu();
+    EXPECT_FALSE(g_strategyConfig.scanCpuConfigured);
+    EXPECT_TRUE(g_strategyConfig.scanCpuChanged);
+    EXPECT_TRUE(g_tmpStrategyConfig.scanCpuChanged);
+    g_strategyConfig.scanCpuChanged = false;
+}
+
+extern "C" void PrepareScanCpuUnset(void);
+extern "C" void PeriodConifgReset(void);
+extern "C" bool GetSystemCpuRange(uint32_t *cpuMin, uint32_t *cpuMax);
+/* key 缺省即未设置：从已设置变为未设置时，候选范围取系统 possible 全范围 */
+TEST_F(PeriodConfigTest, TestPrepareScanCpuUnsetWhenKeyAbsent)
+{
+    uint32_t sysMin = 0;
+    uint32_t sysMax = 0;
+    bool sysOk = GetSystemCpuRange(&sysMin, &sysMax);
+    PeriodConifgReset();
+    g_strategyConfig.scanCpuConfigured = true;
+    g_strategyConfig.scanCpuMin = 0;
+    g_strategyConfig.scanCpuMax = 0;
+    g_tmpStrategyConfig = g_strategyConfig;
+
+    PrepareScanCpuUnset();
+    EXPECT_EQ(!sysOk, g_tmpStrategyConfig.scanCpuConfigured);
+    if (sysOk) {
+        EXPECT_EQ(sysMin, g_tmpStrategyConfig.scanCpuMin);
+        EXPECT_EQ(sysMax, g_tmpStrategyConfig.scanCpuMax);
+    }
+    g_strategyConfig.scanCpuConfigured = false;
+}
+
+/* 系统范围读取失败时保持已设置状态，下一轮重试，不下发 0-0 */
+TEST_F(PeriodConfigTest, TestPrepareScanCpuUnsetDeferredWhenSysRangeUnavailable)
+{
+    PeriodConifgReset();
+    g_strategyConfig.scanCpuConfigured = true;
+    g_strategyConfig.scanCpuMin = 2;
+    g_strategyConfig.scanCpuMax = 5;
+    g_tmpStrategyConfig = g_strategyConfig;
+    g_tmpStrategyConfig.scanCpuConfigured = false;
+    MOCKER(GetSystemCpuRange).stubs().will(returnValue(false));
+
+    PrepareScanCpuUnset();
+    EXPECT_TRUE(g_tmpStrategyConfig.scanCpuConfigured);
+    EXPECT_EQ(2U, g_tmpStrategyConfig.scanCpuMin);
+    EXPECT_EQ(5U, g_tmpStrategyConfig.scanCpuMax);
+    g_strategyConfig.scanCpuConfigured = false;
+}
+
+/* key 存在且有效时不受影响 */
+TEST_F(PeriodConfigTest, TestPrepareScanCpuUnsetKeepsConfiguredKey)
+{
+    PeriodConifgReset();
+    for (int i = 0; g_strategyConfigRead[i].substr != NULL; i++) {
+        if (strcmp(g_strategyConfigRead[i].substr, "smap.scan.cpu") == 0) {
+            g_strategyConfigRead[i].seen = true;
+            break;
+        }
+    }
+    g_strategyConfig.scanCpuConfigured = true;
+    g_strategyConfig.scanCpuMin = 2;
+    g_strategyConfig.scanCpuMax = 5;
+    g_tmpStrategyConfig = g_strategyConfig;
+
+    PrepareScanCpuUnset();
+    EXPECT_TRUE(g_tmpStrategyConfig.scanCpuConfigured);
+    EXPECT_EQ(2U, g_tmpStrategyConfig.scanCpuMin);
+    PeriodConifgReset();
+    g_strategyConfig.scanCpuConfigured = false;
 }
 
 extern "C" int32_t ConfigReadValueToInt(char *pvalue, uint32_t *resultvalue);
