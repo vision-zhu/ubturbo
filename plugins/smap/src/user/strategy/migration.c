@@ -58,6 +58,13 @@ typedef struct {
     bool shouldFreeze;
 } GroupSwapCompPlan;
 
+/* ioctl 返回 -1 时取 errno 作为错误码；errno 异常为 0 时兜底为 -EIO，避免被当作成功 */
+static inline int IoctlErrno(void)
+{
+    int err = errno;
+    return err > 0 ? -err : -EIO;
+}
+
 static int AddMigListCapped(struct MigrateMsg *mMsg, struct MigList *mList, int cap)
 {
     if (!mMsg || !mList) {
@@ -1174,6 +1181,9 @@ static int RunGroupedSwapCompensation(struct ProcessManager *manager, struct Mig
     }
     if (hasCompPages) {
         ret = ioctl(manager->fds.migrate, SMAP_MIG_MIGRATE, &compMsg);
+        if (ret < 0) {
+            ret = IoctlErrno();
+        }
         if (ret) {
             SMAP_LOGGER_ERROR("grouped swap compensation migrate failed: %d.", ret);
         }
@@ -1249,6 +1259,9 @@ static void *SubMigrateThreadFn(void *arg)
         }
     }
     ctx->ret = (ctx->msg.cnt > 0) ? ioctl(ctx->fd, SMAP_MIG_MIGRATE, &ctx->msg) : 0;
+    if (ctx->ret < 0) {
+        ctx->ret = IoctlErrno();
+    }
     return NULL;
 }
 
@@ -1408,6 +1421,9 @@ int DoMigration(struct MigrateMsg *mMsg, struct ProcessManager *manager)
     nThread = DecideThreadNum(mMsg);
     if (nThread == SIG_THREAD_MIG_OUT) {
         err = (mMsg->cnt > 0) ? ioctl(manager->fds.migrate, SMAP_MIG_MIGRATE, mMsg) : 0;
+        if (err < 0) {
+            err = IoctlErrno();
+        }
     } else {
         err = RunMultiThreadedMigrate(mMsg, manager, nThread);
     }
@@ -2146,6 +2162,11 @@ int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg
     }
 
     int ret = ioctl(manager->fds.migrate, SMAP_MIG_MIGRATE_NUMA, msg);
+    if (ret < 0) {
+        ret = IoctlErrno();
+    } else if (ret > 0) {
+        ret = -EIO;
+    }
     SMAP_LOGGER_INFO("migrate numa ioctl ret: %d.", ret);
-    return ret ? -ENOMEM : 0;
+    return ret;
 }

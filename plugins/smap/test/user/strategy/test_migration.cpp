@@ -546,8 +546,10 @@ TEST_F(MigrationTest, TestDoMigration)
     struct MigrateMsg mMsg = {.cnt = 1, .migList = &migList};
 
     struct ProcessManager manager;
+    manager.fds.migrate = -1;
     int ret = DoMigration(&mMsg, &manager);
-    EXPECT_EQ(-1, ret);
+    /* ioctl 失败时返回 -errno（非法 fd 为 -EBADF），而不是 ioctl 的 -1 */
+    EXPECT_EQ(-EBADF, ret);
 }
 
 TEST_F(MigrationTest, TestDoMigrationInitialized)
@@ -563,8 +565,10 @@ TEST_F(MigrationTest, TestDoMigrationInitialized)
     struct MigrateMsg mMsg = {.cnt = 1, .migList = &migList};
 
     struct ProcessManager manager;
+    manager.fds.migrate = -1;
     int ret = DoMigration(&mMsg, &manager);
-    EXPECT_EQ(-1, ret);
+    /* ioctl 失败时返回 -errno（非法 fd 为 -EBADF），而不是 ioctl 的 -1 */
+    EXPECT_EQ(-EBADF, ret);
 }
 
 TEST_F(MigrationTest, DoMigrationMinusCnt)
@@ -1868,13 +1872,40 @@ TEST_F(MigrationTest, TestUpdateMigrateModeAndScanCpuSwapOffStillDelivered)
 }
 
 extern "C" int MigrateRemoteNuma(struct ProcessManager *manager, struct MigrateNumaIoctlMsg *msg);
+static int FailIoctlEinval(int fd, unsigned long req, void *arg)
+{
+    (void)fd;
+    (void)req;
+    (void)arg;
+    errno = EINVAL;
+    return -1;
+}
+
+static int FailIoctlNoErrno(int fd, unsigned long req, void *arg)
+{
+    (void)fd;
+    (void)req;
+    (void)arg;
+    errno = 0;
+    return -1;
+}
+
 TEST_F(MigrationTest, TestMigrateRemoteNumaOne)
 {
     struct ProcessManager manager;
     struct MigrateNumaIoctlMsg msg = {.srcNid = 4, .destNid = 5, .count = 1, .memids = {1}};
-    MOCKER(reinterpret_cast<int (*)(int, unsigned long, void *)>(ioctl)).stubs().will(returnValue(-ENOMEM));
+    MOCKER(reinterpret_cast<int (*)(int, unsigned long, void *)>(ioctl)).stubs().will(invoke(FailIoctlEinval));
     int ret = MigrateRemoteNuma(&manager, &msg);
-    EXPECT_EQ(-ENOMEM, ret);
+    /* 透传 errno，不再统一报 -ENOMEM */
+    EXPECT_EQ(-EINVAL, ret);
+}
+
+TEST_F(MigrationTest, TestMigrateRemoteNumaZeroErrnoFallsBackToEio)
+{
+    struct ProcessManager manager;
+    struct MigrateNumaIoctlMsg msg = {.srcNid = 4, .destNid = 5, .count = 1, .memids = {1}};
+    MOCKER(reinterpret_cast<int (*)(int, unsigned long, void *)>(ioctl)).stubs().will(invoke(FailIoctlNoErrno));
+    EXPECT_EQ(-EIO, MigrateRemoteNuma(&manager, &msg));
 }
 
 TEST_F(MigrationTest, TestApplyUbBwStopThresholdZero)
