@@ -775,6 +775,49 @@ TEST_F(ManageTest, TestApplyPendingMigrationTargetsKeepsRestagedConfig)
     FreeProcessAttrArrays(&attr);
 }
 
+/* 准备失败（单本地+单远端缺驻留观测）时，active 的共享矩阵与位图不得被候选改写 */
+TEST_F(ManageTest, TestApplyPendingMigrationTargetsFailureKeepsActiveArrays)
+{
+    ProcessAttr attr = {};
+    attr.pid = 123;
+    attr.type = VM_TYPE;
+    attr.state = PROC_MIGRATE;
+    attr.targetConfig.migrateMode = MIG_RATIO_MODE;
+    attr.targetConfig.sourceLocalNid = NUMA_NO_NODE;
+    attr.targetConfig.count = 1;
+    attr.targetConfig.targets[0] = {4, 25, 0};
+    attr.pendingTargetConfig.migrateMode = MIG_MEMSIZE_MODE;
+    attr.pendingTargetConfig.sourceLocalNid = NUMA_NO_NODE;
+    attr.pendingTargetConfig.count = 1;
+    attr.pendingTargetConfig.targets[0] = {5, 0, 4096};
+    attr.pendingTargetConfigValid = true;
+
+    g_processManager.nrLocalNuma = 4;
+    ASSERT_EQ(0, InitProcessAttrArrays(&attr));
+    NumaBitmapFree(&attr.numaAttr.numaNodes);
+    attr.numaAttr.numaNodes = BmFromWord(0x11);
+    NM_AT(attr.strategyAttr.initRemoteMemRatio, 0, 4) = 25;
+    NM_AT(attr.strategyAttr.memSize, 0, 4) = 1234;
+    NM_AT(attr.strategyAttr.allocRemoteNrPages, 0, 4) = 77;
+    NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, 4) = 66;
+    g_pageSizeNormal = PAGESIZE_4K;
+    g_pageSizeHuge = PAGESIZE_2M;
+    g_processManager.tracking.pageSize = PAGESIZE_4K;
+    MOCKER(SetLocalNumaByCpu).expects(once()).will(invoke(AddAffinityLocalForTest));
+    MOCKER(GetProcessNumaMapsObservation).expects(once()).will(returnValue(-EIO));
+    MOCKER(SyncAllProcessConfig).expects(never());
+
+    EXPECT_EQ(-EINVAL, ApplyPendingMigrationTargets(&attr));
+    EXPECT_TRUE(attr.pendingTargetConfigValid);
+    EXPECT_EQ(4, attr.targetConfig.targets[0].remoteNid);
+    EXPECT_EQ(25, NM_AT(attr.strategyAttr.initRemoteMemRatio, 0, 4));
+    EXPECT_EQ(1234U, NM_AT(attr.strategyAttr.memSize, 0, 4));
+    EXPECT_EQ(77U, NM_AT(attr.strategyAttr.allocRemoteNrPages, 0, 4));
+    EXPECT_EQ(66U, NM_AT(attr.strategyAttr.remoteNrPagesAfterMigrate, 0, 4));
+    EXPECT_EQ(0x11UL, attr.numaAttr.numaNodes.bits[0]);
+    FreeProcessAttrArrays(&attr);
+}
+
 extern "C" errno_t memset_s(void *dest, size_t destMax, int c, size_t count);
 extern "C" int ProcessManagerInit(uint32_t pageType);
 extern "C" int EnvMutexInit(EnvMutex *mutex);

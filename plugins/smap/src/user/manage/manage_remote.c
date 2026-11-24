@@ -695,6 +695,71 @@ void PublishProcessTargetCandidate(ProcessAttr *attr, const ProcessAttr *candida
     }
 }
 
+/*
+ * 目标配置候选会改写的堆数组（配置矩阵、运行期矩阵）与 numaNodes 位图。
+ * 浅拷贝出的候选与 active 共享这些指针，准备阶段（清零、重算）会直接写穿
+ * active，且准备失败时无法回滚；因此候选持有私有副本。发布时
+ * PublishProcessTargetCandidate 只拷回配置类数组与位图，运行期矩阵（账本、
+ * allocRemoteNrPages、迁移量）不发布，由扫描/规划流水按最新快照重建。
+ */
+#define FOR_EACH_TARGET_CANDIDATE_ARRAY(F) \
+    F(initRemoteMemRatio)                  \
+    F(memSize)                             \
+    F(allocRemoteNrPages)                  \
+    F(l2RemoteMemRatio)                    \
+    F(l3RemoteMemRatio)                    \
+    F(nrMigratePages)                      \
+    F(nrMigrateBackPages)                  \
+    F(remoteNrPagesAfterMigrate)
+
+static void FreeTargetCandidate(ProcessAttr *candidate)
+{
+    StrategyAttribute *sa = &candidate->strategyAttr;
+#define FREE_CANDIDATE_ARRAY(field) \
+    free(sa->field);                \
+    sa->field = NULL;
+    FOR_EACH_TARGET_CANDIDATE_ARRAY(FREE_CANDIDATE_ARRAY)
+#undef FREE_CANDIDATE_ARRAY
+    NumaBitmapFree(&candidate->numaAttr.numaNodes);
+}
+
+/* 由 attr 构造候选：标量浅拷贝，上述数组与位图深拷贝；失败时候选不持有任何资源 */
+static int CloneTargetCandidate(ProcessAttr *candidate, const ProcessAttr *attr)
+{
+    *candidate = *attr;
+    StrategyAttribute *sa = &candidate->strategyAttr;
+    const StrategyAttribute *src = &attr->strategyAttr;
+#define CLEAR_CANDIDATE_ARRAY(field) sa->field = NULL;
+    FOR_EACH_TARGET_CANDIDATE_ARRAY(CLEAR_CANDIDATE_ARRAY)
+#undef CLEAR_CANDIDATE_ARRAY
+    candidate->numaAttr.numaNodes = (NumaBitmap){ 0 };
+
+    int nrLocalNuma = GetNrLocalNuma();
+    if (nrLocalNuma <= 0 || nrLocalNuma > SMAP_MAX_NUMNODES) {
+        return -EINVAL;
+    }
+    size_t count = NM_COUNT(nrLocalNuma);
+#define CLONE_CANDIDATE_ARRAY(field)                                                     \
+    if (src->field != NULL) {                                                            \
+        size_t bytes = count * sizeof(*src->field);                                      \
+        sa->field = malloc(bytes);                                                       \
+        if (sa->field == NULL || memcpy_s(sa->field, bytes, src->field, bytes) != EOK) { \
+            goto FAIL;                                                                   \
+        }                                                                                \
+    }
+    FOR_EACH_TARGET_CANDIDATE_ARRAY(CLONE_CANDIDATE_ARRAY)
+#undef CLONE_CANDIDATE_ARRAY
+    if (!NumaBitmapCopy(&candidate->numaAttr.numaNodes, &attr->numaAttr.numaNodes)) {
+        goto FAIL;
+    }
+    return 0;
+FAIL:
+    FreeTargetCandidate(candidate);
+    SMAP_LOGGER_ERROR("Clone target candidate of pid %d failed.", attr->pid);
+    return -ENOMEM;
+}
+
+/* 调用方负责与 attr 的并发写者互斥（注册槽位的 attr 须持 attrLock，或 attr 为私有候选） */
 int ApplyProcessTargetConfig(ProcessAttr *attr, const ProcessTargetConfig *config, bool skipRemoteResidencyCheck)
 {
     ManagedLocalObservation observation;
@@ -703,13 +768,17 @@ int ApplyProcessTargetConfig(ProcessAttr *attr, const ProcessTargetConfig *confi
         return ret;
     }
 
-    ProcessAttr candidate = *attr;
-    ret = PrepareProcessTargetCandidate(&candidate, config, &observation, skipRemoteResidencyCheck);
+    ProcessAttr candidate;
+    ret = CloneTargetCandidate(&candidate, attr);
     if (ret) {
         return ret;
     }
-    PublishProcessTargetCandidate(attr, &candidate);
-    return 0;
+    ret = PrepareProcessTargetCandidate(&candidate, config, &observation, skipRemoteResidencyCheck);
+    if (ret == 0) {
+        PublishProcessTargetCandidate(attr, &candidate);
+    }
+    FreeTargetCandidate(&candidate);
+    return ret;
 }
 
 int StagePendingMigrationTargets(ProcessAttr *attr, const ProcessTargetConfig *config, bool ignoreRemoteCapacity)
@@ -776,23 +845,27 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
     ProcessTargetConfig config = attr->pendingTargetConfig;
     bool ignoreRemoteCapacity = attr->pendingIgnoreRemoteCapacity;
     uint32_t pendingSeq = attr->pendingSeq;
+    /* 锁内克隆候选：准备阶段只改候选私有数组，不触碰 active 的共享矩阵 */
+    ProcessAttr candidate;
+    int ret = CloneTargetCandidate(&candidate, attr);
     if (slot) {
         EnvMutexUnlock(&slot->attrLock);
     }
-    ManagedLocalObservation observation;
-
-    int ret = CollectProcessCandidateObservation(attr->pid, attr->type == VM_TYPE, &observation);
     if (ret) {
         if (slot) {
             PidSlotReleaseRefs(&slot, 1);
         }
         return ret;
     }
+    ManagedLocalObservation observation;
 
-    ProcessAttr candidate = *attr;
-    candidate.ignoreRemoteCapacity = ignoreRemoteCapacity;
-    ret = PrepareProcessTargetCandidate(&candidate, &config, &observation, false);
+    ret = CollectProcessCandidateObservation(attr->pid, attr->type == VM_TYPE, &observation);
+    if (ret == 0) {
+        candidate.ignoreRemoteCapacity = ignoreRemoteCapacity;
+        ret = PrepareProcessTargetCandidate(&candidate, &config, &observation, false);
+    }
     if (ret) {
+        FreeTargetCandidate(&candidate);
         if (slot) {
             PidSlotReleaseRefs(&slot, 1);
         }
@@ -823,6 +896,7 @@ int ApplyPendingMigrationTargets(ProcessAttr *attr)
         EnvMutexUnlock(&slot->attrLock);
         PidSlotReleaseRefs(&slot, 1);
     }
+    FreeTargetCandidate(&candidate);
     ret = SyncAllProcessConfig();
     if (ret) {
         SMAP_LOGGER_WARNING("Synchronize pending pid %d config maybe failed: %d.", attr->pid, ret);
