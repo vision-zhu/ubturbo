@@ -535,6 +535,53 @@ TEST_F(MigrationTest, TestRefreshPairAccountMaskIgnoresLocalNidBeyondMaskWidth)
     EXPECT_EQ(0x5U, process.managedLocalState.managedLocalMask);
 }
 
+typedef struct {
+    pid_t pid;
+    int from;
+    int to;
+    uint64_t need;
+    uint64_t built;
+    bool shouldFreeze;
+} TestGroupSwapCompPlan;
+extern "C" uint64_t BuildCompMigListFromScan(ProcessAttr *process, TestGroupSwapCompPlan *plan, struct MigList *list);
+
+/* 补偿迁移按方向选页：迁出取最冷页，迁回取最热页，而不是位图前 nr 个位置 */
+TEST_F(MigrationTest, TestBuildCompMigListSelectsByHotness)
+{
+    ProcessAttr process = {};
+    process.pid = 100;
+    ActcData localPages[4] = {};
+    ActcData remotePages[4] = {};
+    const actc_t localFreq[4] = {5, 1, 3, 0};
+    const actc_t remoteFreq[4] = {2, 9, 7, 1};
+    for (int i = 0; i < 4; i++) {
+        localPages[i].freq = localFreq[i];
+        remotePages[i].freq = remoteFreq[i];
+    }
+    process.scanAttr.actcData[0] = localPages;
+    process.scanAttr.actcLen[0] = 4;
+    process.scanAttr.actcData[4] = remotePages;
+    process.scanAttr.actcLen[4] = 4;
+    MOCKER(GetNrLocalNuma).stubs().will(returnValue(4));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(GetNrFreePagesByNode).stubs().will(returnValue((uint64_t)100));
+
+    TestGroupSwapCompPlan out = {.pid = 100, .from = 0, .to = 4, .need = 2};
+    struct MigList outList = {};
+    ASSERT_EQ(2U, BuildCompMigListFromScan(&process, &out, &outList));
+    EXPECT_EQ(1U, outList.addr[0]);
+    EXPECT_EQ(3U, outList.addr[1]);
+    EXPECT_FALSE(out.shouldFreeze);
+    free(outList.addr);
+
+    TestGroupSwapCompPlan back = {.pid = 100, .from = 4, .to = 0, .need = 2};
+    struct MigList backList = {};
+    ASSERT_EQ(2U, BuildCompMigListFromScan(&process, &back, &backList));
+    EXPECT_EQ(1U, backList.addr[0]);
+    EXPECT_EQ(2U, backList.addr[1]);
+    free(backList.addr);
+}
+
 TEST_F(MigrationTest, TestBuildMigrationMsgSuccess)
 {
     int ret;
