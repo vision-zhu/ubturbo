@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <cstdlib>
+#include <vector>
 #include "gtest/gtest.h"
 #include "mockcpp/mokc.h"
 
@@ -245,4 +246,96 @@ TEST_F(OomMigrateTest, TestFindPidMigrateSize_ZeroPageSize)
     MOCKER(GetProcessManager).stubs().will(returnValue(&manager));
     MOCKER(OpenNumaMaps).expects(never());
     FindPidMigrateSize(8192);
+}
+
+/* ============ 候选页筛选：只迁真正位于本地节点的匿名私有页 ============ */
+extern "C" bool IsHugeMode(void);
+extern "C" bool ReadNumaMapsLine(FILE *fp, char *buf, size_t size);
+
+namespace {
+constexpr int OOM_TEST_DEST_NID = 2;
+constexpr int OOM_TEST_MOVE_FLAG = 1 << 1;
+std::vector<uint64_t> g_oomProbed;
+std::vector<uint64_t> g_oomMoved;
+int g_oomMoveFlags = -1;
+
+/* 段 [0x1000, 0x9000)：0x2000/0x4000 在本地 N0，0x1000 已在远端，其余为空洞 */
+long MockSmapMovePagesLayout(int pid, unsigned long count, const void **pages, const int *nodes, int *status,
+                             int flags)
+{
+    for (unsigned long i = 0; i < count; i++) {
+        uint64_t addr = reinterpret_cast<uint64_t>(pages[i]);
+        if (nodes == nullptr) {
+            g_oomProbed.push_back(addr);
+            if (addr == 0x2000 || addr == 0x4000) {
+                status[i] = 0;
+            } else if (addr == 0x1000) {
+                status[i] = OOM_TEST_DEST_NID;
+            } else {
+                status[i] = -ENOENT;
+            }
+            continue;
+        }
+        g_oomMoved.push_back(addr);
+        g_oomMoveFlags = flags;
+        status[i] = nodes[i];
+    }
+    return 0;
+}
+} // namespace
+
+TEST_F(OomMigrateTest, TestMigratePidFromToL2_OnlyLocalAnonPages)
+{
+    static FILE fakeFile;
+    static char anonLine[] = "1000 default anon=4 dirty=4 N0=2 N2=2 kernelpagesize_kB=4\n";
+    static char fileLine[] = "9000 default file=/usr/lib64/libc.so.6 mapped=10 mapmax=30 N0=10 kernelpagesize_kB=4\n";
+    g_oomProbed.clear();
+    g_oomMoved.clear();
+    g_oomMoveFlags = -1;
+    MOCKER(OpenNumaMaps).stubs().will(returnValue(&fakeFile));
+    MOCKER(IsHugeMode).stubs().will(returnValue(false));
+    MOCKER(fgets)
+        .stubs()
+        .will(returnValue(static_cast<char *>(anonLine)))
+        .then(returnValue(static_cast<char *>(fileLine)))
+        .then(returnValue(static_cast<char *>(nullptr)));
+    MOCKER(fclose).stubs().will(returnValue(0));
+    MOCKER(SmapMovePages).stubs().will(invoke(MockSmapMovePagesLayout));
+
+    uint64_t budget = 100;
+    int ret = MigratePidFromToL2(123, 2, OOM_TEST_DEST_NID, 4096, &budget);
+    EXPECT_EQ(0, ret);
+    /* 只迁移查询确认在本地的两页，远端页/空洞不计入预算 */
+    ASSERT_EQ(2U, g_oomMoved.size());
+    EXPECT_EQ(0x2000U, g_oomMoved[0]);
+    EXPECT_EQ(0x4000U, g_oomMoved[1]);
+    EXPECT_EQ(98U, budget);
+    /* 匿名私有段不带 MOVE_ALL */
+    EXPECT_EQ(OOM_TEST_MOVE_FLAG, g_oomMoveFlags);
+    /* file= 段（共享库）不查询也不迁移；查询不越过下一段起始地址 */
+    for (uint64_t addr : g_oomProbed) {
+        EXPECT_LT(addr, 0x9000U);
+    }
+}
+
+/* 超长行被 fgets 拆段时整行丢弃，后续段中以路径残余开头的"伪地址"不会被解析 */
+TEST_F(OomMigrateTest, TestReadNumaMapsLine_DropsOverlongLine)
+{
+    static FILE fakeFile;
+    static char head[1024];
+    static char tail[] = "cafe/very/long/path N0=5 kernelpagesize_kB=4\n";
+    static char normal[] = "2000 default anon=1 N0=1 kernelpagesize_kB=4\n";
+    memset(head, 'a', sizeof(head) - 1);
+    head[sizeof(head) - 1] = '\0';
+    MOCKER(fgets)
+        .stubs()
+        .will(returnValue(static_cast<char *>(head)))
+        .then(returnValue(static_cast<char *>(tail)))
+        .then(returnValue(static_cast<char *>(normal)))
+        .then(returnValue(static_cast<char *>(nullptr)));
+
+    char buf[1024];
+    ASSERT_TRUE(ReadNumaMapsLine(&fakeFile, buf, sizeof(buf)));
+    EXPECT_STREQ(normal, buf);
+    EXPECT_FALSE(ReadNumaMapsLine(&fakeFile, buf, sizeof(buf)));
 }
