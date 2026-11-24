@@ -20,6 +20,8 @@
 #define SMAP_CONFIG_PATH "/dev/shm/smap_config"
 #define SMAP_CONFIG_MODE (0600)
 #define SMAP_CONFIG_PATH_MAX 256
+/* 不可用（损坏/版本不支持）的旧配置改名保留的后缀 */
+#define SMAP_CONFIG_BAK_SUFFIX ".bak"
 
 /*
  * Layout of config is as follows:

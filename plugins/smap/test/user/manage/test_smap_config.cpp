@@ -1565,6 +1565,53 @@ TEST_F(SmapConfigFileTest, RecoverRebuildsEmptyFile)
     struct SmapConfigImage img = {};
     ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
     FreeConfigImage(&img);
+    /* 损坏文件改名备份而不是删除 */
+    struct stat st;
+    ASSERT_EQ(0, stat((path + SMAP_CONFIG_BAK_SUFFIX).c_str(), &st));
+    EXPECT_EQ(0, st.st_size);
+}
+
+TEST_F(SmapConfigFileTest, LoadRejectsUnsupportedVersion)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver = SMAP_CONFIG_VER_V1;
+    WriteRaw(img.data, img.len);
+    FreeConfigImage(&img);
+    EXPECT_EQ(-EPROTONOSUPPORT, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(nullptr, img.data);
+}
+
+TEST_F(SmapConfigFileTest, RecoverBacksUpUnsupportedVersion)
+{
+    struct SmapConfigImage img = {};
+    ASSERT_EQ(0, BuildInitConfigImage(&img));
+    reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver = SMAP_CONFIG_VER_V2;
+    std::vector<char> old(img.data, img.data + img.len);
+    WriteRaw(img.data, img.len);
+    FreeConfigImage(&img);
+
+    MOCKER(ParseConfig).expects(never());
+    ASSERT_EQ(0, RecoverFromConfigLocked());
+    ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
+    EXPECT_EQ(SMAP_CONFIG_VER, reinterpret_cast<struct SmapConfigHeader *>(img.data)->ver);
+    FreeConfigImage(&img);
+
+    std::string saved = path;
+    path += SMAP_CONFIG_BAK_SUFFIX;
+    EXPECT_EQ(old, ReadRaw());
+    path = saved;
+    EXPECT_EQ(2, CountFiles());
+}
+
+TEST_F(SmapConfigFileTest, SyncBacksUpCorruptedFile)
+{
+    WriteRaw("abcd", 4);
+    ASSERT_EQ(0, SyncRunModeLocked(MEM_POOL_MODE));
+    struct stat st;
+    ASSERT_EQ(0, stat((path + SMAP_CONFIG_BAK_SUFFIX).c_str(), &st));
+    EXPECT_EQ(4, st.st_size);
+    EXPECT_EQ(2, CountFiles());
 }
 
 TEST_F(SmapConfigFileTest, RecoverParsesValidFileWithoutRewriting)
@@ -1585,5 +1632,9 @@ TEST_F(SmapConfigFileTest, RecoverRebuildsWhenParseFails)
     struct SmapConfigImage img = {};
     ASSERT_EQ(0, LoadConfigImage(path.c_str(), &img));
     EXPECT_EQ(WATERLINE_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
+    FreeConfigImage(&img);
+    /* 解析失败的旧文件保留为备份 */
+    ASSERT_EQ(0, LoadConfigImage((path + SMAP_CONFIG_BAK_SUFFIX).c_str(), &img));
+    EXPECT_EQ(MEM_POOL_MODE, reinterpret_cast<struct SmapConfigHeader *>(img.data)->runMode);
     FreeConfigImage(&img);
 }
