@@ -22,6 +22,8 @@
 #define SCAN_TIME_4K VM_LIGHT_STABLE_SCAN_CYCLE
 #define SCAN_TIME_2M VM_LIGHT_STABLE_SCAN_CYCLE
 #define SCAN_PERIOD_UNIT_MS 50
+/* 本地节点位掩码为 uint32_t 且需计算 (1U << nrLocalNuma) - 1，支持的本地节点数上限 */
+#define SMAP_MAX_LOCAL_NUMA 31
 
 int RefreshRemoteRam(struct ProcessManager *manager);
 

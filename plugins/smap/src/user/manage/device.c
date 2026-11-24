@@ -133,12 +133,20 @@ static int GetNrLocalNumaFromKernel(struct ProcessManager *manager)
     int nrLocalNuma = 0;
     int ret = ioctl(manager->fds.access, SMAP_ACCESS_GET_NR_LOCAL_NUMA, &nrLocalNuma);
     if (ret < 0) {
-        SMAP_LOGGER_ERROR("failed to get nr_local_numa from kernel: %d, errno: %d", ret, errno);
-        return ret;
+        int err = errno; /* 日志可能改写 errno，先保存 */
+        SMAP_LOGGER_ERROR("failed to get nr_local_numa from kernel: %d, errno: %d", ret, err);
+        return -err;
     }
     if (nrLocalNuma <= 0 || nrLocalNuma > SMAP_MAX_NUMNODES) {
         SMAP_LOGGER_ERROR("get nr_local_numa invalid :%d", nrLocalNuma);
         return -EINVAL;
+    }
+    /* 本地节点集合在用户态以 uint32_t 位掩码表达（managedLocalMask、Pair 容量掩码、
+     * (1U << nrLocalNuma) - 1 等），超过 SMAP_MAX_LOCAL_NUMA 时移位溢出/混叠，
+     * Pair 规划与纳管会静默出错，因此显式拒绝 */
+    if (nrLocalNuma > SMAP_MAX_LOCAL_NUMA) {
+        SMAP_LOGGER_ERROR("nr_local_numa %d exceeds supported limit %d.", nrLocalNuma, SMAP_MAX_LOCAL_NUMA);
+        return -EOPNOTSUPP;
     }
     manager->nrLocalNuma = nrLocalNuma;
     SMAP_LOGGER_INFO("get nr_local_numa %d from kernel successfully", manager->nrLocalNuma);

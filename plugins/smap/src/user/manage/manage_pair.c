@@ -209,7 +209,8 @@ static void DistributePairRequestPages(uint64_t pages, const uint64_t weights[],
 
 static int ValidatePairRequestInput(const ProcessAttr *attr, const PairRequestContext *context)
 {
-    if (!attr || !context || context->nrLocalNuma <= 0 || context->nrLocalNuma > SMAP_MAX_NUMNODES ||
+    /* 本地节点以 uint32_t 位掩码表达，超过 SMAP_MAX_LOCAL_NUMA 时掩码移位溢出 */
+    if (!attr || !context || context->nrLocalNuma <= 0 || context->nrLocalNuma > SMAP_MAX_LOCAL_NUMA ||
         context->pageSizeKB == 0) {
         return -EINVAL;
     }
