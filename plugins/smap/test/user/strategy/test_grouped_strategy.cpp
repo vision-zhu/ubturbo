@@ -574,6 +574,66 @@ TEST_F(GroupedStrategyTest, TestGroupedStrategySwapCapIgnoresStaleMaxMigrate)
     FreeMigList(mlist);
 }
 
+static ProcessAttr *g_concurrentPolicyTarget;
+/* 模拟规划期间 IPC 线程整体覆写 groupPolicy（SetGroupedProcessConfig） */
+static int ReplacePolicyDuringPlanning(void)
+{
+    if (g_concurrentPolicyTarget) {
+        g_concurrentPolicyTarget->groupPolicy.groups[0].targets[0].quotaPages = 20;
+    }
+    return 4;
+}
+
+static void InitSlotGroupedProcess(ProcessAttr *process, ActcData *remotePages, uint64_t nrRemote)
+{
+    process->pid = 140;
+    process->groupPolicy.enabled = true;
+    process->groupPolicy.groupCount = 1;
+    process->groupPolicy.groups[0].localCount = 1;
+    process->groupPolicy.groups[0].locals[0].nid = 0;
+    process->groupPolicy.groups[0].targetCount = 1;
+    process->groupPolicy.groups[0].targets[0].nid = 4;
+    process->groupPolicy.groups[0].targets[0].quotaPages = 10;
+    process->scanAttr.actcData[4] = remotePages;
+    process->scanAttr.actcLen[4] = nrRemote;
+}
+
+/* 策略未被并发替换：规划结果（usedPages 同步）在 attrLock 内提交回活跃 attr */
+TEST_F(GroupedStrategyTest, TestGroupedStrategyCommitsPlanningState)
+{
+    ProcessAttr process = {};
+    ActcData remotePages[3] = {};
+    struct MigList *mlist = TestMlist();
+    InitSlotGroupedProcess(&process, remotePages, 3);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    PidSlotAdd(&g_processManager, &process);
+
+    EXPECT_EQ(0, GroupedMigrationStrategy(&process, mlist));
+    EXPECT_EQ(3U, process.groupPolicy.groups[0].targets[0].usedPages);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    FreeMigList(mlist);
+}
+
+/* 规划期间策略被替换：丢弃本轮结果，不把旧策略上的统计写到新策略上 */
+TEST_F(GroupedStrategyTest, TestGroupedStrategyDropsRoundWhenPolicyReplaced)
+{
+    ProcessAttr process = {};
+    ActcData remotePages[3] = {};
+    struct MigList *mlist = TestMlist();
+    InitSlotGroupedProcess(&process, remotePages, 3);
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    PidSlotAdd(&g_processManager, &process);
+    g_concurrentPolicyTarget = &process;
+    MOCKER(GetNrLocalNuma).stubs().will(invoke(ReplacePolicyDuringPlanning));
+
+    EXPECT_EQ(-EAGAIN, GroupedMigrationStrategy(&process, mlist));
+    EXPECT_EQ(0U, process.groupPolicy.groups[0].targets[0].usedPages);
+    EXPECT_EQ(20U, process.groupPolicy.groups[0].targets[0].quotaPages);
+    g_concurrentPolicyTarget = nullptr;
+    memset(&g_processManager.slots, 0, sizeof(g_processManager.slots));
+    FreeMigList(mlist);
+}
+
 TEST_F(GroupedStrategyTest, TestGroupedStrategySwapUsesLocalWatermarkRatio)
 {
     ProcessAttr process = {};
