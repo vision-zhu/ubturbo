@@ -33,7 +33,8 @@ static void *Worker(void *arg)
             EnvMutexUnlock(&pool->lock);
             continue;
         }
-        ThreadPoolTask task = pool->ring[pool->head++ % MAX_PID_SLOTS];
+        ThreadPoolTask task = pool->ring[pool->head];
+        pool->head = (pool->head + 1) % MAX_PID_SLOTS;
         pool->count--;
         EnvMutexUnlock(&pool->lock);
         PidMigrationWork(manager, task.slot, task.pid);
@@ -88,7 +89,9 @@ int ThreadPoolSubmit(struct ProcessManager *manager, struct PidSlot *slot, pid_t
         EnvMutexUnlock(&pool->lock);
         return -EAGAIN;
     }
-    pool->ring[pool->tail++ % MAX_PID_SLOTS] = (ThreadPoolTask){ .slot = slot, .pid = pid };
+    /* head/tail 始终保持在 [0, MAX_PID_SLOTS) 内：容量非 2 的幂，自由递增的计数器回绕时下标会跳变 */
+    pool->ring[pool->tail] = (ThreadPoolTask){ .slot = slot, .pid = pid };
+    pool->tail = (pool->tail + 1) % MAX_PID_SLOTS;
     pool->count++;
     EnvCondSignal(&pool->cond);
     EnvMutexUnlock(&pool->lock);
