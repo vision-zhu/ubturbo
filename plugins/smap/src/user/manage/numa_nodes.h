@@ -252,12 +252,46 @@ static inline int NumaGetL2Count(const NumaBitmap *bm, int nrLocalNuma)
     return count;
 }
 
-/* 遍历所有远端在线节点（定义见 manage.c，内容先写、g_nrRemote 最后 release 发布） */
+/*
+ * 远端在线节点列表（g_remoteNids/g_nrRemote 定义见 manage.c）。
+ * 唯一写者 RebuildRemoteNids（daemon 线程）按 seqlock 协议原地更新：写前把
+ * g_remoteNidsSeq 置为奇数、写完再置为偶数。读者经 SnapshotRemoteNids 在
+ * 序号稳定（偶数且前后一致）时拷贝出一致快照，避免遍历过程中读到新旧
+ * 混杂的列表（重复/遗漏某个 nid）。
+ */
 extern int g_remoteNids[SMAP_NODE_CAP_LIMIT];
 extern int g_nrRemote;
+extern unsigned int g_remoteNidsSeq;
 
-#define for_each_remote_nid(nid)                                                                      \
-    for (int __remote_nid_i__ = 0, __remote_nid_n__ = __atomic_load_n(&g_nrRemote, __ATOMIC_ACQUIRE); \
-         __remote_nid_i__ < __remote_nid_n__ && ((nid) = g_remoteNids[__remote_nid_i__], 1); __remote_nid_i__++)
+static inline int SnapshotRemoteNids(int *out, int outCap)
+{
+    for (;;) {
+        unsigned int seq = __atomic_load_n(&g_remoteNidsSeq, __ATOMIC_ACQUIRE);
+        if ((seq & 1U) != 0) {
+            continue; /* 写者更新中，重试 */
+        }
+        int n = __atomic_load_n(&g_nrRemote, __ATOMIC_RELAXED);
+        if (n < 0) {
+            n = 0;
+        }
+        if (n > outCap) {
+            n = outCap;
+        }
+        for (int i = 0; i < n; i++) {
+            out[i] = __atomic_load_n(&g_remoteNids[i], __ATOMIC_RELAXED);
+        }
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (__atomic_load_n(&g_remoteNidsSeq, __ATOMIC_RELAXED) == seq) {
+            return n;
+        }
+    }
+}
+
+/* 遍历远端在线节点：循环开始时取一致快照（栈上 SMAP_NODE_CAP_LIMIT 个 int），循环体内不受并发重建影响 */
+#define for_each_remote_nid(nid)                                                                                \
+    for (int __remote_nid_snap__[SMAP_NODE_CAP_LIMIT],                                                          \
+         __remote_nid_n__ = SnapshotRemoteNids(__remote_nid_snap__, SMAP_NODE_CAP_LIMIT), __remote_nid_i__ = 0; \
+         __remote_nid_i__ < __remote_nid_n__ && ((nid) = __remote_nid_snap__[__remote_nid_i__], 1);             \
+         __remote_nid_i__++)
 
 #endif /* __NUMA_NODES_H__ */

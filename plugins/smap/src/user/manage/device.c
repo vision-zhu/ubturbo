@@ -302,7 +302,10 @@ int ScanRemoteNids(int *out, int outCap)
     return n;
 }
 
-/* 重建 g_remoteNids 列表（不变化则跳过） */
+/* g_remoteNids 的 seqlock 序号：奇数表示 RebuildRemoteNids 正在更新（协议见 numa_nodes.h） */
+unsigned int g_remoteNidsSeq = 0;
+
+/* 重建 g_remoteNids 列表（唯一写者：初始化路径与 daemon 线程，二者不并发） */
 void RebuildRemoteNids(void)
 {
     int tmp[SMAP_MAX_NUMNODES];
@@ -311,13 +314,17 @@ void RebuildRemoteNids(void)
         SMAP_LOGGER_WARNING("ScanRemoteNids failed, keep current remote list");
         return;
     }
-    /* 先填充 g_remoteNids 内容，最后再 release 发布 g_nrRemote：并发读者（for_each_remote_nid）
-     * 要么看到旧计数+旧内容，要么看到新计数+新内容，不会看到新计数+未填充的尾部。
-     * 运行期会由 daemon 线程周期调用，必须保证 aarch64 下的 store-store 顺序 */
+    /* seqlock 写端：序号置奇 → release 栅栏 → 原地更新内容与计数 → release 置偶。
+     * 读者（SnapshotRemoteNids）在序号为奇或前后不一致时重试，因此只会拿到
+     * 完整的旧列表或完整的新列表，不会看到遍历中途被覆写的混合内容 */
+    unsigned int seq = __atomic_load_n(&g_remoteNidsSeq, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_remoteNidsSeq, seq + 1U, __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     for (int i = 0; i < n; i++) {
-        g_remoteNids[i] = tmp[i];
+        __atomic_store_n(&g_remoteNids[i], tmp[i], __ATOMIC_RELAXED);
     }
-    __atomic_store_n(&g_nrRemote, n, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_nrRemote, n, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_remoteNidsSeq, seq + 2U, __ATOMIC_RELEASE);
 }
 
 /* 检测远端节点集合是否变化 */
