@@ -728,7 +728,8 @@ void RemoveManagedProcess(int nr, pid_t *pidArr);
 struct RemoveMsg;
 struct RemovePayload;
 int IoctlRemoveProcess(struct RemoveMsg *msg);
-void ClearManagedProcess(int nr, struct RemovePayload *payload);
+/* 返回 0 成功；部分节点移除因进程长时间处于迁移中被跳过时返回 -EBUSY（其余 payload 照常处理） */
+int ClearManagedProcess(int nr, struct RemovePayload *payload);
 
 int MigrateMemoryBack(pid_t pid, int srcNid, int desNid, uint64_t paStart, uint64_t paEnd);
 
