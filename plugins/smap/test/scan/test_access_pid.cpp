@@ -1675,3 +1675,60 @@ TEST_F(DriversAccessPidTest, AccessAddPidDuplicateKeepsScanParams)
     EXPECT_EQ(100, existing.scan_time);
     EXPECT_EQ(2, existing.ntimes);
 }
+
+extern "C" int create_procfs(struct access_pid *ap);
+
+/* Before /proc/smap is replaced, INUSE slots drop their entries (and only
+ * they: a REMOVING slot already dropped its own in ap_slot_remove). */
+TEST_F(DriversAccessPidTest, AccessPidProcfsDetachAllInUseSlots)
+{
+    struct proc_dir_entry root = {};
+    struct proc_dir_entry freq = {};
+    struct proc_dir_entry other = {};
+    struct access_pid live = {};
+    struct access_pid gone = {};
+
+    ap_test_reset_slots();
+    live.pid = 100;
+    live.proc_root = &root;
+    live.proc_freq = &freq;
+    gone.pid = 200;
+    gone.proc_root = &other;
+    ASSERT_GE(ap_slot_add(&live), 0);
+    ASSERT_GE(ap_slot_add(&gone), 0);
+    atomic_set(&gone.slot->state, AP_SLOT_REMOVING);
+
+    /* proc_remove() is an inline no-op in the test headers; check the effect */
+    access_pid_procfs_detach_all();
+    EXPECT_EQ(nullptr, live.proc_root);
+    EXPECT_EQ(nullptr, live.proc_freq);
+    EXPECT_EQ(&other, gone.proc_root);
+    EXPECT_EQ(1u, refcount_read(&live.slot->refs));
+    ap_test_reset_slots();
+}
+
+/* After the new root exists, every INUSE slot without an entry gets one;
+ * a failure leaves the pid tracked. */
+TEST_F(DriversAccessPidTest, AccessPidProcfsAttachAllInUseSlots)
+{
+    struct proc_dir_entry root = {};
+    struct access_pid a = {};
+    struct access_pid b = {};
+    struct access_pid has = {};
+
+    ap_test_reset_slots();
+    a.pid = 100;
+    b.pid = 101;
+    has.pid = 102;
+    has.proc_root = &root;
+    ASSERT_GE(ap_slot_add(&a), 0);
+    ASSERT_GE(ap_slot_add(&b), 0);
+    ASSERT_GE(ap_slot_add(&has), 0);
+
+    MOCKER(create_procfs).expects(exactly(2)).will(returnValue(0)).then(returnValue(-ENOMEM));
+    access_pid_procfs_attach_all();
+    GlobalMockObject::verify();
+    EXPECT_EQ(AP_SLOT_INUSE, atomic_read(&b.slot->state));
+    EXPECT_EQ(1u, refcount_read(&a.slot->refs));
+    ap_test_reset_slots();
+}

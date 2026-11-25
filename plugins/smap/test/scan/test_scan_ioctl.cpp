@@ -905,26 +905,104 @@ TEST_F(ScanIoctlTestKernel, IoctlRemoveAllPidHoldsPidTableMutex)
 }
 
 extern "C" long ioctl_create_smap_procfs(void __user *argp);
-extern "C" int create_procfs_root(struct user_info *ui);
+extern "C" int create_procfs_root(kuid_t kuid, kgid_t kgid);
 extern "C" void remove_procfs_root(void);
+extern "C" struct user_info ubturbo_ui;
 
-static int StubCreateProcfsRootFail(struct user_info *ui)
+static int StubCreateProcfsRootFail(kuid_t kuid, kgid_t kgid)
 {
-    (void)ui;
+    (void)kuid;
+    (void)kgid;
     g_pidTableDepthSeen = g_pidTableLockDepth;
     return -ENOMEM;
+}
+
+static struct proc_dir_entry g_fakeProcRoot;
+
+static int StubCreateProcfsRootOk(kuid_t kuid, kgid_t kgid)
+{
+    (void)kuid;
+    (void)kgid;
+    smap_procfs_root = &g_fakeProcRoot;
+    return 0;
+}
+
+static void ResetProcfsRootState(void)
+{
+    smap_procfs_root = nullptr;
+    ubturbo_ui.uid = 0;
+    ubturbo_ui.gid = 0;
 }
 
 TEST_F(ScanIoctlTestKernel, IoctlCreateProcfsHoldsPidTableMutex)
 {
     struct user_info ui = {.uid = 1000, .gid = 1000};
 
+    ResetProcfsRootState();
     ResetPidTableLockStubs();
     MOCKER(copy_from_user).stubs().with(outBoundP((void *)&ui, sizeof(ui))).will(returnValue(0UL));
-    MOCKER(remove_procfs_root).stubs();
+    MOCKER(remove_procfs_root).expects(never());
+    MOCKER(access_pid_procfs_attach_all).expects(never());
     MOCKER(create_procfs_root).stubs().will(invoke(StubCreateProcfsRootFail));
     EXPECT_EQ(-ENOMEM, ioctl_create_smap_procfs(NULL));
     EXPECT_EQ(1, g_pidTableDepthSeen);
     EXPECT_EQ(1, g_pidTableLockCalls);
     EXPECT_EQ(0, g_pidTableLockDepth);
+    /* a failed creation must not record the user */
+    EXPECT_EQ(0u, ubturbo_ui.uid);
+}
+
+/* The daemon calls CREATE_PROCFS on every start with the same non-root user:
+ * the first call creates the root and records the owner, later calls are
+ * no-ops instead of removing and recreating /proc/smap. */
+TEST_F(ScanIoctlTestKernel, IoctlCreateProcfsRecordsUserAndKeepsRoot)
+{
+    struct user_info ui = {.uid = 988, .gid = 986};
+
+    ResetProcfsRootState();
+    MOCKER(copy_from_user).stubs().with(outBoundP((void *)&ui, sizeof(ui))).will(returnValue(0UL));
+    MOCKER(remove_procfs_root).expects(never());
+    MOCKER(access_pid_procfs_detach_all).expects(never());
+    MOCKER(access_pid_procfs_attach_all).expects(once());
+    MOCKER(create_procfs_root).expects(once()).will(invoke(StubCreateProcfsRootOk));
+    EXPECT_EQ(0, ioctl_create_smap_procfs(NULL));
+    EXPECT_EQ(988u, ubturbo_ui.uid);
+    EXPECT_EQ(986u, ubturbo_ui.gid);
+    EXPECT_EQ(0, ioctl_create_smap_procfs(NULL));
+    EXPECT_EQ(&g_fakeProcRoot, smap_procfs_root);
+    GlobalMockObject::verify();
+    ResetProcfsRootState();
+}
+
+/* A different user gets a new root: tracked pids' entries are detached
+ * before the old root is removed and recreated under the new one. */
+TEST_F(ScanIoctlTestKernel, IoctlCreateProcfsUserChangeRebuildsTree)
+{
+    struct user_info ui = {.uid = 1001, .gid = 1002};
+
+    ResetProcfsRootState();
+    smap_procfs_root = &g_fakeProcRoot;
+    ubturbo_ui.uid = 988;
+    ubturbo_ui.gid = 986;
+    MOCKER(copy_from_user).stubs().with(outBoundP((void *)&ui, sizeof(ui))).will(returnValue(0UL));
+    MOCKER(access_pid_procfs_detach_all).expects(once()).id("detach");
+    MOCKER(remove_procfs_root).expects(once()).after("detach").id("rm");
+    MOCKER(create_procfs_root).expects(once()).after("rm").will(invoke(StubCreateProcfsRootOk)).id("mk");
+    MOCKER(access_pid_procfs_attach_all).expects(once()).after("mk");
+    EXPECT_EQ(0, ioctl_create_smap_procfs(NULL));
+    EXPECT_EQ(1001u, ubturbo_ui.uid);
+    EXPECT_EQ(1001u, procfs_kuid.val);
+    EXPECT_EQ(1002u, procfs_kgid.val);
+    GlobalMockObject::verify();
+    ResetProcfsRootState();
+}
+
+TEST_F(ScanIoctlTestKernel, IoctlCreateProcfsRejectsInvalidUser)
+{
+    struct user_info ui = {.uid = (uid_t)-1, .gid = 1000};
+
+    ResetProcfsRootState();
+    MOCKER(copy_from_user).stubs().with(outBoundP((void *)&ui, sizeof(ui))).will(returnValue(0UL));
+    MOCKER(create_procfs_root).expects(never());
+    EXPECT_EQ(-EINVAL, ioctl_create_smap_procfs(NULL));
 }

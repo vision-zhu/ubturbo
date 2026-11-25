@@ -2,12 +2,12 @@
 
 kuid_t make_kuid(struct user_namespace *ns, uid_t uid)
 {
-	kuid_t kuid = { 0 };
+	kuid_t kuid = { uid };
 	return kuid;
 }
 
 kgid_t make_kgid(struct user_namespace *ns, gid_t gid)
 {
-	kgid_t kgid = { 0 };
+	kgid_t kgid = { gid };
 	return kgid;
 }

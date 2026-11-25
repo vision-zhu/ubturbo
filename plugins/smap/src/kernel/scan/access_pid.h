@@ -141,6 +141,8 @@ int access_add_statistic_pid(int len, struct access_add_pid_payload *payload,
 int access_add_pid(int len, struct access_add_pid_payload *payload, u32 stride);
 void access_remove_pid(int len, struct access_remove_pid_payload *payload);
 void access_remove_all_pid(void);
+void access_pid_procfs_detach_all(void);
+void access_pid_procfs_attach_all(void);
 void change_ap_type(pid_t pid);
 void clean_last_ap_data(struct access_pid *ap);
 int convert_pos_to_paddr_sorted(pid_t pid, int nid, u64 len, u64 *addr);
