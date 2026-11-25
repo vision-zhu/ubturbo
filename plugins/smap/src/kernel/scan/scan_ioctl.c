@@ -233,17 +233,14 @@ static void remove_procfs_root(void)
 	smap_procfs_root = NULL;
 }
 
-static int create_procfs_root(struct user_info *ui)
+static int create_procfs_root(kuid_t kuid, kgid_t kgid)
 {
 	smap_procfs_root = proc_mkdir(SMAP_PROC_ROOT, NULL);
 	if (!smap_procfs_root) {
 		pr_err("failed to create /proc/%s\n", SMAP_PROC_ROOT);
 		return -ENOMEM;
 	}
-
-	procfs_kuid = make_kuid(&init_user_ns, ui->uid);
-	procfs_kgid = make_kgid(&init_user_ns, ui->gid);
-	proc_set_user(smap_procfs_root, procfs_kuid, procfs_kgid);
+	proc_set_user(smap_procfs_root, kuid, kgid);
 	return 0;
 }
 
@@ -252,30 +249,48 @@ static inline bool is_user_unchanged(struct user_info *ui)
 	return ui && ui->uid == ubturbo_ui.uid && ui->gid == ubturbo_ui.gid;
 }
 
+/*
+ * The daemon issues this on every start. Same user as last time: nothing to
+ * do. Otherwise (re)create the root owned by the caller. Tracked pids keep
+ * pointers to their /proc/smap/<pid> entries and proc_remove() of the root
+ * would free those entries under them (the next REMOVE_PID then
+ * proc_remove()s freed memory), so detach them properly first and recreate
+ * them under the new root. Pids stay tracked across a daemon crash, so this
+ * path does see tracked pids.
+ */
 static long ioctl_create_smap_procfs(void __user *argp)
 {
-	int ret;
+	int ret = 0;
 	struct user_info temp_ui;
+	kuid_t kuid;
+	kgid_t kgid;
 
 	if (copy_from_user(&temp_ui, argp, sizeof(temp_ui)))
 		return -EFAULT;
+	kuid = make_kuid(&init_user_ns, temp_ui.uid);
+	kgid = make_kgid(&init_user_ns, temp_ui.gid);
+	if (!uid_valid(kuid) || !gid_valid(kgid))
+		return -EINVAL;
 
 	mutex_lock(&pid_table_mutex);
 	if (smap_procfs_root && is_user_unchanged(&temp_ui)) {
 		pr_info("procfs root directory unchanged\n");
-		ret = 0;
 		goto out_unlock;
 	}
 
-	remove_procfs_root();
-
-	ret = create_procfs_root(&temp_ui);
-	if (ret) {
+	if (smap_procfs_root) {
+		access_pid_procfs_detach_all();
 		remove_procfs_root();
-		goto out_unlock;
 	}
-
-	pr_info("procfs root directory create\n");
+	ret = create_procfs_root(kuid, kgid);
+	if (ret)
+		goto out_unlock;
+	procfs_kuid = kuid;
+	procfs_kgid = kgid;
+	ubturbo_ui = temp_ui;
+	access_pid_procfs_attach_all();
+	pr_info("procfs root directory created for %u:%u\n", temp_ui.uid,
+		temp_ui.gid);
 out_unlock:
 	mutex_unlock(&pid_table_mutex);
 	return ret;

@@ -12,4 +12,17 @@ typedef struct {
 	gid_t val;
 } kgid_t;
 
+#define INVALID_UID ((uid_t)-1)
+#define INVALID_GID ((gid_t)-1)
+
+static inline bool uid_valid(kuid_t uid)
+{
+	return uid.val != INVALID_UID;
+}
+
+static inline bool gid_valid(kgid_t gid)
+{
+	return gid.val != INVALID_GID;
+}
+
 #endif /* _LINUX_UIDGID_H */

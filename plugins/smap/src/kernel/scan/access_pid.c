@@ -755,6 +755,50 @@ static int create_procfs(struct access_pid *ap)
 	return 0;
 }
 
+/*
+ * Drop the /proc/smap/<pid> entries of every tracked pid before the root is
+ * replaced. proc_remove() waits for in-flight mem_freq callbacks, as in
+ * ap_slot_remove(); the slot's initial reference keeps the ap alive. Called
+ * with pid_table_mutex held, so no slot is added or removed meanwhile, and
+ * proc_root/proc_freq of INUSE slots are only touched under that mutex.
+ */
+void access_pid_procfs_detach_all(void)
+{
+	int i;
+
+	for (i = 0; i < AP_MAX_SLOTS; i++) {
+		struct ap_slot *s = ap_get_slot_at(i);
+
+		if (!s)
+			continue;
+		if (s->ap->proc_root) {
+			proc_remove(s->ap->proc_root);
+			s->ap->proc_root = NULL;
+			s->ap->proc_freq = NULL;
+		}
+		ap_put_slot(s);
+	}
+}
+
+/* Recreate the entries dropped above under the new root, owned by the new
+ * procfs user. A pid whose entry cannot be created stays tracked without one.
+ */
+void access_pid_procfs_attach_all(void)
+{
+	int i;
+
+	for (i = 0; i < AP_MAX_SLOTS; i++) {
+		struct ap_slot *s = ap_get_slot_at(i);
+
+		if (!s)
+			continue;
+		if (!s->ap->proc_root && create_procfs(s->ap))
+			pr_warn("pid %d stays tracked without /proc/%s/%d\n",
+				s->pid, SMAP_PROC_ROOT, s->pid);
+		ap_put_slot(s);
+	}
+}
+
 int init_access_pid(struct access_add_pid_payload *payload,
 		    struct access_pid **elem)
 {
