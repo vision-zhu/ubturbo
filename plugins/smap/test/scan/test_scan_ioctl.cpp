@@ -789,3 +789,142 @@ TEST_F(ScanIoctlTestKernel, IoctlRestartPidNoent)
     ap_test_reset_slots();
     EXPECT_EQ(-ENOENT, access_tracking_restart_pid(8899));
 }
+
+/*
+ * pid_table_mutex: ADD_PID / REMOVE_PID / REMOVE_ALL_PID / CREATE_PROCFS must
+ * run their table and procfs updates with the mutex held and drop it on every
+ * return path, so concurrent ADD_PID of one pid cannot both miss the
+ * existence check and register /proc/smap/<pid> twice.
+ */
+static int g_pidTableLockDepth;
+static int g_pidTableLockCalls;
+static int g_pidTableDepthSeen;
+
+static void StubPidTableMutexLock(::mutex *lock)
+{
+    (void)lock;
+    g_pidTableLockDepth++;
+    g_pidTableLockCalls++;
+}
+
+static void StubPidTableMutexUnlock(::mutex *lock)
+{
+    (void)lock;
+    g_pidTableLockDepth--;
+}
+
+static void ResetPidTableLockStubs(void)
+{
+    g_pidTableLockDepth = 0;
+    g_pidTableLockCalls = 0;
+    g_pidTableDepthSeen = -1;
+    MOCKER(mutex_lock).stubs().will(invoke(StubPidTableMutexLock));
+    MOCKER(mutex_unlock).stubs().will(invoke(StubPidTableMutexUnlock));
+}
+
+static int StubAddPayloadSeeLock(int len, struct access_add_pid_payload *payload, u32 stride, int page_size)
+{
+    (void)len;
+    (void)payload;
+    (void)stride;
+    (void)page_size;
+    g_pidTableDepthSeen = g_pidTableLockDepth;
+    return -EEXIST;
+}
+
+TEST_F(ScanIoctlTestKernel, IoctlAddPidHoldsPidTableMutex)
+{
+    struct access_add_pid_msg msg;
+
+    msg.count = 1;
+    msg.stride = kAddPidStride;
+    msg.payload = (struct access_add_pid_payload *)vzalloc((size_t)msg.count * msg.stride);
+    ASSERT_NE(nullptr, msg.payload);
+    struct access_add_pid_payload *p = AddPidAt(msg.payload, 0);
+    p->nr_words = NUMA_NODES_BIT_WORDS;
+    p->pid = 14587;
+    p->numa_nodes[0] = 0x1;
+    p->scan_time = 50;
+    p->ntimes = 40;
+    p->type = NORMAL_SCAN;
+
+    ResetPidTableLockStubs();
+    MOCKER(add_payload).stubs().will(invoke(StubAddPayloadSeeLock));
+    EXPECT_EQ(-EEXIST, checkIoctlAddPid(msg));
+    EXPECT_EQ(1, g_pidTableDepthSeen);
+    EXPECT_EQ(1, g_pidTableLockCalls);
+    EXPECT_EQ(0, g_pidTableLockDepth);
+
+    /* a payload rejected before add_payload never takes the mutex */
+    GlobalMockObject::verify();
+    ResetPidTableLockStubs();
+    p->type = MAX_SCAN_TYPE;
+    EXPECT_EQ(-EINVAL, checkIoctlAddPid(msg));
+    EXPECT_EQ(0, g_pidTableLockCalls);
+    vfree(msg.payload);
+}
+
+static void StubRemovePidSeeLock(int len, struct access_remove_pid_payload *payload)
+{
+    (void)len;
+    (void)payload;
+    g_pidTableDepthSeen = g_pidTableLockDepth;
+}
+
+TEST_F(ScanIoctlTestKernel, IoctlRemovePidHoldsPidTableMutex)
+{
+    struct access_remove_pid_msg msg;
+    struct access_remove_pid_payload payload = {};
+
+    msg.count = 1;
+    msg.payload = &payload;
+    payload.pid = 1;
+    ResetPidTableLockStubs();
+    MOCKER(copy_from_user).stubs().with(outBoundP((void *)&msg, sizeof(msg))).will(returnValue(0UL));
+    MOCKER(access_remove_pid).stubs().will(invoke(StubRemovePidSeeLock));
+    MOCKER(access_remove_ham_pid).stubs();
+    MOCKER(access_remove_statistic_pid).stubs();
+    EXPECT_EQ(0, ioctl_remove_pid(NULL));
+    EXPECT_EQ(1, g_pidTableDepthSeen);
+    EXPECT_EQ(1, g_pidTableLockCalls);
+    EXPECT_EQ(0, g_pidTableLockDepth);
+}
+
+static void StubRemoveAllPidSeeLock(void)
+{
+    g_pidTableDepthSeen = g_pidTableLockDepth;
+}
+
+TEST_F(ScanIoctlTestKernel, IoctlRemoveAllPidHoldsPidTableMutex)
+{
+    ResetPidTableLockStubs();
+    MOCKER(access_remove_all_pid).stubs().will(invoke(StubRemoveAllPidSeeLock));
+    EXPECT_EQ(0, ioctl_remove_all_pid(NULL));
+    EXPECT_EQ(1, g_pidTableDepthSeen);
+    EXPECT_EQ(0, g_pidTableLockDepth);
+}
+
+extern "C" long ioctl_create_smap_procfs(void __user *argp);
+extern "C" int create_procfs_root(struct user_info *ui);
+extern "C" void remove_procfs_root(void);
+
+static int StubCreateProcfsRootFail(struct user_info *ui)
+{
+    (void)ui;
+    g_pidTableDepthSeen = g_pidTableLockDepth;
+    return -ENOMEM;
+}
+
+TEST_F(ScanIoctlTestKernel, IoctlCreateProcfsHoldsPidTableMutex)
+{
+    struct user_info ui = {.uid = 1000, .gid = 1000};
+
+    ResetPidTableLockStubs();
+    MOCKER(copy_from_user).stubs().with(outBoundP((void *)&ui, sizeof(ui))).will(returnValue(0UL));
+    MOCKER(remove_procfs_root).stubs();
+    MOCKER(create_procfs_root).stubs().will(invoke(StubCreateProcfsRootFail));
+    EXPECT_EQ(-ENOMEM, ioctl_create_smap_procfs(NULL));
+    EXPECT_EQ(1, g_pidTableDepthSeen);
+    EXPECT_EQ(1, g_pidTableLockCalls);
+    EXPECT_EQ(0, g_pidTableLockDepth);
+}

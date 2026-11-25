@@ -3,6 +3,10 @@
 #ifndef TEST_MUTEX_H
 #define TEST_MUTEX_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct mutex {
     int		owner;
 };
@@ -20,5 +24,9 @@ void mutex_lock(struct mutex *lock);
 int mutex_trylock(struct mutex *lock);
 
 void mutex_unlock(struct mutex *lock);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // TEST_MUTEX_H

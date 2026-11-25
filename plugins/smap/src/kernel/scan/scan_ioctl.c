@@ -11,6 +11,7 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/numa.h>
+#include <linux/mutex.h>
 
 #include "acpi_mem.h"
 #include "iomem.h"
@@ -36,6 +37,17 @@ static struct class *scan_class;
 static struct cdev scan_cdev;
 static struct device *scan_device;
 static struct user_info ubturbo_ui = { 0 };
+
+/*
+ * Serializes the ioctls that change the tracked-pid tables (slot table, HAM
+ * list, statistic list) and the /proc/smap tree. Each add path checks for an
+ * existing pid and only inserts after a sleeping setup (page walks, procfs
+ * creation), so without this two concurrent ADD_PID of one pid both miss the
+ * check and both register /proc/smap/<pid> and a tracking entry. Removal and
+ * procfs-root recreation take it too, so no subdirectory is created under a
+ * root that is being torn down.
+ */
+static DEFINE_MUTEX(pid_table_mutex);
 kuid_t procfs_kuid;
 kgid_t procfs_kgid;
 struct proc_dir_entry *smap_procfs_root = NULL;
@@ -162,7 +174,9 @@ static long ioctl_add_pid(void __user *argp)
 		ret = -EINVAL;
 		goto out_free_payload;
 	}
+	mutex_lock(&pid_table_mutex);
 	ret = add_payload(msg.count, payload, msg.stride, page_size);
+	mutex_unlock(&pid_table_mutex);
 out_free_payload:
 	vfree(payload);
 	return ret;
@@ -196,16 +210,20 @@ static long ioctl_remove_pid(void __user *argp)
 	for (i = 0; i < msg.count; i++)
 		pr_info("[%d] pid %d\n", i, payload[i].pid);
 
+	mutex_lock(&pid_table_mutex);
 	access_remove_pid(msg.count, payload);
 	access_remove_ham_pid(msg.count, payload);
 	access_remove_statistic_pid(msg.count, payload);
+	mutex_unlock(&pid_table_mutex);
 	vfree(payload);
 	return 0;
 }
 
 static long ioctl_remove_all_pid(void __user *argp)
 {
+	mutex_lock(&pid_table_mutex);
 	access_remove_all_pid();
+	mutex_unlock(&pid_table_mutex);
 	return 0;
 }
 
@@ -242,9 +260,11 @@ static long ioctl_create_smap_procfs(void __user *argp)
 	if (copy_from_user(&temp_ui, argp, sizeof(temp_ui)))
 		return -EFAULT;
 
+	mutex_lock(&pid_table_mutex);
 	if (smap_procfs_root && is_user_unchanged(&temp_ui)) {
 		pr_info("procfs root directory unchanged\n");
-		return 0;
+		ret = 0;
+		goto out_unlock;
 	}
 
 	remove_procfs_root();
@@ -252,11 +272,13 @@ static long ioctl_create_smap_procfs(void __user *argp)
 	ret = create_procfs_root(&temp_ui);
 	if (ret) {
 		remove_procfs_root();
-		return ret;
+		goto out_unlock;
 	}
 
 	pr_info("procfs root directory create\n");
-	return 0;
+out_unlock:
+	mutex_unlock(&pid_table_mutex);
+	return ret;
 }
 
 #ifndef BYTES_PER_LONG
